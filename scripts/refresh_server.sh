@@ -513,7 +513,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=$(systemd_quote "$REPO_ROOT")
+WorkingDirectory=$REPO_ROOT
 Environment=$(systemd_quote "PATH=$PATH")
 Environment=$(systemd_quote "HOME=$HOME")
 ExecStart=$(systemd_quote "$binary") ${args}

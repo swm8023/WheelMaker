@@ -47,10 +47,12 @@ Assert-Contains "npm uninstall -g"
 Assert-Contains "npm install -g"
 Assert-Contains "~/Library/LaunchAgents"
 Assert-Contains "~/.config/systemd/user"
+Assert-Contains 'WorkingDirectory=$REPO_ROOT'
 Assert-Contains "git stash push -u -m"
 Assert-Contains "wheelmaker deploy auto-stash before pull"
 Assert-NotContains "skip git pull and continue"
 Assert-NotContains "require_command npx"
+Assert-NotContains 'WorkingDirectory=$(systemd_quote "$REPO_ROOT")'
 
 $publishIndex = $text.IndexOf("publish_web", [StringComparison]::Ordinal)
 $manifestIndex = $text.LastIndexOf("write_release_manifest", [StringComparison]::Ordinal)
