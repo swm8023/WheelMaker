@@ -64,6 +64,7 @@ import { insertChatSlashCommandText } from './chat/chatSlashInsertion';
 import {
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
+  resolveChatBottomFollowAction,
   resolveChatSessionReadWindowUpdate,
   shouldAutoScrollChatToBottom,
 } from './chat/chatScrollIntent';
@@ -2272,6 +2273,7 @@ function App() {
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatVirtualListRef = useRef<ChatVirtualTurnListHandle | null>(null);
+  const chatDisplayItemCountRef = useRef(0);
   const chatAutoScrollFollowRef = useRef(true);
   const chatPointerScrollingRef = useRef(false);
   const chatUserScrollLockUntilRef = useRef(0);
@@ -2392,6 +2394,34 @@ function App() {
   const selectedChatConfigOptions = useMemo(() => {
     return selectedChatSession?.configOptions ?? [];
   }, [selectedChatSession]);
+
+  const selectedFullChatMessages =
+    selectedChatEncodedKey
+      ? chatMessageStoreRef.current[selectedChatEncodedKey] ?? []
+      : [];
+
+  const selectedPendingPrompt = selectedChatEncodedKey
+    ? chatPendingPromptsByKey[selectedChatEncodedKey]
+    : undefined;
+
+  const chatDisplayIndex = useMemo(() => buildChatDisplayIndex(chatMessages, {
+    shouldRender: message => {
+      const promptStatus = isPromptStartMessage(message)
+        ? resolvePromptTurnStatus(selectedFullChatMessages, message)
+        : null;
+      return shouldRenderChatTurn(message, hideToolCalls, promptStatus);
+    },
+    pendingKey: selectedPendingPrompt
+      ? `${selectedChatEncodedKey}:pending:${selectedPendingPrompt.createdAt}`
+      : undefined,
+    pendingEstimatedHeight: 120,
+  }), [
+    chatMessages,
+    hideToolCalls,
+    selectedChatEncodedKey,
+    selectedFullChatMessages,
+    selectedPendingPrompt,
+  ]);
 
   const chatConfigDisplay = useMemo(() => {
     if (selectedChatConfigOptions.length === 0) {
@@ -3176,8 +3206,18 @@ function App() {
       return;
     }
     resizeChatComposerTextarea();
+    const chatDisplayItemCount = chatDisplayIndex.items.length;
+    const chatBottomFollowAction = resolveChatBottomFollowAction({
+      itemCount: chatDisplayItemCount,
+      previousItemCount: chatDisplayItemCountRef.current,
+    });
+    chatDisplayItemCountRef.current = chatDisplayItemCount;
+    if (chatBottomFollowAction === 'scrollToBottom') {
+      scrollChatToBottom();
+      return;
+    }
     autoscrollChatToBottom();
-  }, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, resizeChatComposerTextarea, autoscrollChatToBottom]);
+  }, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, chatDisplayIndex.items.length, resizeChatComposerTextarea, scrollChatToBottom, autoscrollChatToBottom]);
 
   useEffect(() => {
     gitSelectedBranchesRef.current = gitSelectedBranches;
@@ -8763,11 +8803,6 @@ function App() {
     ],
   );
 
-  const selectedFullChatMessages =
-    selectedChatEncodedKey
-      ? chatMessageStoreRef.current[selectedChatEncodedKey] ?? []
-      : [];
-
   const findPromptRequestForDone = (doneTurnIndex: number): RegistryChatMessage | undefined => {
     const ordered = [...selectedFullChatMessages].sort((left, right) => (left.turnIndex ?? 0) - (right.turnIndex ?? 0));
     const doneIndex = ordered.findIndex(message => message.method === 'prompt_done' && (message.turnIndex ?? 0) === doneTurnIndex);
@@ -8790,9 +8825,6 @@ function App() {
     await writeTextToClipboard(result.markdown);
   };
 
-  const selectedPendingPrompt = selectedChatEncodedKey
-    ? chatPendingPromptsByKey[selectedChatEncodedKey]
-    : undefined;
   const selectedChatHasOpenPromptTurn = selectedFullChatMessages.some(message =>
     isPromptStartMessage(message) &&
     resolvePromptTurnStatus(selectedFullChatMessages, message) === 'responding',
@@ -8846,25 +8878,6 @@ function App() {
   const latestSelectableOptionReplyMessageKey = latestSelectableAssistantReply.hasOptionReplies
     ? latestSelectableAssistantReply.messageKey
     : '';
-
-  const chatDisplayIndex = useMemo(() => buildChatDisplayIndex(chatMessages, {
-    shouldRender: message => {
-      const promptStatus = isPromptStartMessage(message)
-        ? resolvePromptTurnStatus(selectedFullChatMessages, message)
-        : null;
-      return shouldRenderChatTurn(message, hideToolCalls, promptStatus);
-    },
-    pendingKey: selectedPendingPrompt
-      ? `${selectedChatEncodedKey}:pending:${selectedPendingPrompt.createdAt}`
-      : undefined,
-    pendingEstimatedHeight: 120,
-  }), [
-    chatMessages,
-    hideToolCalls,
-    selectedChatEncodedKey,
-    selectedFullChatMessages,
-    selectedPendingPrompt,
-  ]);
 
   const renderChatMessageTurn = (message: RegistryChatMessage) => {
     const doneTurnIndex = message.turnIndex ?? 0;

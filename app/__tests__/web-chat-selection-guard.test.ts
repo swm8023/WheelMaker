@@ -38,12 +38,23 @@ describe('web chat selection guards', () => {
     ).toEqual({sessionId: '', canMutateSelection: false});
   });
 
-  test('online list loading falls back when the selected session disappeared', () => {
+  test('online list loading preserves the live selected session during transient list gaps', () => {
     expect(
       resolveChatListSelection({
         activeProjectId: 'project-a',
         availableSessionIds: ['session-newest'],
         currentKey: chatSessionKeyFromParts('project-a', 'session-missing'),
+        persistedKey: chatSessionKeyFromParts('project-a', 'session-missing'),
+      }),
+    ).toEqual({sessionId: 'session-missing', canMutateSelection: true});
+  });
+
+  test('online list loading falls back when only a stale persisted selection is missing', () => {
+    expect(
+      resolveChatListSelection({
+        activeProjectId: 'project-a',
+        availableSessionIds: ['session-newest'],
+        currentKey: null,
         persistedKey: chatSessionKeyFromParts('project-a', 'session-missing'),
       }),
     ).toEqual({sessionId: 'session-newest', canMutateSelection: true});

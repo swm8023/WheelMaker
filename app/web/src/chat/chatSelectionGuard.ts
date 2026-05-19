@@ -54,9 +54,11 @@ export function resolveChatListSelection(input: {
     persistedSelection ||
     legacySelection ||
     '';
+  const preservesLiveSelection = Boolean(currentSelection);
 
   if (
     sessionId &&
+    !preservesLiveSelection &&
     !input.allowMissingSelection &&
     !availableSessionIds.includes(sessionId)
   ) {

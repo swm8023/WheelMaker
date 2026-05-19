@@ -20,6 +20,15 @@ export function shouldAutoScrollChatToBottom(input: {
   return input.force || (input.followsLatest && !input.pointerScrolling && !input.userScrollLocked);
 }
 
+export type ChatBottomFollowAction = 'scrollToBottom' | 'autoscrollToBottom';
+
+export function resolveChatBottomFollowAction(input: {
+  itemCount: number;
+  previousItemCount: number;
+}): ChatBottomFollowAction {
+  return input.itemCount === input.previousItemCount ? 'autoscrollToBottom' : 'scrollToBottom';
+}
+
 export type ChatSessionReadWindowUpdate = {
   resetToLatest?: true;
   followLatest?: boolean;

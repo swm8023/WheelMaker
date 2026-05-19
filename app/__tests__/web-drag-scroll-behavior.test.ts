@@ -4,6 +4,7 @@ import {
   CHAT_USER_SCROLL_LOCK_MS,
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
+  resolveChatBottomFollowAction,
   resolveChatSessionReadWindowUpdate,
   shouldAutoScrollChatToBottom,
 } from '../web/src/chat/chatScrollIntent';
@@ -62,6 +63,25 @@ describe('web drag scroll behavior', () => {
     expect(mainTsx).not.toContain('scrollChatToBottom(false);');
     expect(mainTsx).not.toContain('run(CHAT_BOTTOM_SCROLL_RETRY_FRAMES);');
     expect(mainTsx).not.toContain('keepSettling:');
+  });
+
+  test('uses explicit bottom scroll when a new virtual chat item is appended', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    expect(resolveChatBottomFollowAction({
+      itemCount: 4,
+      previousItemCount: 3,
+    })).toBe('scrollToBottom');
+    expect(resolveChatBottomFollowAction({
+      itemCount: 4,
+      previousItemCount: 4,
+    })).toBe('autoscrollToBottom');
+    expect(mainTsx).toContain('const chatDisplayItemCountRef = useRef(0);');
+    expect(mainTsx).toContain('const chatBottomFollowAction = resolveChatBottomFollowAction({');
+    expect(mainTsx).toContain("if (chatBottomFollowAction === 'scrollToBottom') {");
+    expect(mainTsx).toContain('scrollChatToBottom();');
+    expect(mainTsx).toContain('autoscrollChatToBottom();');
   });
 
   test('keeps incremental session reads from resetting a history scroll window', () => {
