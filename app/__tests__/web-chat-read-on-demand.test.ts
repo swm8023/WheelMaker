@@ -34,7 +34,7 @@ describe('web chat read-on-demand behavior', () => {
     expect(workspaceStoreTs).toContain('getSelectedChatSessionKey(): ChatSessionKey | null {');
     expect(workspaceStoreTs).toContain('rememberSelectedChatSessionKey(key: ChatSessionKey | null): void {');
     expect(mainTsx).toContain('workspaceStore.getSelectedChatSessionId(activeProjectId)');
-    expect(mainTsx).toContain('nextSessions[0]?.sessionId ||');
+    expect(mainTsx).toContain('resolveChatListSelection({');
     expect(mainTsx).toContain('workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);');
     expect(mainTsx).toContain('loadChatSession(currentSelection, activeProjectId, {');
   });

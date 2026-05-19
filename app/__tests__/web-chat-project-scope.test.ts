@@ -12,8 +12,7 @@ describe('web chat project scoping', () => {
     expect(mainTsx).not.toContain('if (activeProjectId !== projectIdRef.current) {');
     expect(mainTsx).toContain('const result = await service.readProjectSession(');
     expect(mainTsx).toContain('activeProjectId,');
-    expect(mainTsx).toContain('const currentSelectedRuntimeKey = encodeChatSessionKey(selectedChatKeyRef.current);');
-    expect(mainTsx).toContain('currentSelectedRuntimeKey !== selectionSnapshot');
+    expect(mainTsx).toContain('shouldApplyPreservedChatLoad(selectedChatKeyRef.current, selectionSnapshot)');
     expect(mainTsx).toContain('selectionSnapshot: runtimeKey,');
   });
 

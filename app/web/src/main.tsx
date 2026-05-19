@@ -71,6 +71,7 @@ import {
 } from './chat/chatScrollIntent';
 import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { mergeChatSessionList, shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
+import { resolveChatListSelection, shouldApplyPreservedChatLoad } from './chat/chatSelectionGuard';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
 import { resolveLayoutMode } from './services/responsiveLayout';
@@ -4870,15 +4871,19 @@ function App() {
     }
 
     const persistedSelection = workspaceStore.migrateSelectedChatSessionKey(activeProjectId);
-    const currentSelection =
-      preferredSelection ||
-      (selectedChatKeyRef.current?.projectId === activeProjectId
-        ? selectedChatKeyRef.current.sessionId
-        : '') ||
-      (persistedSelection?.projectId === activeProjectId
-        ? persistedSelection.sessionId
-        : '') ||
-      workspaceStore.getSelectedChatSessionId(activeProjectId);
+    const selectionResolution = resolveChatListSelection({
+      activeProjectId,
+      allowMissingSelection: true,
+      availableSessionIds: sessionRows.map(session => session.sessionId),
+      currentKey: selectedChatKeyRef.current,
+      legacySelectionId: workspaceStore.getSelectedChatSessionId(activeProjectId),
+      persistedKey: persistedSelection,
+      preferredSelection,
+    });
+    if (!selectionResolution.canMutateSelection) {
+      return;
+    }
+    const currentSelection = selectionResolution.sessionId;
     if (!currentSelection) {
       setChatMessages([]);
       return;
@@ -5048,15 +5053,11 @@ function App() {
         useIncremental ? checkpointTurnIndex : 0,
       );
       const selectionSnapshot = options?.selectionSnapshot ?? '';
-      const currentSelectedRuntimeKey = encodeChatSessionKey(selectedChatKeyRef.current);
       if (
         options?.preserveUserSelection &&
-        selectionSnapshot &&
-        currentSelectedRuntimeKey !== selectionSnapshot &&
-        chatSelectedIdRef.current !== selectionSnapshot &&
-        chatSelectedIdRef.current !== sessionId
+        !shouldApplyPreservedChatLoad(selectedChatKeyRef.current, selectionSnapshot)
       ) {
-        return;
+        return false;
       }
       const resultSessionId = result.sessionId || result.session?.sessionId || sessionId;
       const resultRuntimeKey = buildChatRuntimeKey(activeProjectId, resultSessionId);
@@ -5118,7 +5119,7 @@ function App() {
   const refreshSessionTurns = async (
     sessionId: string,
     activeProjectId = projectIdRef.current,
-    selectionSnapshot = chatSelectedIdRef.current,
+    selectionSnapshot = '',
   ) => {
     if (!activeProjectId || !sessionId) return false;
     const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
@@ -5126,8 +5127,7 @@ function App() {
       const turnState = ensureChatTurnStore(runtimeKey);
       const checkpointTurnIndex = turnState.cursor.turnIndex;
       const result = await service.readProjectSession(activeProjectId, sessionId, checkpointTurnIndex);
-      const currentSelectedRuntimeKey = encodeChatSessionKey(selectedChatKeyRef.current);
-      if (selectionSnapshot && currentSelectedRuntimeKey !== selectionSnapshot && chatSelectedIdRef.current !== selectionSnapshot) {
+      if (!shouldApplyPreservedChatLoad(selectedChatKeyRef.current, selectionSnapshot)) {
         return false;
       }
       const resultSessionId = result.sessionId || result.session?.sessionId || sessionId;
@@ -5198,20 +5198,18 @@ function App() {
       }
 
       const persistedSelection = workspaceStore.migrateSelectedChatSessionKey(activeProjectId);
-      let currentSelection =
-        preferredSelection ||
-        (selectedChatKeyRef.current?.projectId === activeProjectId
-          ? selectedChatKeyRef.current.sessionId
-          : '') ||
-        (persistedSelection?.projectId === activeProjectId
-          ? persistedSelection.sessionId
-          : '') ||
-        workspaceStore.getSelectedChatSessionId(activeProjectId) ||
-        '';
-      if (currentSelection && !nextSessions.some(session => session.sessionId === currentSelection)) {
-        currentSelection = nextSessions[0]?.sessionId || '';
+      const selectionResolution = resolveChatListSelection({
+        activeProjectId,
+        availableSessionIds: nextSessions.map(session => session.sessionId),
+        currentKey: selectedChatKeyRef.current,
+        legacySelectionId: workspaceStore.getSelectedChatSessionId(activeProjectId),
+        persistedKey: persistedSelection,
+        preferredSelection,
+      });
+      if (!selectionResolution.canMutateSelection) {
+        return;
       }
-      currentSelection = currentSelection || nextSessions[0]?.sessionId || '';
+      const currentSelection = selectionResolution.sessionId;
       if (!currentSelection) {
         applySelectedChatKey(null);
         setChatMessages([]);
@@ -6760,7 +6758,7 @@ function App() {
         if (gapReadCursor) {
           chatReadRepairQueueRef.current.request(runtimeKey, gapReadCursor.turnIndex, async cursor => {
             chatFinishedCursorRef.current[runtimeKey] = cursor;
-            await refreshSessionTurns(sessionId, eventProjectId, runtimeKey);
+            await refreshSessionTurns(sessionId, eventProjectId);
           }).catch(() => undefined);
         }
         if (message.method === 'prompt_request') {
@@ -8887,34 +8885,6 @@ function App() {
     selectedFullChatMessages,
     selectedPendingPrompt,
   ]);
-
-  useEffect(() => {
-    if (tab !== 'chat' || typeof ResizeObserver === 'undefined') {
-      return;
-    }
-    const container = chatScrollRef.current;
-    if (!container) {
-      return;
-    }
-    const target = container.querySelector<HTMLElement>('.chat-virtual-list') ?? container;
-    let raf = 0;
-    const observer = new ResizeObserver(() => {
-      if (raf) {
-        window.cancelAnimationFrame(raf);
-      }
-      raf = window.requestAnimationFrame(() => {
-        raf = 0;
-        scrollChatToBottom(false);
-      });
-    });
-    observer.observe(target);
-    return () => {
-      if (raf) {
-        window.cancelAnimationFrame(raf);
-      }
-      observer.disconnect();
-    };
-  }, [tab, selectedChatId, chatDisplayIndex.items.length, scrollChatToBottom]);
 
   const renderChatMessageTurn = (message: RegistryChatMessage) => {
     const doneTurnIndex = message.turnIndex ?? 0;

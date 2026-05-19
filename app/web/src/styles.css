@@ -3392,20 +3392,10 @@ body,
 
 .chat-virtual-list {
   flex: 0 0 auto;
-}
-
-.chat-virtual-premeasure {
-  contain: layout style paint;
-  left: 0;
-  pointer-events: none;
-  position: absolute;
-  top: 0;
-  visibility: hidden;
   width: 100%;
-  z-index: -1;
 }
 
-.chat-virtual-premeasure-row {
+.chat-virtual-row {
   box-sizing: border-box;
   width: 100%;
 }
