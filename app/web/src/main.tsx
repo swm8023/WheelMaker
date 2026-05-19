@@ -8371,42 +8371,38 @@ function App() {
                   ) : null}
                 </div>
                 <div className="wheelmaker-update-panel">
-                  <div className="wheelmaker-update-main">
-                    <div className="wheelmaker-update-title-line">
-                      <div className="wheelmaker-update-heading">
-                        <span className="wheelmaker-update-product">WheelMaker</span>
-                        <span className="wheelmaker-update-ref-tag">{wheelMakerReleaseRef(wheelMakerData)}</span>
-                      </div>
-                      <div className="wheelmaker-update-state">
-                        <span className={`agent-package-status status-${wheelMakerStatus}`}>
-                          {wheelMaker?.loading ? 'Checking' : wheelMakerUpdateStatusLabel(wheelMakerStatus)}
-                        </span>
-                        <span className="wheelmaker-update-behind">{wheelMakerBehindCopy(wheelMakerData)}</span>
-                      </div>
-                    </div>
-                    <div className="wheelmaker-update-sha-lines">
-                      <div className="wheelmaker-update-sha-line" title={`Current ${wheelMakerCurrentSha || '-'} ${wheelMakerCurrentTime}`}>
-                        <span className="wheelmaker-update-sha-label">Current</span>
-                        <span className="wheelmaker-update-sha-value">{shortGitSha(wheelMakerCurrentSha)}</span>
-                        <span className="wheelmaker-update-sha-time">{wheelMakerCurrentTime}</span>
-                      </div>
-                      <div className="wheelmaker-update-sha-line" title={`Latest ${wheelMakerLatestSha || '-'} ${wheelMakerLatestTime}`}>
-                        <span className="wheelmaker-update-sha-label">Latest</span>
-                        <span className="wheelmaker-update-sha-value">{shortGitSha(wheelMakerLatestSha)}</span>
-                        <span className="wheelmaker-update-sha-time">{wheelMakerLatestTime}</span>
-                      </div>
-                    </div>
-                    {wheelMaker?.error || wheelMakerData?.error ? (
-                      <div className="settings-metadata-error">{wheelMaker?.error || wheelMakerData?.error}</div>
-                    ) : null}
+                  <div className="wheelmaker-update-title-line">
+                    <span className="wheelmaker-update-product">WheelMaker</span>
+                    <span className={`agent-package-status status-${wheelMakerStatus}`}>
+                      {wheelMaker?.loading ? 'Checking' : wheelMakerUpdateStatusLabel(wheelMakerStatus)}
+                    </span>
                   </div>
+                  <div className="wheelmaker-update-version-line">
+                    <span className="wheelmaker-update-ref-tag">{wheelMakerReleaseRef(wheelMakerData)}</span>
+                    <span className="wheelmaker-update-behind">{wheelMakerBehindCopy(wheelMakerData)}</span>
+                  </div>
+                  <div className="wheelmaker-update-sha-lines">
+                    <div className="wheelmaker-update-sha-line" title={`Current ${wheelMakerCurrentSha || '-'} ${wheelMakerCurrentTime}`}>
+                      <span className="wheelmaker-update-sha-label">Current</span>
+                      <span className="wheelmaker-update-sha-value">{shortGitSha(wheelMakerCurrentSha)}</span>
+                      <span className="wheelmaker-update-sha-time">{wheelMakerCurrentTime}</span>
+                    </div>
+                    <div className="wheelmaker-update-sha-line" title={`Latest ${wheelMakerLatestSha || '-'} ${wheelMakerLatestTime}`}>
+                      <span className="wheelmaker-update-sha-label">Latest</span>
+                      <span className="wheelmaker-update-sha-value">{shortGitSha(wheelMakerLatestSha)}</span>
+                      <span className="wheelmaker-update-sha-time">{wheelMakerLatestTime}</span>
+                    </div>
+                  </div>
+                  {wheelMaker?.error || wheelMakerData?.error ? (
+                    <div className="settings-metadata-error">{wheelMaker?.error || wheelMakerData?.error}</div>
+                  ) : null}
                   <button
                     type="button"
                     className="wheelmaker-update-action-btn"
                     disabled={wheelMakerPending || wheelMakerData?.pendingSignal === true}
                     onClick={() => requestWheelMakerUpdatePublish(card.hubId, wheelMakerData)}
                   >
-                    {wheelMakerPending ? 'Requesting...' : wheelMakerData?.pendingSignal ? 'Requested' : 'Update+Publish'}
+                    {wheelMakerPending ? 'Updating...' : wheelMakerData?.pendingSignal ? 'Requested' : 'Update'}
                   </button>
                 </div>
                 <div className="settings-detail-group-title">Agent Packages</div>
@@ -11134,7 +11130,7 @@ function App() {
     : npmPackageTarget
       ? agentPackageActionLabel(npmPackageTarget.action)
     : wheelMakerUpdateTarget
-      ? 'Update+Publish'
+      ? 'Update'
     : 'Archive';
   const confirmPrimaryClassName = confirmTarget?.kind === 'clearCache' || npmPackageTarget?.action === 'uninstall'
     ? 'app-confirm-btn primary danger'

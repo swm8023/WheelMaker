@@ -69,6 +69,7 @@ describe('agent package update settings UI source structure', () => {
 
     expect(stylesCss).toContain('.agent-package-hub-list');
     expect(stylesCss).toContain('.wheelmaker-update-panel');
+    expect(stylesCss).toContain('.wheelmaker-update-version-line');
     expect(stylesCss).toContain('.wheelmaker-update-ref-tag');
     expect(stylesCss).toContain('.wheelmaker-update-sha-line');
     expect(stylesCss).toContain('.wheelmaker-update-action-btn');
@@ -90,23 +91,38 @@ describe('agent package update settings UI source structure', () => {
     expect(agentPackagesStart).toBeGreaterThan(wheelMakerBlockStart);
     const wheelMakerBlock = mainTsx.slice(wheelMakerBlockStart, agentPackagesStart);
     expect(wheelMakerBlock).toContain('className="wheelmaker-update-product"');
+    expect(wheelMakerBlock).toContain('className="wheelmaker-update-version-line"');
     expect(wheelMakerBlock).toContain('className="wheelmaker-update-ref-tag"');
     expect(wheelMakerBlock).toContain('wheelMakerReleaseRef(wheelMakerData)');
     expect(wheelMakerBlock).toContain('className="wheelmaker-update-sha-line"');
     expect(wheelMakerBlock).toContain('wheelMakerCurrentTime');
     expect(wheelMakerBlock).toContain('wheelMakerLatestTime');
+    expect(wheelMakerBlock).toContain(": 'Update'}");
+    expect(mainTsx).not.toContain('Update+Publish');
 
     const panelBlock = stylesCss.match(/\.wheelmaker-update-panel \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(panelBlock).toContain('border-left: 3px solid');
     expect(panelBlock).toContain('grid-template-columns: minmax(0, 1fr) auto;');
+    expect(panelBlock).toContain('grid-template-rows: auto auto auto;');
+
+    const versionLineBlock = stylesCss.match(/\.wheelmaker-update-version-line \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(versionLineBlock).toContain('grid-row: 2;');
+    expect(versionLineBlock).toContain('overflow: hidden;');
 
     const shaLineBlock = stylesCss.match(/\.wheelmaker-update-sha-line \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(shaLineBlock).toContain('white-space: nowrap;');
     expect(shaLineBlock).toContain('grid-template-columns: 52px auto minmax(0, 1fr);');
 
+    const shaLinesBlock = stylesCss.match(/\.wheelmaker-update-sha-lines \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(shaLinesBlock).toContain('grid-column: 1 / -1;');
+
     const refTagBlock = stylesCss.match(/\.wheelmaker-update-ref-tag \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(refTagBlock).toContain('text-overflow: ellipsis;');
     expect(refTagBlock).toContain('font-family: \'JetBrains Mono\', Consolas, \'Courier New\', monospace;');
+
+    const actionButtonBlock = stylesCss.match(/\.wheelmaker-update-action-btn \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(actionButtonBlock).toContain('grid-row: 1 / 3;');
+    expect(actionButtonBlock).toContain('min-width: 74px;');
   });
 
   test('places agent tags beside display names and lets versions span under the action button', () => {
