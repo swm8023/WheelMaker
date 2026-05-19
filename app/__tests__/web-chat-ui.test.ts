@@ -234,6 +234,11 @@ describe('web chat integration', () => {
     expect(sendBlock).toContain('const result = await service.sendProjectSessionMessage(selectedProjectId, {');
     expect(sendBlock).toContain('if (!result.ok) {');
     expect(sendBlock).toContain('markPendingChatPromptUndelivered(runtimeKey');
+    expect(sendBlock).toContain('if (shouldApplySentChatSelection(selectedChatKeyRef.current, selectedKey)) {');
+    const sendSelectionGuard = sendBlock.indexOf('if (shouldApplySentChatSelection(selectedChatKeyRef.current, selectedKey)) {');
+    const sendSelectionApply = sendBlock.indexOf('applySelectedChatKey(nextSelectedKey);', sendSelectionGuard);
+    expect(sendSelectionGuard).toBeGreaterThan(sendBlock.indexOf('const nextSelectedKey = chatSessionKeyFromParts(selectedProjectId, nextSessionId);'));
+    expect(sendSelectionApply).toBeGreaterThan(sendSelectionGuard);
     expect(sendBlock).not.toContain('markChatSessionRunning(');
     expect(sendAwait).toBeGreaterThan(sendExistingStart);
     expect(mainTsx).toContain('const [hasPendingProjectUpdates, setHasPendingProjectUpdates] = useState(false);');

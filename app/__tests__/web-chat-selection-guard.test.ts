@@ -3,6 +3,7 @@ import {
   resolveSelectedChatVisibilityRecovery,
   shouldApplyLoadedChatSelection,
   shouldApplyPreservedChatLoad,
+  shouldApplySentChatSelection,
 } from '../web/src/chat/chatSelectionGuard';
 import { chatSessionKeyFromParts, encodeChatSessionKey } from '../web/src/chat/chatSessionKey';
 
@@ -24,6 +25,18 @@ describe('web chat selection guards', () => {
     expect(shouldApplyLoadedChatSelection(loaded, loaded)).toBe(true);
     expect(shouldApplyLoadedChatSelection(null, loaded)).toBe(true);
     expect(shouldApplyLoadedChatSelection(current, null)).toBe(false);
+  });
+
+  test('send responses can only update selection when the user stayed on the sending chat', () => {
+    const sentFrom = chatSessionKeyFromParts('project-a', 'session-a');
+    const otherChat = chatSessionKeyFromParts('project-a', 'session-b');
+    const otherProject = chatSessionKeyFromParts('project-b', 'session-a');
+
+    expect(shouldApplySentChatSelection(sentFrom, sentFrom)).toBe(true);
+    expect(shouldApplySentChatSelection(otherChat, sentFrom)).toBe(false);
+    expect(shouldApplySentChatSelection(otherProject, sentFrom)).toBe(false);
+    expect(shouldApplySentChatSelection(null, sentFrom)).toBe(false);
+    expect(shouldApplySentChatSelection(sentFrom, null)).toBe(false);
   });
 
   test('list loading prefers the live selected session over a stale preferred session', () => {

@@ -76,6 +76,7 @@ import {
   resolveSelectedChatVisibilityRecovery,
   shouldApplyLoadedChatSelection,
   shouldApplyPreservedChatLoad,
+  shouldApplySentChatSelection,
 } from './chat/chatSelectionGuard';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
@@ -5739,8 +5740,10 @@ function App() {
         movePendingChatPrompt(runtimeKey, buildChatRuntimeKey(selectedProjectId, nextSessionId), nextSessionId);
       }
       const nextSelectedKey = chatSessionKeyFromParts(selectedProjectId, nextSessionId);
-      applySelectedChatKey(nextSelectedKey);
-      workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
+      if (shouldApplySentChatSelection(selectedChatKeyRef.current, selectedKey)) {
+        applySelectedChatKey(nextSelectedKey);
+        workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       markPendingChatPromptUndelivered(runtimeKey, message);
