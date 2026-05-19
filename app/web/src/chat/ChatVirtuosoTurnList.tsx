@@ -1,7 +1,6 @@
 import React from 'react';
 import {Virtuoso, type Components, type VirtuosoHandle} from 'react-virtuoso';
 import type {ChatDisplayIndex, ChatDisplayIndexItem} from './chatDisplayIndex';
-import {resolveChatScrollBottomTop} from './chatScrollIntent';
 
 const DEFAULT_AT_BOTTOM_THRESHOLD = 80;
 const DEFAULT_BOTTOM_BUFFER = 12;
@@ -102,16 +101,6 @@ function resolveDefaultItemHeight(heightEstimates: number[], rowGap: number): nu
   return Math.max(1, Math.round(totalHeight / heightEstimates.length));
 }
 
-function scrollElementToBottom(element: HTMLElement, behavior: ChatVirtuosoScrollBehavior): void {
-  element.scrollTo({
-    top: resolveChatScrollBottomTop({
-      scrollHeight: element.scrollHeight,
-      clientHeight: element.clientHeight,
-    }),
-    behavior,
-  });
-}
-
 export const ChatVirtuosoTurnList = React.forwardRef<
   ChatVirtuosoTurnListHandle,
   ChatVirtuosoTurnListProps
@@ -157,6 +146,12 @@ export const ChatVirtuosoTurnList = React.forwardRef<
     }),
     [bottomBuffer, rowGap],
   );
+  const initialTopMostItemIndex = React.useMemo(
+    () => displayIndex.items.length > 0
+      ? {index: 'LAST' as const, align: 'end' as const, offset: virtuosoContext.bottomBuffer}
+      : 0,
+    [displayIndex.items.length, virtuosoContext.bottomBuffer],
+  );
 
   const shouldAutoscrollNow = React.useCallback(
     () => shouldAutoscroll?.() ?? true,
@@ -171,48 +166,50 @@ export const ChatVirtuosoTurnList = React.forwardRef<
     [onAtBottomChange],
   );
 
-  const settleScrollParentToBottom = React.useCallback(
+  const scrollToLastDisplayItem = React.useCallback(
     (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
-      if (!scrollParent) {
+      if (displayIndex.items.length === 0) {
         return;
       }
-      scrollElementToBottom(scrollParent, behavior);
+      virtuosoRef.current?.scrollToIndex({
+        index: 'LAST',
+        align: 'end',
+        offset: virtuosoContext.bottomBuffer,
+        behavior,
+      });
       atBottomRef.current = true;
       onAtBottomChange?.(true);
     },
-    [onAtBottomChange, scrollParent],
+    [displayIndex.items.length, onAtBottomChange, virtuosoContext.bottomBuffer],
   );
 
-  const requestScrollParentBottomSettle = React.useCallback(
+  const requestScrollToLastDisplayItem = React.useCallback(
     (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
       window.requestAnimationFrame(() => {
-        settleScrollParentToBottom(behavior);
-        window.requestAnimationFrame(() => settleScrollParentToBottom('auto'));
+        scrollToLastDisplayItem(behavior);
+        window.requestAnimationFrame(() => scrollToLastDisplayItem('auto'));
       });
     },
-    [settleScrollParentToBottom],
+    [scrollToLastDisplayItem],
   );
 
   const handleTotalListHeightChanged = React.useCallback(() => {
     if (atBottomRef.current && shouldAutoscrollNow()) {
       virtuosoRef.current?.autoscrollToBottom();
-      requestScrollParentBottomSettle('auto');
+      requestScrollToLastDisplayItem('auto');
     }
-  }, [requestScrollParentBottomSettle, shouldAutoscrollNow]);
+  }, [requestScrollToLastDisplayItem, shouldAutoscrollNow]);
 
   React.useImperativeHandle(ref, () => ({
     autoscrollToBottom: () => {
       virtuosoRef.current?.autoscrollToBottom();
-      requestScrollParentBottomSettle('auto');
+      requestScrollToLastDisplayItem('auto');
     },
     scrollToBottom: (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
-      if (displayIndex.items.length === 0) {
-        return;
-      }
-      virtuosoRef.current?.scrollToIndex({index: 'LAST', align: 'end', behavior});
-      requestScrollParentBottomSettle(behavior);
+      scrollToLastDisplayItem(behavior);
+      requestScrollToLastDisplayItem(behavior);
     },
-  }), [displayIndex.items.length, requestScrollParentBottomSettle]);
+  }), [requestScrollToLastDisplayItem, scrollToLastDisplayItem]);
 
   if (!scrollParent) {
     return <div className="chat-virtuoso-list" />;
@@ -228,7 +225,7 @@ export const ChatVirtuosoTurnList = React.forwardRef<
       context={virtuosoContext}
       defaultItemHeight={defaultItemHeight}
       heightEstimates={heightEstimates}
-      initialTopMostItemIndex={displayIndex.items.length > 0 ? {index: 'LAST', align: 'end'} : 0}
+      initialTopMostItemIndex={initialTopMostItemIndex}
       alignToBottom={true}
       atBottomThreshold={atBottomThreshold}
       atBottomStateChange={handleAtBottomStateChange}

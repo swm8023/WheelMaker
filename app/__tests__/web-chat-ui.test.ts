@@ -110,7 +110,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const chatPointerScrollingRef = useRef(false);');
     expect(mainTsx).toContain('const chatUserScrollLockUntilRef = useRef(0);');
     expect(mainTsx).toContain('const chatVirtuosoListRef = useRef<ChatVirtuosoTurnListHandle | null>(null);');
-    expect(mainTsx).toContain('const chatDisplayItemCountRef = useRef(0);');
+    expect(mainTsx).not.toContain('const chatDisplayItemCountRef = useRef(0);');
     expect(mainTsx).not.toContain('const chatProgrammaticScrollRef = useRef(false);');
     expect(mainTsx).toContain('const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;');
     expect(mainTsx).not.toContain('function isChatScrolledNearBottom(container: HTMLElement): boolean {');
@@ -123,8 +123,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const scrollChatToBottom = useCallback((force = false) => {');
     expect(mainTsx).toContain('shouldAutoScrollChatToBottom({');
     expect(mainTsx).toContain("chatVirtuosoListRef.current?.scrollToBottom('auto');");
-    expect(mainTsx).toContain('const autoscrollChatToBottom = useCallback(() => {');
-    expect(mainTsx).toContain('chatVirtuosoListRef.current?.autoscrollToBottom();');
+    expect(mainTsx).not.toContain('const autoscrollChatToBottom = useCallback(() => {');
+    expect(mainTsx).not.toContain('chatVirtuosoListRef.current?.autoscrollToBottom();');
     expect(mainTsx).not.toContain('container.scrollTop = nextScrollTop;');
     expect(mainTsx).toContain('const forceChatScrollToBottom = useCallback(() => {');
     expect(mainTsx).toContain('chatAutoScrollFollowRef.current = true;');
@@ -132,9 +132,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('useLayoutEffect(() => {');
     expect(mainTsx).toContain('resizeChatComposerTextarea();');
     expect(mainTsx).toContain('}, [resizeChatComposerTextarea, chatComposerText, tab, selectedChatId, currentChatDraftKey]);');
-    expect(mainTsx).toContain('const chatBottomFollowAction = resolveChatBottomFollowAction({');
-    expect(mainTsx).toContain("if (chatBottomFollowAction === 'scrollToBottom') {");
-    expect(mainTsx).toContain('}, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, chatDisplayIndex.items.length, resizeChatComposerTextarea, scrollChatToBottom, autoscrollChatToBottom]);');
+    expect(mainTsx).not.toContain('const chatBottomFollowAction = resolveChatBottomFollowAction({');
+    expect(mainTsx).not.toContain("if (chatBottomFollowAction === 'scrollToBottom') {");
+    expect(mainTsx).toContain('}, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, resizeChatComposerTextarea]);');
     expect(mainTsx).toContain('onScroll={handleChatScroll}');
     expect(mainTsx).toContain('onWheel={event => { if (event.deltaY < 0) { markChatUserScrollIntent(); } }}');
     expect(mainTsx).toContain('<ChatVirtuosoTurnList');

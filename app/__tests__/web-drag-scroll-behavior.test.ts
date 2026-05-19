@@ -4,7 +4,6 @@ import {
   CHAT_USER_SCROLL_LOCK_MS,
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
-  resolveChatBottomFollowAction,
   resolveChatSessionReadWindowUpdate,
   resolveChatScrollBottomTop,
   resolveChatScrollToBottomVisibility,
@@ -58,8 +57,9 @@ describe('web drag scroll behavior', () => {
     expect(virtualList).toContain("from 'react-virtuoso';");
     expect(virtualList).toContain('type VirtuosoHandle');
     expect(virtualList).toContain('totalListHeightChanged={handleTotalListHeightChanged}');
+    expect(virtualList).toContain('virtuosoRef.current?.autoscrollToBottom();');
     expect(mainTsx).toContain("chatVirtuosoListRef.current?.scrollToBottom('auto');");
-    expect(mainTsx).toContain('chatVirtuosoListRef.current?.autoscrollToBottom();');
+    expect(mainTsx).not.toContain('chatVirtuosoListRef.current?.autoscrollToBottom();');
     expect(mainTsx).not.toContain('container.scrollTop = nextScrollTop;');
     expect(mainTsx).not.toContain("container.querySelector<HTMLElement>('.chat-virtuoso-list') ?? container");
     expect(mainTsx).not.toContain('scrollChatToBottom(false);');
@@ -67,23 +67,23 @@ describe('web drag scroll behavior', () => {
     expect(mainTsx).not.toContain('keepSettling:');
   });
 
-  test('uses explicit bottom scroll when a new virtual chat item is appended', () => {
+  test('keeps virtualizer item-count follow logic inside the Virtuoso wrapper', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const scrollIntent = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'chat', 'chatScrollIntent.ts'), 'utf8');
+    const virtualList = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'chat', 'ChatVirtuosoTurnList.tsx'),
+      'utf8',
+    );
 
-    expect(resolveChatBottomFollowAction({
-      itemCount: 4,
-      previousItemCount: 3,
-    })).toBe('scrollToBottom');
-    expect(resolveChatBottomFollowAction({
-      itemCount: 4,
-      previousItemCount: 4,
-    })).toBe('autoscrollToBottom');
-    expect(mainTsx).toContain('const chatDisplayItemCountRef = useRef(0);');
-    expect(mainTsx).toContain('const chatBottomFollowAction = resolveChatBottomFollowAction({');
-    expect(mainTsx).toContain("if (chatBottomFollowAction === 'scrollToBottom') {");
-    expect(mainTsx).toContain('scrollChatToBottom();');
-    expect(mainTsx).toContain('autoscrollChatToBottom();');
+    expect(virtualList).toContain('followOutput={isAtBottom => (isAtBottom && shouldAutoscrollNow() ? \'auto\' : false)}');
+    expect(virtualList).toContain('totalListHeightChanged={handleTotalListHeightChanged}');
+    expect(virtualList).toContain('requestScrollToLastDisplayItem(');
+    expect(scrollIntent).not.toContain('resolveChatBottomFollowAction');
+    expect(mainTsx).not.toContain('chatDisplayItemCountRef');
+    expect(mainTsx).not.toContain('resolveChatBottomFollowAction');
+    expect(mainTsx).not.toContain('chatBottomFollowAction');
+    expect(mainTsx).not.toContain('autoscrollChatToBottom');
   });
 
   test('shows the scroll-to-bottom button from the actual chat scroll container position', () => {
@@ -123,11 +123,23 @@ describe('web drag scroll behavior', () => {
     expect(resolveChatScrollBottomTop({scrollHeight: 300, clientHeight: 500})).toBe(0);
     expect(mainTsx).toContain('const CHAT_HISTORY_BOTTOM_BUFFER = 28;');
     expect(mainTsx).toContain('bottomBuffer={CHAT_HISTORY_BOTTOM_BUFFER}');
-    expect(virtualList).toContain('function scrollElementToBottom(');
-    expect(virtualList).toContain('resolveChatScrollBottomTop({');
-    expect(virtualList).toContain('const requestScrollParentBottomSettle = React.useCallback(');
-    expect(virtualList).toContain("window.requestAnimationFrame(() => settleScrollParentToBottom('auto'));");
+    expect(virtualList).toContain('const scrollToLastDisplayItem = React.useCallback(');
+    expect(virtualList).toContain('offset: virtuosoContext.bottomBuffer,');
+    expect(virtualList).toContain('const requestScrollToLastDisplayItem = React.useCallback(');
+    expect(virtualList).toContain("window.requestAnimationFrame(() => scrollToLastDisplayItem('auto'));");
     expect(virtualList).toContain('onAtBottomChange?.(true);');
+    expect(virtualList).not.toContain('function scrollElementToBottom(');
+    expect(virtualList).not.toContain('.scrollTo({');
+  });
+
+  test('documents Virtuoso as the chat dynamic turn virtualizer', () => {
+    const repositoryRoot = path.join(__dirname, '..', '..');
+    const context = fs.readFileSync(path.join(repositoryRoot, 'CONTEXT.md'), 'utf8');
+
+    expect(context).toContain('implemented with `react-virtuoso`');
+    expect(context).toContain('Virtuoso Measurement Cache');
+    expect(context).not.toContain('implemented with `@tanstack/react-virtual`');
+    expect(context).not.toContain('Measured Height Cache');
   });
 
   test('keeps incremental session reads from resetting a history scroll window', () => {

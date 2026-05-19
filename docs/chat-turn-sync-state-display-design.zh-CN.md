@@ -435,7 +435,7 @@ Display Index =
   -> shallow parse content envelope only
   -> map each renderable unit to DisplayItem
   -> apply hide/show filters
-  -> keep lightweight item metadata and height cache
+  -> keep lightweight item metadata and height estimates
 
 Virtualized Chat View =
   Display Index
@@ -544,7 +544,7 @@ type ScrollAnchor = {
 
 更新流程：
 
-1. 在修改 display index、height cache 或 tail 内容前记录 anchor。
+1. 在修改 display index、Virtuoso measurement state 或 tail 内容前记录 anchor。
 2. 应用数据变化并让 Virtuoso 完成布局。
 3. 如果处于 Tail Lock，滚动到底部。
 4. 否则恢复 anchor 的 viewport offset。

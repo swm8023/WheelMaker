@@ -38,7 +38,10 @@ describe('web chat turn rendering', () => {
     expect(virtualList).toContain("import {Virtuoso, type Components, type VirtuosoHandle} from 'react-virtuoso';");
     expect(virtualList).toContain('export type ChatVirtuosoTurnListHandle = {');
     expect(virtualList).toContain('React.useImperativeHandle(ref, () => ({');
-    expect(virtualList).toContain("scrollToIndex({index: 'LAST', align: 'end', behavior});");
+    expect(virtualList).toContain('const scrollToLastDisplayItem = React.useCallback(');
+    expect(virtualList).toContain("index: 'LAST',");
+    expect(virtualList).toContain("align: 'end',");
+    expect(virtualList).toContain('offset: virtuosoContext.bottomBuffer,');
     expect(virtualList).toContain('virtuosoRef.current?.autoscrollToBottom();');
     expect(virtualList).toContain('components={ChatVirtuosoComponents}');
     expect(virtualList).toContain('context={virtuosoContext}');
@@ -47,7 +50,8 @@ describe('web chat turn rendering', () => {
     expect(virtualList).toContain('key={runtimeKey}');
     expect(virtualList).toContain('customScrollParent={scrollParent}');
     expect(virtualList).toContain('computeItemKey={(index, item) => item.key}');
-    expect(virtualList).toContain("initialTopMostItemIndex={displayIndex.items.length > 0 ? {index: 'LAST', align: 'end'} : 0}");
+    expect(virtualList).toContain('const initialTopMostItemIndex = React.useMemo(');
+    expect(virtualList).toContain('initialTopMostItemIndex={initialTopMostItemIndex}');
     expect(virtualList).toContain('increaseViewportBy={{top: viewportIncrease, bottom: viewportIncrease}}');
     expect(virtualList).toContain('atBottomStateChange={handleAtBottomStateChange}');
     expect(virtualList).toContain("followOutput={isAtBottom => (isAtBottom && shouldAutoscrollNow() ? 'auto' : false)}");
@@ -60,7 +64,7 @@ describe('web chat turn rendering', () => {
     expect(main).toContain("import {ChatVirtuosoTurnList, type ChatVirtuosoTurnListHandle} from './chat/ChatVirtuosoTurnList';");
     expect(main).toContain('const chatVirtuosoListRef = useRef<ChatVirtuosoTurnListHandle | null>(null);');
     expect(main).toContain("chatVirtuosoListRef.current?.scrollToBottom('auto');");
-    expect(main).toContain('chatVirtuosoListRef.current?.autoscrollToBottom();');
+    expect(main).not.toContain('chatVirtuosoListRef.current?.autoscrollToBottom();');
     expect(main).toContain('const handleChatAtBottomChange = useCallback((atBottom: boolean) => {');
     expect(main).toContain('setChatShowScrollToBottom(!atBottom);');
     expect(main).toContain('ref={chatVirtuosoListRef}');

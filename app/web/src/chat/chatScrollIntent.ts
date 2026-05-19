@@ -56,15 +56,6 @@ export function resolveChatScrollToBottomVisibility(input: {
   };
 }
 
-export type ChatBottomFollowAction = 'scrollToBottom' | 'autoscrollToBottom';
-
-export function resolveChatBottomFollowAction(input: {
-  itemCount: number;
-  previousItemCount: number;
-}): ChatBottomFollowAction {
-  return input.itemCount === input.previousItemCount ? 'autoscrollToBottom' : 'scrollToBottom';
-}
-
 export type ChatSessionReadWindowUpdate = {
   resetToLatest?: true;
   followLatest?: boolean;

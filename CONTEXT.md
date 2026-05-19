@@ -109,16 +109,16 @@ One lightweight row-like unit in the **Display Index**, identified by a stable k
 _Avoid_: Message object, React node, decoded turn
 
 **Dynamic Turn Virtualizer**:
-The chat scrolling engine, implemented with `@tanstack/react-virtual`, that owns logical list height, mounts only visible plus overscan **Display Items**, and keeps the browser scrollbar meaningful for long sessions.
+The chat scrolling engine, implemented with `react-virtuoso`, that owns logical list height, mounts only visible plus overscan **Display Items**, and keeps the browser scrollbar meaningful for long sessions.
 _Avoid_: Manual slice, DOM window, fake scrollbar
 
 **Lazy Height Estimate**:
 The initial height used for an unmounted **Display Item** before its real DOM height has been measured.
 _Avoid_: Final height, pre-rendered height, exact offscreen height
 
-**Measured Height Cache**:
-The in-memory cache of actual mounted **Display Item** heights, keyed by session, item key, and content revision.
-_Avoid_: Persistent layout store, turn cache, markdown cache
+**Virtuoso Measurement Cache**:
+The internal `react-virtuoso` measurement state for actual mounted **Display Item** heights, restored or changed only through Virtuoso interfaces rather than an app-owned height store.
+_Avoid_: App height cache, persistent layout store, turn cache, markdown cache
 
 **Viewport Anchor**:
 The currently stable visible **Display Item** and offset used to keep the user's reading position fixed while the window changes or heights are corrected.
@@ -191,7 +191,7 @@ _Avoid_: Archive gap, system fallback
 - A **Gap Turn** becomes a visible **Display Item** so the missing durable slot is explicit in the scroll surface
 - The **Dynamic Turn Virtualizer** owns scrollbar height for the selected chat; mounted DOM node count must not define scrollbar semantics
 - A **Lazy Height Estimate** may be imprecise until the item is mounted and measured
-- The **Measured Height Cache** improves scrollbar accuracy over time, but it is not a durable chat cache
+- The **Virtuoso Measurement Cache** improves scrollbar accuracy over time, but it is not a durable chat cache and must not be duplicated in app state
 - A **Viewport Anchor** keeps the reading position stable when windows expand, windows trim, height estimates are corrected, or streaming text grows
 - **Tail Lock** keeps the selected chat attached to the latest **Display Item** only while the user is at the bottom
 - Outside **Tail Lock**, new turns and streaming growth update source/display data without forcing the viewport to jump
@@ -297,7 +297,7 @@ _Avoid_: Archive gap, system fallback
 > **Domain expert:** "No — count renderable **Turns** so the UI stays turn-first."
 
 > **Dev:** "Does the client need to render all turns to make the right scrollbar accurate?"
-> **Domain expert:** "No — the **Dynamic Turn Virtualizer** uses **Lazy Height Estimates** and the **Measured Height Cache**. Exact height is measured only for mounted **Display Items**."
+> **Domain expert:** "No — the **Dynamic Turn Virtualizer** uses **Lazy Height Estimates** and the **Virtuoso Measurement Cache**. Exact height is measured only for mounted **Display Items**."
 
 > **Dev:** "Can hidden tool calls still take scroll height so raw turn positions stay aligned?"
 > **Domain expert:** "No — raw coordinates stay on **Display Items** and copy/cursor logic, but hidden turns do not contribute visible scroll height."
@@ -358,5 +358,5 @@ _Avoid_: Archive gap, system fallback
 - "retry read" could mean concurrent reads or a serialized follow-up — resolved: use one in-flight **Read Repair** plus a **Repair Pending Flag**
 - "session status" could mean local inferred state or server projection — resolved: display status comes from **Session Summary**
 - "window" could imply mounted DOM count defines scrollbar height — resolved: the **Dynamic Turn Virtualizer** owns logical scrollbar height from the **Display Index**
-- "accurate height" could imply pre-rendering all turns — resolved: use **Lazy Height Estimates** plus **Measured Height Cache**
+- "accurate height" could imply pre-rendering all turns — resolved: use **Lazy Height Estimates** plus **Virtuoso Measurement Cache**
 - "special render" could imply React components guess from raw JSON on mount — resolved: classify special UI as **Display Items** during shallow parsing

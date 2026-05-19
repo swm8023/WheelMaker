@@ -64,7 +64,6 @@ import { insertChatSlashCommandText } from './chat/chatSlashInsertion';
 import {
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
-  resolveChatBottomFollowAction,
   resolveChatSessionReadWindowUpdate,
   resolveChatScrollToBottomVisibility,
   shouldAutoScrollChatToBottom,
@@ -2279,7 +2278,6 @@ function App() {
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatVirtuosoListRef = useRef<ChatVirtuosoTurnListHandle | null>(null);
-  const chatDisplayItemCountRef = useRef(0);
   const chatAutoScrollFollowRef = useRef(true);
   const chatPointerScrollingRef = useRef(false);
   const chatUserScrollLockUntilRef = useRef(0);
@@ -2645,18 +2643,6 @@ function App() {
       chatVirtuosoListRef.current?.scrollToBottom('auto');
       chatAutoScrollFollowRef.current = true;
       setChatShowScrollToBottom(false);
-    });
-  }, [shouldAutoscrollChat]);
-
-  const autoscrollChatToBottom = useCallback(() => {
-    if (!shouldAutoscrollChat(false)) {
-      return;
-    }
-    window.requestAnimationFrame(() => {
-      if (!shouldAutoscrollChat(false)) {
-        return;
-      }
-      chatVirtuosoListRef.current?.autoscrollToBottom();
     });
   }, [shouldAutoscrollChat]);
 
@@ -3227,18 +3213,7 @@ function App() {
       return;
     }
     resizeChatComposerTextarea();
-    const chatDisplayItemCount = chatDisplayIndex.items.length;
-    const chatBottomFollowAction = resolveChatBottomFollowAction({
-      itemCount: chatDisplayItemCount,
-      previousItemCount: chatDisplayItemCountRef.current,
-    });
-    chatDisplayItemCountRef.current = chatDisplayItemCount;
-    if (chatBottomFollowAction === 'scrollToBottom') {
-      scrollChatToBottom();
-      return;
-    }
-    autoscrollChatToBottom();
-  }, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, chatDisplayIndex.items.length, resizeChatComposerTextarea, scrollChatToBottom, autoscrollChatToBottom]);
+  }, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, resizeChatComposerTextarea]);
 
   useEffect(() => {
     gitSelectedBranchesRef.current = gitSelectedBranches;

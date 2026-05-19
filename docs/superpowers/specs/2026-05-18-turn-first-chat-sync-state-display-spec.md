@@ -470,7 +470,7 @@ Hidden tool/thought turns MUST NOT contribute visible scrollbar height. They SHO
 
 ### UI-025 Lazy Height Measurement
 
-Unmounted items MUST use estimated height. Exact height MUST be measured only for mounted visible + overscan items and cached by `sessionId + item.key + contentRevision`.
+Unmounted items MUST use estimated height. Exact height MUST be measured only for mounted visible + overscan items by `react-virtuoso` internal measurement state. The app MUST NOT maintain a second height cache keyed by session or Display Item.
 
 ### UI-026 No Full Pre-Render For Scrollbar
 
