@@ -39,41 +39,6 @@ function upsertTurn(turns: RegistrySessionTurn[], incoming: RegistrySessionTurn)
   return sortTurns(next);
 }
 
-function continuousReadTurns(
-  turns: RegistrySessionTurn[],
-  afterTurnIndex: number,
-  latestTurnIndex: number,
-): RegistrySessionTurn[] {
-  const after = Math.max(0, Math.trunc(afterTurnIndex ?? 0));
-  const latest = Math.max(after, Math.trunc(latestTurnIndex ?? after));
-  const inRange = sortTurns(
-    turns
-      .map(item => normalizeTurn(item))
-      .filter((turn): turn is RegistrySessionTurn => (
-        !!turn && turn.turnIndex > after && turn.turnIndex <= latest
-      )),
-  );
-  for (let index = 0; index < inRange.length; index += 1) {
-    const turn = inRange[index];
-    const isLast = index === inRange.length - 1;
-    if (!turn.finished && !isLast) {
-      throw new Error('invalid session.read result: unfinished tail must be last');
-    }
-  }
-  const byIndex = new Map<number, RegistrySessionTurn>();
-  for (const turn of inRange) {
-    byIndex.set(turn.turnIndex, turn);
-  }
-  const out: RegistrySessionTurn[] = [];
-  for (let turnIndex = after + 1; turnIndex <= latest; turnIndex += 1) {
-    const turn = byIndex.get(turnIndex);
-    if (!turn) break;
-    out.push(cloneTurn(turn));
-    if (!turn.finished) break;
-  }
-  return out;
-}
-
 export function createEmptyChatTurnStore(): ChatTurnStoreState {
   return {finished: [], live: [], cursor: {turnIndex: 0}};
 }
@@ -197,7 +162,18 @@ export function applySessionReadResult(
     return resetChatTurnStore(state);
   }
   const latest = Math.max(after, Math.trunc(latestTurnIndex ?? after));
-  const normalized = continuousReadTurns(turns, after, latest);
+  const normalized = sortTurns(
+    turns
+      .map(item => normalizeTurn(item))
+      .filter((item): item is RegistrySessionTurn => !!item),
+  );
+  for (let index = 0; index < normalized.length; index += 1) {
+    const turn = normalized[index];
+    const isLast = index === normalized.length - 1;
+    if (!turn.finished && !isLast) {
+      throw new Error('invalid session.read result: unfinished tail must be last');
+    }
+  }
   state.finished = state.finished.filter(turn => turn.turnIndex <= after || turn.turnIndex > latest);
   state.live = state.live.filter(turn => turn.turnIndex <= after || turn.turnIndex > latest);
   for (const turn of normalized) {

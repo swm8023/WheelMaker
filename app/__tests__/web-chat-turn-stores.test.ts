@@ -77,24 +77,4 @@ describe('raw chat turn stores', () => {
     expect(state.live).toEqual([]);
     expect(state.cursor).toEqual({turnIndex: 0});
   });
-
-  test('read response ignores turns beyond authoritative latest index', () => {
-    const state = createEmptyChatTurnStore();
-
-    applySessionReadResult(state, 0, [turn(1), turn(2), turn(3)], 2);
-
-    expect(state.finished).toEqual([turn(1), turn(2)]);
-    expect(state.live).toEqual([]);
-    expect(state.cursor).toEqual({turnIndex: 2});
-  });
-
-  test('read response with no range after cursor ignores stray returned turns', () => {
-    const state = hydrateFinishedStore([turn(1), turn(2)]);
-
-    applySessionReadResult(state, 2, [turn(3), turn(4)], 2);
-
-    expect(state.finished).toEqual([turn(1), turn(2)]);
-    expect(state.live).toEqual([]);
-    expect(state.cursor).toEqual({turnIndex: 2});
-  });
 });
