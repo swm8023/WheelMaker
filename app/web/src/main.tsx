@@ -333,6 +333,7 @@ const RECONNECT_GRACE_PERIOD_MS = 30_000;
 const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
 const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
+const CHAT_HISTORY_BOTTOM_BUFFER = 28;
 const CHAT_PENDING_CONFIRM_TIMEOUT_MS = 5000;
 const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
@@ -9159,6 +9160,7 @@ function App() {
                   scrollRef={chatScrollRef}
                   displayIndex={chatDisplayIndex}
                   runtimeKey={selectedChatEncodedKey}
+                  bottomBuffer={CHAT_HISTORY_BOTTOM_BUFFER}
                   atBottomThreshold={CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD}
                   onAtBottomChange={handleChatAtBottomChange}
                   shouldAutoscroll={shouldAutoscrollChat}

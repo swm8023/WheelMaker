@@ -6,6 +6,7 @@ import {
   nextChatUserScrollLockUntil,
   resolveChatBottomFollowAction,
   resolveChatSessionReadWindowUpdate,
+  resolveChatScrollBottomTop,
   resolveChatScrollToBottomVisibility,
   shouldAutoScrollChatToBottom,
 } from '../web/src/chat/chatScrollIntent';
@@ -108,6 +109,25 @@ describe('web drag scroll behavior', () => {
     expect(mainTsx).toContain('const handleChatScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {');
     expect(mainTsx).toContain('resolveChatScrollToBottomVisibility({');
     expect(mainTsx).toContain('onScroll={handleChatScroll}');
+  });
+
+  test('settles programmatic chat bottom scrolling against the actual scroll parent', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const virtualList = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'chat', 'ChatVirtuosoTurnList.tsx'),
+      'utf8',
+    );
+
+    expect(resolveChatScrollBottomTop({scrollHeight: 1200, clientHeight: 500})).toBe(700);
+    expect(resolveChatScrollBottomTop({scrollHeight: 300, clientHeight: 500})).toBe(0);
+    expect(mainTsx).toContain('const CHAT_HISTORY_BOTTOM_BUFFER = 28;');
+    expect(mainTsx).toContain('bottomBuffer={CHAT_HISTORY_BOTTOM_BUFFER}');
+    expect(virtualList).toContain('function scrollElementToBottom(');
+    expect(virtualList).toContain('resolveChatScrollBottomTop({');
+    expect(virtualList).toContain('const requestScrollParentBottomSettle = React.useCallback(');
+    expect(virtualList).toContain("window.requestAnimationFrame(() => settleScrollParentToBottom('auto'));");
+    expect(virtualList).toContain('onAtBottomChange?.(true);');
   });
 
   test('keeps incremental session reads from resetting a history scroll window', () => {

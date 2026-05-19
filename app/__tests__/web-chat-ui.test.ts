@@ -189,7 +189,7 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain("const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);");
     expect(stylesCss).toContain('.chat-composer');
     expect(stylesCss).toContain('.chat-composer::before {');
-    expect(stylesCss).toContain('--chat-history-bottom-buffer: 12px;');
+    expect(stylesCss).toContain('--chat-history-bottom-buffer: 28px;');
     expect(stylesCss).toMatch(
       /\.chat-block \{[\s\S]*overflow-y: scroll;[\s\S]*scrollbar-gutter: stable;[\s\S]*padding: 18px 18px 0;[\s\S]*\}/,
     );

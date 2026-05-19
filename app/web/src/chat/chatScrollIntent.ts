@@ -25,6 +25,15 @@ export type ChatScrollToBottomVisibility = {
   showScrollToBottom: boolean;
 };
 
+export function resolveChatScrollBottomTop(input: {
+  scrollHeight: number;
+  clientHeight: number;
+}): number {
+  const scrollHeight = Number.isFinite(input.scrollHeight) ? Math.max(0, input.scrollHeight) : 0;
+  const clientHeight = Number.isFinite(input.clientHeight) ? Math.max(0, input.clientHeight) : 0;
+  return Math.max(0, scrollHeight - clientHeight);
+}
+
 export function resolveChatScrollToBottomVisibility(input: {
   scrollTop: number;
   scrollHeight: number;
@@ -35,7 +44,10 @@ export function resolveChatScrollToBottomVisibility(input: {
   const scrollHeight = Number.isFinite(input.scrollHeight) ? Math.max(0, input.scrollHeight) : 0;
   const clientHeight = Number.isFinite(input.clientHeight) ? Math.max(0, input.clientHeight) : 0;
   const threshold = Number.isFinite(input.threshold) ? Math.max(0, input.threshold) : 0;
-  const distanceFromBottom = Math.max(0, scrollHeight - clientHeight - scrollTop);
+  const distanceFromBottom = Math.max(
+    0,
+    resolveChatScrollBottomTop({scrollHeight, clientHeight}) - scrollTop,
+  );
   const scrollable = scrollHeight > clientHeight + 1;
   const atBottom = !scrollable || distanceFromBottom <= threshold;
   return {

@@ -1,6 +1,7 @@
 import React from 'react';
 import {Virtuoso, type Components, type VirtuosoHandle} from 'react-virtuoso';
 import type {ChatDisplayIndex, ChatDisplayIndexItem} from './chatDisplayIndex';
+import {resolveChatScrollBottomTop} from './chatScrollIntent';
 
 const DEFAULT_AT_BOTTOM_THRESHOLD = 80;
 const DEFAULT_BOTTOM_BUFFER = 12;
@@ -101,6 +102,16 @@ function resolveDefaultItemHeight(heightEstimates: number[], rowGap: number): nu
   return Math.max(1, Math.round(totalHeight / heightEstimates.length));
 }
 
+function scrollElementToBottom(element: HTMLElement, behavior: ChatVirtuosoScrollBehavior): void {
+  element.scrollTo({
+    top: resolveChatScrollBottomTop({
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }),
+    behavior,
+  });
+}
+
 export const ChatVirtuosoTurnList = React.forwardRef<
   ChatVirtuosoTurnListHandle,
   ChatVirtuosoTurnListProps
@@ -160,23 +171,48 @@ export const ChatVirtuosoTurnList = React.forwardRef<
     [onAtBottomChange],
   );
 
+  const settleScrollParentToBottom = React.useCallback(
+    (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
+      if (!scrollParent) {
+        return;
+      }
+      scrollElementToBottom(scrollParent, behavior);
+      atBottomRef.current = true;
+      onAtBottomChange?.(true);
+    },
+    [onAtBottomChange, scrollParent],
+  );
+
+  const requestScrollParentBottomSettle = React.useCallback(
+    (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
+      window.requestAnimationFrame(() => {
+        settleScrollParentToBottom(behavior);
+        window.requestAnimationFrame(() => settleScrollParentToBottom('auto'));
+      });
+    },
+    [settleScrollParentToBottom],
+  );
+
   const handleTotalListHeightChanged = React.useCallback(() => {
     if (atBottomRef.current && shouldAutoscrollNow()) {
       virtuosoRef.current?.autoscrollToBottom();
+      requestScrollParentBottomSettle('auto');
     }
-  }, [shouldAutoscrollNow]);
+  }, [requestScrollParentBottomSettle, shouldAutoscrollNow]);
 
   React.useImperativeHandle(ref, () => ({
     autoscrollToBottom: () => {
       virtuosoRef.current?.autoscrollToBottom();
+      requestScrollParentBottomSettle('auto');
     },
     scrollToBottom: (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
       if (displayIndex.items.length === 0) {
         return;
       }
       virtuosoRef.current?.scrollToIndex({index: 'LAST', align: 'end', behavior});
+      requestScrollParentBottomSettle(behavior);
     },
-  }), [displayIndex.items.length]);
+  }), [displayIndex.items.length, requestScrollParentBottomSettle]);
 
   if (!scrollParent) {
     return <div className="chat-virtuoso-list" />;

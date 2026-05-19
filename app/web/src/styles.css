@@ -3371,7 +3371,7 @@ body,
 }
 
 .chat-main {
-  --chat-history-bottom-buffer: 12px;
+  --chat-history-bottom-buffer: 28px;
   flex: 1;
   min-height: 0;
   display: flex;
