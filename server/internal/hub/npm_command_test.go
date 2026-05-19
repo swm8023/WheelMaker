@@ -82,9 +82,6 @@ func npmCallKey(name string, args ...string) string {
 
 func TestNPMCommandScanReturnsRuntimeAndDeprecatedPackageRows(t *testing.T) {
 	runner := newFakeNPMRunner()
-	runner.set("node", []string{"--version"}, npmCommandResult{Stdout: "v22.11.0\n", ExitCode: 0})
-	runner.set("npm", []string{"--version"}, npmCommandResult{Stdout: "11.12.1\n", ExitCode: 0})
-	runner.set("npm", []string{"prefix", "-g"}, npmCommandResult{Stdout: "C:\\Users\\you\\npm\n", ExitCode: 0})
 	runner.set("npm", []string{"list", "-g", "--depth=0", "--json"}, npmCommandResult{
 		Stdout:   `{"dependencies":{"@openai/codex":{"version":"0.129.0"},"@zed-industries/claude-agent-acp":{"version":"0.13.0"}}}`,
 		ExitCode: 0,
@@ -103,8 +100,8 @@ func TestNPMCommandScanReturnsRuntimeAndDeprecatedPackageRows(t *testing.T) {
 	if !body.OK || body.Hub.HubID != "hub-a" {
 		t.Fatalf("response=%#v", body)
 	}
-	if body.Hub.NodeVersion != "v22.11.0" || body.Hub.NPMVersion != "11.12.1" || body.Hub.NPMPrefix != "C:\\Users\\you\\npm" {
-		t.Fatalf("metadata=%#v", body.Hub)
+	if runner.hasCall("node", "--version") || runner.hasCall("npm", "--version") || runner.hasCall("npm", "prefix", "-g") {
+		t.Fatalf("scan should not call hidden metadata commands: %#v", runner.calls)
 	}
 
 	codex := findNPMTestPackage(t, body.Hub.Packages, "@openai/codex")

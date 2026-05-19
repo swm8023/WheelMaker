@@ -83,9 +83,9 @@ Rules:
   "hub": {
     "hubId": "dev-hub",
     "online": true,
-    "nodeVersion": "v22.11.0",
-    "npmVersion": "11.12.1",
-    "npmPrefix": "C:\\Users\\you\\scoop\\apps\\nodejs\\current",
+    "nodeVersion": "",
+    "npmVersion": "",
+    "npmPrefix": "",
     "warning": "",
     "error": "",
     "packages": [
@@ -109,7 +109,7 @@ Rules:
 }
 ```
 
-If `npm list -g --depth=0 --json` fails, the hub scan returns `ok: false` or a hub-level `error`, and `packages` is empty. Failed `node --version`, `npm --version`, or `npm prefix -g` calls do not fail the scan if `npm list` succeeds; they only populate `warning` and leave the affected metadata blank.
+If `npm list -g --depth=0 --json` fails, the hub scan returns `ok: false` or a hub-level `error`, and `packages` is empty.
 
 ### Install And Uninstall Responses
 
@@ -176,9 +176,6 @@ Hub owns the actual npm logic and keeps task state in memory only. The retained 
 
 Commands:
 
-- `node --version`
-- `npm --version`
-- `npm prefix -g`
 - `npm list -g --depth=0 --json`
 - `npm view <package> version` for runtime allowlist packages
 
@@ -284,7 +281,7 @@ Settings sections become:
 4. `Database`
 5. `Clear Local Cache`
 
-`Update` is a Settings detail route. The detail page title is `Update`. The first content group title is `Agent Packages`, leaving room for future WheelMaker server update controls in the same page.
+`Update` is a Settings detail route. The detail page title is `Update`. Agent npm package rows appear in each hub card below the WheelMaker release block without a separate package group title.
 
 ### Update Detail
 
@@ -294,7 +291,6 @@ The `Update` detail page:
 - derives unique hub IDs from online projects
 - sorts hub groups by stable `hubId` order
 - sends one `cmd.npm` scan request per hub
-- renders hub cards with `nodeVersion`, `npmVersion`, and `npmPrefix`
 - renders package rows with display name, package name, agent tags, installed version, latest version, status, and action button
 - includes a `Refresh` action
 - does not auto-refresh on a timer
@@ -421,7 +417,7 @@ Settings source-structure tests:
 - `settingsDetailView` supports `update`.
 - `Update` uses the shared Settings detail shell.
 - `Update` detail title is `Update`.
-- `Agent Packages` appears as the first Update content group.
+- Agent npm package rows appear below the WheelMaker release block without an extra group title.
 
 Desktop activity bar tests:
 
@@ -436,7 +432,6 @@ Update page behavior tests:
 
 - online hubs are derived from `project.list` and sorted by hub ID.
 - scan requests are sent per hub.
-- hub metadata shows node, npm, and npm prefix values.
 - package rows show install/update/uninstall actions according to policy.
 - confirmation modal is used for install/update/uninstall.
 - accepted tasks trigger query polling.
@@ -447,7 +442,7 @@ Update page behavior tests:
 
 - Settings main list has a `More` section with the confirmed row order.
 - `Update` opens a detail page titled `Update`.
-- The Update page displays `Agent Packages` grouped by hub.
+- The Update page displays agent npm package rows grouped by hub.
 - All package management is based on global npm package state only.
 - Runtime package names are hard-coded and cannot be supplied arbitrarily.
 - Deprecated package uninstall is supported only for hard-coded deprecated packages.
@@ -459,4 +454,3 @@ Update page behavior tests:
 - `codex` and `claude` launch global binaries rather than `npx`.
 - macOS deployment installs missing Codex/Claude ACP packages like Windows.
 - Tests cover protocol, hub command policy, UI IA, shortcuts, and provider launch changes.
-

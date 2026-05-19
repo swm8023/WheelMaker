@@ -203,33 +203,14 @@ func (c *NPMCommand) scan(ctx context.Context, hubID string) npmCommandResponse 
 		Online:   true,
 		Packages: []npmPackageStatus{},
 	}
-	var warnings []string
-
-	if version, warning := c.readCommandLine(ctx, "node", "--version"); warning != "" {
-		warnings = append(warnings, "node --version: "+warning)
-	} else {
-		hub.NodeVersion = version
-	}
-	if version, warning := c.readCommandLine(ctx, "npm", "--version"); warning != "" {
-		warnings = append(warnings, "npm --version: "+warning)
-	} else {
-		hub.NPMVersion = version
-	}
-	if prefix, warning := c.readCommandLine(ctx, "npm", "prefix", "-g"); warning != "" {
-		warnings = append(warnings, "npm prefix -g: "+warning)
-	} else {
-		hub.NPMPrefix = prefix
-	}
 
 	listResult := c.runner.Run(ctx, "npm", "list", "-g", "--depth=0", "--json")
 	if commandFailed(listResult) {
-		hub.Warning = strings.Join(warnings, "; ")
 		hub.Error = "npm list failed: " + npmResultSummary(listResult)
 		return npmCommandResponse{OK: false, UpdatedAt: updatedAt, Hub: hub, Task: c.currentTaskSnapshot()}
 	}
 	installed, err := parseNPMListDependencies(listResult.Stdout)
 	if err != nil {
-		hub.Warning = strings.Join(warnings, "; ")
 		hub.Error = "npm list failed: " + err.Error()
 		return npmCommandResponse{OK: false, UpdatedAt: updatedAt, Hub: hub, Task: c.currentTaskSnapshot()}
 	}
@@ -268,16 +249,7 @@ func (c *NPMCommand) scan(ctx context.Context, hubID string) npmCommandResponse 
 			CanUninstall:     true,
 		})
 	}
-	hub.Warning = strings.Join(warnings, "; ")
 	return npmCommandResponse{OK: true, UpdatedAt: updatedAt, Hub: hub, Task: c.currentTaskSnapshot()}
-}
-
-func (c *NPMCommand) readCommandLine(ctx context.Context, name string, args ...string) (string, string) {
-	result := c.runner.Run(ctx, name, args...)
-	if commandFailed(result) {
-		return "", npmResultSummary(result)
-	}
-	return firstNonEmptyLine(result.Stdout), ""
 }
 
 type npmLatestResult struct {

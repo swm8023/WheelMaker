@@ -54,7 +54,6 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('wheelMakerReleaseRef');
     expect(mainTsx).toContain('formatWheelMakerDateTime');
     expect(mainTsx).toContain('wheelMakerData?.git?.latestCommittedAt');
-    expect(mainTsx).toContain('Agent Packages');
     expect(mainTsx).toContain('refreshAgentPackages');
     expect(mainTsx).toContain('deriveAgentPackageHubIds');
     expect(mainTsx).toContain('withAgentPackageTimeout(');
@@ -66,6 +65,12 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('requestAgentPackageAction');
     expect(mainTsx).toContain('handleAgentPackageConfirmedAction');
     expect(mainTsx).toContain('packageStatusLabel');
+    expect(mainTsx).toContain('const showWheelMakerUpdateAction =');
+    expect(mainTsx).toContain("wheelMakerStatus !== 'up_to_date'");
+    expect(mainTsx).not.toContain('Agent Packages');
+    expect(mainTsx).not.toContain('>Prefix:');
+    expect(mainTsx).not.toContain('title={hub?.npmPrefix');
+    expect(mainTsx).not.toContain('Updated: {agentCard.updatedAt}');
 
     expect(stylesCss).toContain('.agent-package-hub-list');
     expect(stylesCss).toContain('.wheelmaker-update-panel');
@@ -86,7 +91,7 @@ describe('agent package update settings UI source structure', () => {
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     const wheelMakerBlockStart = mainTsx.indexOf('className="wheelmaker-update-panel"');
-    const agentPackagesStart = mainTsx.indexOf('Agent Packages', wheelMakerBlockStart);
+    const agentPackagesStart = mainTsx.indexOf('className="agent-package-row-list"', wheelMakerBlockStart);
     expect(wheelMakerBlockStart).toBeGreaterThanOrEqual(0);
     expect(agentPackagesStart).toBeGreaterThan(wheelMakerBlockStart);
     const wheelMakerBlock = mainTsx.slice(wheelMakerBlockStart, agentPackagesStart);

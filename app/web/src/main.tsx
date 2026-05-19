@@ -8379,6 +8379,10 @@ function App() {
             const hub = agentCard?.hub;
             const task = agentCard?.task;
             const wheelMakerPending = wheelMakerUpdatePendingHubId === card.hubId;
+            const showWheelMakerUpdateAction =
+              wheelMakerPending ||
+              wheelMakerData?.pendingSignal === true ||
+              wheelMakerStatus !== 'up_to_date';
             const wheelMakerCurrentSha = wheelMakerData?.release?.sha || wheelMakerData?.git?.currentSha || '';
             const wheelMakerLatestSha = wheelMakerData?.git?.latestSha || '';
             const wheelMakerCurrentTime = formatWheelMakerDateTime(
@@ -8422,24 +8426,17 @@ function App() {
                   {wheelMaker?.error || wheelMakerData?.error ? (
                     <div className="settings-metadata-error">{wheelMaker?.error || wheelMakerData?.error}</div>
                   ) : null}
-                  <button
-                    type="button"
-                    className="wheelmaker-update-action-btn"
-                    disabled={wheelMakerPending || wheelMakerData?.pendingSignal === true}
-                    onClick={() => requestWheelMakerUpdatePublish(card.hubId, wheelMakerData)}
-                  >
-                    {wheelMakerPending ? 'Updating...' : wheelMakerData?.pendingSignal ? 'Requested' : 'Update'}
-                  </button>
+                  {showWheelMakerUpdateAction ? (
+                    <button
+                      type="button"
+                      className="wheelmaker-update-action-btn"
+                      disabled={wheelMakerPending || wheelMakerData?.pendingSignal === true}
+                      onClick={() => requestWheelMakerUpdatePublish(card.hubId, wheelMakerData)}
+                    >
+                      {wheelMakerPending ? 'Updating...' : wheelMakerData?.pendingSignal ? 'Requested' : 'Update'}
+                    </button>
+                  ) : null}
                 </div>
-                <div className="settings-detail-group-title">Agent Packages</div>
-                <div className="agent-package-hub-meta">
-                  <span>Node: {hub?.nodeVersion || '-'}</span>
-                  <span>npm: {hub?.npmVersion || '-'}</span>
-                  <span title={hub?.npmPrefix || ''}>Prefix: {hub?.npmPrefix || '-'}</span>
-                </div>
-                {agentCard?.updatedAt ? (
-                  <div className="settings-metadata-line">Updated: {agentCard.updatedAt}</div>
-                ) : null}
                 {hub?.warning ? (
                   <div className="settings-metadata-line settings-metadata-error">{hub.warning}</div>
                 ) : null}

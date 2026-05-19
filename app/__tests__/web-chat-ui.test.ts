@@ -77,7 +77,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('resolveChatListSelection({');
     expect(mainTsx).not.toContain('result.lastIndex < afterIndex');
     expect(mainTsx).toContain('preserveUserSelection');
-    expect(mainTsx).toContain('const shouldSyncSelectedSession =');
+    expect(mainTsx).toContain('const canApplyLoadedSelection = shouldApplyLoadedChatSelection(');
     expect(mainTsx).toContain('selectionSnapshot');
     expect(mainTsx).toContain('const nextSelectedKey = chatSessionKeyFromParts(activeProjectId, resultSessionId);');
     expect(mainTsx).toContain('applySelectedChatKey(nextSelectedKey);');

@@ -9,7 +9,7 @@ Extend the existing Settings `Update` page so each online hub can report and tri
 
 ## Scope
 
-- Show `WheelMaker` above `Agent Packages` on each Update hub card.
+- Show `WheelMaker` above the agent npm package rows on each Update hub card.
 - Show current published SHA/time, latest remote SHA/time, status, and behind commit count.
 - Add `cmd.update` as an explicit client role registry method.
 - Keep Registry as a hubId forwarder only; it does not create tasks or store update state.
@@ -87,10 +87,7 @@ The updater consumes `update-now.signal`.
 
 The Update page derives online hubs from `project.list` and queries each hub with `cmd.update` and `cmd.npm`.
 
-Each hub card renders:
-
-1. `WheelMaker`
-2. `Agent Packages`
+Each hub card renders the `WheelMaker` release block first, followed by agent npm package rows without an extra package group title.
 
 The WheelMaker row shows:
 
