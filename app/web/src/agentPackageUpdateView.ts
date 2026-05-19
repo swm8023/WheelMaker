@@ -1,5 +1,7 @@
 import type {RegistryNpmPackageStatus, RegistryProject} from './types/registry';
 
+export const AGENT_PACKAGE_SCAN_TIMEOUT_MS = 65000;
+
 export function deriveAgentPackageHubIds(projects: RegistryProject[]): string[] {
   const hubIds = new Set<string>();
   projects.forEach(project => {
@@ -43,4 +45,26 @@ export function packageStatusLabel(status: RegistryNpmPackageStatus | string): s
     default:
       return status || 'Unknown';
   }
+}
+
+export function withAgentPackageTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+    promise.then(
+      value => {
+        globalThis.clearTimeout(timer);
+        resolve(value);
+      },
+      error => {
+        globalThis.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }

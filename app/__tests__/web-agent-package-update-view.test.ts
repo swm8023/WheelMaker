@@ -1,4 +1,4 @@
-import {deriveAgentPackageHubIds, packageStatusLabel} from '../web/src/agentPackageUpdateView';
+import {deriveAgentPackageHubIds, packageStatusLabel, withAgentPackageTimeout} from '../web/src/agentPackageUpdateView';
 import type {RegistryProject} from '../web/src/types/registry';
 
 describe('agent package update view helpers', () => {
@@ -22,5 +22,19 @@ describe('agent package update view helpers', () => {
     expect(packageStatusLabel('checking_failed')).toBe('Checking failed');
     expect(packageStatusLabel('deprecated')).toBe('Deprecated');
     expect(packageStatusLabel('running')).toBe('Running');
+  });
+
+  test('turns a stuck scan promise into a timeout error', async () => {
+    jest.useFakeTimers();
+    const pending = withAgentPackageTimeout(
+      new Promise(() => undefined),
+      25,
+      'hub-a scan timed out',
+    );
+
+    jest.advanceTimersByTime(25);
+
+    await expect(pending).rejects.toThrow('hub-a scan timed out');
+    jest.useRealTimers();
   });
 });

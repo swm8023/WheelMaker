@@ -47,6 +47,7 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('Agent Packages');
     expect(mainTsx).toContain('refreshAgentPackages');
     expect(mainTsx).toContain('deriveAgentPackageHubIds');
+    expect(mainTsx).toContain('withAgentPackageTimeout(');
     expect(mainTsx).toContain('service.scanNpmPackages');
     expect(mainTsx).toContain('service.installNpmPackage');
     expect(mainTsx).toContain('service.uninstallNpmPackage');

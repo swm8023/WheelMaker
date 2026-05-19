@@ -83,7 +83,12 @@ import {
   type TokenProviderSectionView,
   type TokenStatCardView,
 } from './tokenStatsView';
-import {deriveAgentPackageHubIds, packageStatusLabel} from './agentPackageUpdateView';
+import {
+  AGENT_PACKAGE_SCAN_TIMEOUT_MS,
+  deriveAgentPackageHubIds,
+  packageStatusLabel,
+  withAgentPackageTimeout,
+} from './agentPackageUpdateView';
 import {
   CODE_FONT_OPTIONS,
   CODE_THEME_OPTIONS,
@@ -6254,7 +6259,11 @@ function App() {
       });
       const responses = await Promise.all(hubIds.map(async hubId => {
         try {
-          const result = await service.scanNpmPackages(hubId);
+          const result = await withAgentPackageTimeout(
+            service.scanNpmPackages(hubId),
+            AGENT_PACKAGE_SCAN_TIMEOUT_MS,
+            `${hubId} npm package scan timed out`,
+          );
           return {hubId, result};
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
