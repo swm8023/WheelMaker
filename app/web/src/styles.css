@@ -647,6 +647,140 @@ body,
   font-size: 11px;
 }
 
+.settings-detail-group-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.agent-package-hub-list {
+  gap: 10px;
+}
+
+.agent-package-hub-card {
+  gap: 8px;
+}
+
+.agent-package-hub-meta,
+.agent-package-version-line {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.agent-package-task {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text);
+  padding: 6px;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.agent-package-task.failed {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.agent-package-row-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.agent-package-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  padding-top: 8px;
+}
+
+.agent-package-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.agent-package-title-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-package-status {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.agent-package-status.status-update_available,
+.agent-package-status.status-not_installed {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+
+.agent-package-status.status-deprecated,
+.agent-package-status.status-failed,
+.agent-package-status.status-checking_failed {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+}
+
+.agent-package-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  font-size: 11px;
+}
+
+.agent-package-action-btn {
+  min-width: 82px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.agent-package-action-btn.danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
+}
+
+.agent-package-action-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.agent-package-action-btn:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
 .settings-database-dump {
   margin: 0;
   max-height: min(62vh, 520px);

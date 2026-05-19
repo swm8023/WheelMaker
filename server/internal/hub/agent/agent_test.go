@@ -129,56 +129,62 @@ func TestFormatACPLogLine_NotifySessionUpdateFilter(t *testing.T) {
 	}
 }
 
-func TestCodexACPProvider_UsesNpxByDefault(t *testing.T) {
+func TestCodexACPProvider_UsesGlobalBinaryByDefault(t *testing.T) {
 	p := NewCodexProvider()
 	p.resolveBinary = func(name string, configuredPath string) (string, error) {
-		t.Fatalf("resolveBinary should not be called: name=%q configuredPath=%q", name, configuredPath)
-		return "", nil
+		if name != "codex-acp" {
+			t.Fatalf("resolveBinary name=%q, want codex-acp", name)
+		}
+		if configuredPath != "" {
+			t.Fatalf("resolveBinary configuredPath=%q, want empty", configuredPath)
+		}
+		return "/usr/bin/codex-acp", nil
 	}
 	p.lookPath = func(bin string) (string, error) {
-		if bin != "npx" {
-			t.Fatalf("lookPath bin=%q, want npx", bin)
-		}
-		return "/usr/bin/npx", nil
+		t.Fatalf("lookPath should not be called: bin=%q", bin)
+		return "", nil
 	}
 
 	exe, args, env, err := p.Launch()
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	if exe != "/usr/bin/npx" {
+	if exe != "/usr/bin/codex-acp" {
 		t.Fatalf("exe=%q", exe)
 	}
-	if len(args) == 0 || args[0] != "--yes" {
-		t.Fatalf("args=%v", args)
+	if len(args) != 0 {
+		t.Fatalf("args=%v, want empty", args)
 	}
 	if len(env) != 0 {
 		t.Fatalf("env=%v, want empty", env)
 	}
 }
 
-func TestClaudeACPProvider_UsesNpxByDefault(t *testing.T) {
+func TestClaudeACPProvider_UsesGlobalBinaryByDefault(t *testing.T) {
 	p := NewClaudeProvider()
 	p.resolveBinary = func(name string, configuredPath string) (string, error) {
-		t.Fatalf("resolveBinary should not be called: name=%q configuredPath=%q", name, configuredPath)
-		return "", nil
+		if name != "claude-agent-acp" {
+			t.Fatalf("resolveBinary name=%q, want claude-agent-acp", name)
+		}
+		if configuredPath != "" {
+			t.Fatalf("resolveBinary configuredPath=%q, want empty", configuredPath)
+		}
+		return "/usr/bin/claude-agent-acp", nil
 	}
 	p.lookPath = func(bin string) (string, error) {
-		if bin != "npx" {
-			t.Fatalf("lookPath bin=%q, want npx", bin)
-		}
-		return "/usr/bin/npx", nil
+		t.Fatalf("lookPath should not be called: bin=%q", bin)
+		return "", nil
 	}
 
 	exe, args, _, err := p.Launch()
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	if exe != "/usr/bin/npx" {
+	if exe != "/usr/bin/claude-agent-acp" {
 		t.Fatalf("exe=%q", exe)
 	}
-	if len(args) != 2 || args[1] != "@agentclientprotocol/claude-agent-acp" {
-		t.Fatalf("args=%v", args)
+	if len(args) != 0 {
+		t.Fatalf("args=%v, want empty", args)
 	}
 }
 

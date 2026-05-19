@@ -167,6 +167,67 @@ export interface RegistryTokenScanResult {
   providers: RegistryTokenScanProvider[];
 }
 
+export type RegistryNpmPackageStatus =
+  | 'not_installed'
+  | 'up_to_date'
+  | 'update_available'
+  | 'latest_unknown'
+  | 'checking_failed'
+  | 'deprecated'
+  | 'installing'
+  | 'updating'
+  | 'uninstalling'
+  | 'running'
+  | 'succeeded'
+  | 'failed';
+
+export interface RegistryNpmPackage {
+  packageName: string;
+  displayName: string;
+  agentTypes: string[];
+  kind: 'runtime' | 'deprecated';
+  installed: boolean;
+  installedVersion: string;
+  latestVersion: string;
+  status: RegistryNpmPackageStatus;
+  error: string;
+  canInstall: boolean;
+  canUpdate: boolean;
+  canUninstall: boolean;
+}
+
+export interface RegistryNpmHubSnapshot {
+  hubId: string;
+  online: boolean;
+  nodeVersion: string;
+  npmVersion: string;
+  npmPrefix: string;
+  warning: string;
+  error: string;
+  packages: RegistryNpmPackage[];
+}
+
+export interface RegistryNpmTask {
+  running: boolean;
+  action: 'install' | 'uninstall' | string;
+  packageName: string;
+  version: string;
+  status: RegistryNpmPackageStatus;
+  startedAt: string;
+  finishedAt: string;
+  exitCode: number | null;
+  errorSummary: string;
+  message?: string;
+}
+
+export interface RegistryNpmCommandResponse {
+  ok: boolean;
+  accepted?: boolean;
+  updatedAt?: string;
+  hub?: RegistryNpmHubSnapshot;
+  task: RegistryNpmTask | null;
+}
+
 export interface RegistrySessionMessageEventPayload {
   sessionId: string;
   turn: RegistrySessionTurn;

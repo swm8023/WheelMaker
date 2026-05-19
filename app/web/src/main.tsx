@@ -83,6 +83,7 @@ import {
   type TokenProviderSectionView,
   type TokenStatCardView,
 } from './tokenStatsView';
+import {deriveAgentPackageHubIds, packageStatusLabel} from './agentPackageUpdateView';
 import {
   CODE_FONT_OPTIONS,
   CODE_THEME_OPTIONS,
@@ -128,6 +129,9 @@ import type {
   RegistryGitCommit,
   RegistryGitCommitFile,
   RegistryGitStatus,
+  RegistryNpmHubSnapshot,
+  RegistryNpmPackage,
+  RegistryNpmTask,
   RegistryProject,
   RegistryTokenScanResult,
 } from './types/registry';
@@ -161,8 +165,25 @@ type ConfirmTarget =
       sessionId: string;
       title: string;
     }
-  | {kind: 'clearCache'};
-type SettingsDetailView = 'tokenStats' | 'ccSwitch' | 'database' | null;
+  | {kind: 'clearCache'}
+  | {
+      kind: 'npmPackage';
+      action: 'install' | 'update' | 'uninstall';
+      hubId: string;
+      packageName: string;
+      displayName: string;
+      installedVersion: string;
+      latestVersion: string;
+    };
+type SettingsDetailView = 'update' | 'tokenStats' | 'ccSwitch' | 'database' | null;
+type AgentPackageHubView = {
+  hubId: string;
+  loading: boolean;
+  error: string;
+  updatedAt: string;
+  hub: RegistryNpmHubSnapshot | null;
+  task: RegistryNpmTask | null;
+};
 type ChatComposerDraft = {
   text: string;
   attachments: ChatAttachment[];
@@ -354,6 +375,24 @@ function buildChatDraftKey(activeProjectId: string, sessionId: string): string {
   const projectKey = activeProjectId.trim() || CHAT_DRAFT_KEY_PROJECT_FALLBACK;
   const sessionKey = sessionId.trim() || CHAT_NEW_DRAFT_SESSION_KEY;
   return `${projectKey}:${sessionKey}`;
+}
+
+function agentPackageActionForPackage(pkg: RegistryNpmPackage): 'install' | 'update' | 'uninstall' | null {
+  if (pkg.canInstall) return 'install';
+  if (pkg.canUpdate) return 'update';
+  if (pkg.canUninstall) return 'uninstall';
+  return null;
+}
+
+function agentPackageActionLabel(action: 'install' | 'update' | 'uninstall'): string {
+  switch (action) {
+    case 'update':
+      return 'Update';
+    case 'uninstall':
+      return 'Uninstall';
+    default:
+      return 'Install';
+  }
 }
 
 function floatingControlSlotRatio(slot: PersistedFloatingControlSlot): number {
@@ -2222,6 +2261,10 @@ function App() {
   const [tokenStatsError, setTokenStatsError] = useState('');
   const [tokenStatsUpdatedAt, setTokenStatsUpdatedAt] = useState('');
   const [tokenStatsProviders, setTokenStatsProviders] = useState<TokenProviderSectionView[]>([]);
+  const [agentPackageHubs, setAgentPackageHubs] = useState<Record<string, AgentPackageHubView>>({});
+  const [agentPackagesLoading, setAgentPackagesLoading] = useState(false);
+  const [agentPackagesError, setAgentPackagesError] = useState('');
+  const [agentPackageActionPendingKey, setAgentPackageActionPendingKey] = useState('');
 
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [workspaceProjectMenuOpen, setWorkspaceProjectMenuOpen] = useState(false);
@@ -3919,12 +3962,30 @@ function App() {
     setSidebarCollapsed(false);
   }, [sidebarSettingsOpen, tab, setSidebarSettingsOpen, setSidebarCollapsed, setTab]);
   const handleDesktopSettingsSelect = useCallback(() => {
+    if (sidebarSettingsOpen && (settingsDetailView === 'update' || settingsDetailView === 'tokenStats')) {
+      setSettingsDetailView(null);
+      setSidebarSettingsOpen(true);
+      setSidebarCollapsed(false);
+      return;
+    }
     const nextOpen = !sidebarSettingsOpen;
     setSidebarSettingsOpen(nextOpen);
     if (nextOpen) {
+      setSettingsDetailView(null);
       setSidebarCollapsed(false);
     }
-  }, [sidebarSettingsOpen, setSidebarSettingsOpen, setSidebarCollapsed]);
+  }, [sidebarSettingsOpen, settingsDetailView, setSidebarSettingsOpen, setSidebarCollapsed]);
+  const openSettingsDetail = useCallback((detail: Exclude<SettingsDetailView, null>) => {
+    setSidebarSettingsOpen(true);
+    setSidebarCollapsed(false);
+    if (detail === 'tokenStats') {
+      setTokenStatsError('');
+    }
+    if (detail === 'database') {
+      openDatabasePanel();
+    }
+    setSettingsDetailView(detail);
+  }, [setSidebarSettingsOpen, setSidebarCollapsed]);
   const clampDesktopSidebarWidthForViewport = useCallback((width: number) => {
     const viewportMax = windowWidth > 0
       ? Math.floor(windowWidth * DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO)
@@ -6146,6 +6207,175 @@ function App() {
     refreshTokenStats().catch(() => undefined);
   }, [settingsDetailView, refreshTokenStats]);
 
+  const agentPackageActionKey = useCallback((hubId: string, packageName: string): string => {
+    return `${hubId}:${packageName}`;
+  }, []);
+
+  const agentPackageHubCards = useMemo(() => {
+    return Object.values(agentPackageHubs).sort((left, right) => {
+      if (left.hubId < right.hubId) return -1;
+      if (left.hubId > right.hubId) return 1;
+      return 0;
+    });
+  }, [agentPackageHubs]);
+
+  const agentPackageAnyTaskRunning = useMemo(
+    () => agentPackageHubCards.some(card => card.task?.running),
+    [agentPackageHubCards],
+  );
+
+  const refreshAgentPackages = useCallback(async () => {
+    setAgentPackagesLoading(true);
+    setAgentPackagesError('');
+    try {
+      const latestProjects = await service.listProjects();
+      if (latestProjects.length > 0) {
+        setProjects(latestProjects);
+      }
+      const hubIds = deriveAgentPackageHubIds(latestProjects);
+      if (hubIds.length === 0) {
+        setAgentPackageHubs({});
+        setAgentPackagesError('No online hubs available.');
+        return;
+      }
+      setAgentPackageHubs(prev => {
+        const next: Record<string, AgentPackageHubView> = {};
+        hubIds.forEach(hubId => {
+          next[hubId] = {
+            hubId,
+            loading: true,
+            error: '',
+            updatedAt: prev[hubId]?.updatedAt || '',
+            hub: prev[hubId]?.hub ?? null,
+            task: prev[hubId]?.task ?? null,
+          };
+        });
+        return next;
+      });
+      const responses = await Promise.all(hubIds.map(async hubId => {
+        try {
+          const result = await service.scanNpmPackages(hubId);
+          return {hubId, result};
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return {hubId, error: message};
+        }
+      }));
+      setAgentPackageHubs(prev => {
+        const next: Record<string, AgentPackageHubView> = {};
+        responses.forEach(entry => {
+          if ('error' in entry) {
+            next[entry.hubId] = {
+              hubId: entry.hubId,
+              loading: false,
+              error: entry.error || '',
+              updatedAt: prev[entry.hubId]?.updatedAt || '',
+              hub: prev[entry.hubId]?.hub ?? null,
+              task: prev[entry.hubId]?.task ?? null,
+            };
+            return;
+          }
+          const hub = entry.result.hub ?? {
+            hubId: entry.hubId,
+            online: true,
+            nodeVersion: '',
+            npmVersion: '',
+            npmPrefix: '',
+            warning: '',
+            error: '',
+            packages: [],
+          };
+          next[entry.hubId] = {
+            hubId: entry.hubId,
+            loading: false,
+            error: entry.result.ok ? '' : hub.error || 'Scan failed.',
+            updatedAt: entry.result.updatedAt || '',
+            hub,
+            task: entry.result.task ?? prev[entry.hubId]?.task ?? null,
+          };
+        });
+        return next;
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setAgentPackagesError(message);
+    } finally {
+      setAgentPackagesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (settingsDetailView !== 'update') {
+      return;
+    }
+    refreshAgentPackages().catch(() => undefined);
+  }, [settingsDetailView, refreshAgentPackages]);
+
+  const pollAgentPackageTask = useCallback(async (hubId: string) => {
+    for (;;) {
+      await new Promise(resolve => {
+        window.setTimeout(resolve, 1000);
+      });
+      const result = await service.queryNpmPackageTask(hubId);
+      setAgentPackageHubs(prev => ({
+        ...prev,
+        [hubId]: {
+          ...(prev[hubId] ?? {hubId, loading: false, error: '', updatedAt: '', hub: null, task: null}),
+          task: result.task ?? null,
+        },
+      }));
+      if (!result.task?.running) {
+        break;
+      }
+    }
+    await refreshAgentPackages();
+  }, [refreshAgentPackages]);
+
+  const requestAgentPackageAction = useCallback((
+    action: 'install' | 'update' | 'uninstall',
+    hubId: string,
+    pkg: RegistryNpmPackage,
+  ) => {
+    setConfirmError('');
+    setConfirmTarget({
+      kind: 'npmPackage',
+      action,
+      hubId,
+      packageName: pkg.packageName,
+      displayName: pkg.displayName,
+      installedVersion: pkg.installedVersion,
+      latestVersion: pkg.latestVersion,
+    });
+  }, []);
+
+  const handleAgentPackageConfirmedAction = useCallback(async (target: Extract<ConfirmTarget, {kind: 'npmPackage'}>) => {
+    const pendingKey = agentPackageActionKey(target.hubId, target.packageName);
+    setConfirmError('');
+    setAgentPackageActionPendingKey(pendingKey);
+    try {
+      const result = target.action === 'uninstall'
+        ? await service.uninstallNpmPackage(target.hubId, target.packageName)
+        : await service.installNpmPackage(target.hubId, target.packageName, 'latest');
+      setAgentPackageHubs(prev => ({
+        ...prev,
+        [target.hubId]: {
+          ...(prev[target.hubId] ?? {hubId: target.hubId, loading: false, error: '', updatedAt: '', hub: null, task: null}),
+          task: result.task ?? null,
+        },
+      }));
+      setConfirmTarget(null);
+      setConfirmError('');
+      await pollAgentPackageTask(target.hubId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setConfirmError(message);
+      setAgentPackagesError(message);
+      setError(message);
+    } finally {
+      setAgentPackageActionPendingKey('');
+    }
+  }, [agentPackageActionKey, pollAgentPackageTask]);
+
   const formatDatabaseDump = (dump: Awaited<ReturnType<typeof workspaceStore.dumpDatabase>>): string => {
     return JSON.stringify(
       {
@@ -7529,6 +7759,116 @@ function App() {
     </div>
   );
 
+  const renderUpdateSettingsDetail = () =>
+    renderSettingsDetailShell(
+      'Update',
+      <>
+        <div className="settings-detail-group-title">Agent Packages</div>
+        {agentPackagesLoading && agentPackageHubCards.length === 0 ? (
+          <div className="muted block">Scanning online hubs...</div>
+        ) : null}
+        {agentPackagesError ? (
+          <div className="muted block settings-metadata-error">{agentPackagesError}</div>
+        ) : null}
+        {!agentPackagesLoading && agentPackageHubCards.length === 0 && !agentPackagesError ? (
+          <div className="muted block">No online hubs available.</div>
+        ) : null}
+        <div className="settings-metadata-list agent-package-hub-list">
+          {agentPackageHubCards.map(card => {
+            const hub = card.hub;
+            const task = card.task;
+            return (
+              <div key={`agent-package-hub:${card.hubId}`} className="settings-metadata-card agent-package-hub-card">
+                <div className="settings-metadata-line settings-metadata-line-tags">
+                  <span className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', card.hubId)}`}>
+                    <span className="wide-project-hub-dot" aria-hidden="true" />
+                    <span className="wide-project-hub-label">Hub: {card.hubId}</span>
+                  </span>
+                  {card.loading ? (
+                    <span className="wide-session-agent-tag">Scanning</span>
+                  ) : null}
+                </div>
+                <div className="agent-package-hub-meta">
+                  <span>Node: {hub?.nodeVersion || '-'}</span>
+                  <span>npm: {hub?.npmVersion || '-'}</span>
+                  <span title={hub?.npmPrefix || ''}>Prefix: {hub?.npmPrefix || '-'}</span>
+                </div>
+                {card.updatedAt ? (
+                  <div className="settings-metadata-line">Updated: {card.updatedAt}</div>
+                ) : null}
+                {hub?.warning ? (
+                  <div className="settings-metadata-line settings-metadata-error">{hub.warning}</div>
+                ) : null}
+                {card.error || hub?.error ? (
+                  <div className="settings-metadata-line settings-metadata-error">{card.error || hub?.error}</div>
+                ) : null}
+                {task ? (
+                  <div className={`agent-package-task ${task.status === 'failed' ? 'failed' : ''}`}>
+                    <span>{packageStatusLabel(task.status)}</span>
+                    <span>{task.packageName}</span>
+                    {task.message ? <span>{task.message}</span> : null}
+                    {task.errorSummary ? <span>{task.errorSummary}</span> : null}
+                  </div>
+                ) : null}
+                <div className="agent-package-row-list">
+                  {(hub?.packages ?? []).map(pkg => {
+                    const action = agentPackageActionForPackage(pkg);
+                    const pendingKey = agentPackageActionKey(card.hubId, pkg.packageName);
+                    const pending = agentPackageActionPendingKey === pendingKey || task?.running === true;
+                    return (
+                      <div key={`${card.hubId}:${pkg.packageName}`} className="agent-package-row">
+                        <div className="agent-package-main">
+                          <div className="agent-package-title-line">
+                            <span className="settings-metadata-title" title={pkg.displayName}>{pkg.displayName}</span>
+                            <span className={`agent-package-status status-${pkg.status}`}>{packageStatusLabel(pkg.status)}</span>
+                          </div>
+                          <div className="agent-package-name" title={pkg.packageName}>{pkg.packageName}</div>
+                          <div className="settings-metadata-line settings-metadata-line-tags">
+                            {pkg.agentTypes.map(agent => (
+                              <span key={`${pkg.packageName}:${agent}`} className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', agent)}`}>
+                                {agent}
+                              </span>
+                            ))}
+                          </div>
+                          <div className="agent-package-version-line">
+                            <span>Installed: {pkg.installedVersion || '-'}</span>
+                            <span>Latest: {pkg.latestVersion || '-'}</span>
+                          </div>
+                          {pkg.error ? (
+                            <div className="settings-metadata-error">{pkg.error}</div>
+                          ) : null}
+                        </div>
+                        {action ? (
+                          <button
+                            type="button"
+                            className={`agent-package-action-btn ${action === 'uninstall' ? 'danger' : ''}`}
+                            disabled={pending || agentPackageAnyTaskRunning}
+                            onClick={() => requestAgentPackageAction(action, card.hubId, pkg)}
+                          >
+                            {pending ? 'Running...' : agentPackageActionLabel(action)}
+                          </button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </>,
+      <button
+        type="button"
+        className="token-stats-refresh-btn token-stats-refresh-inline"
+        onClick={() => {
+          refreshAgentPackages().catch(() => undefined);
+        }}
+        disabled={agentPackagesLoading}
+      >
+        {agentPackagesLoading ? 'Refreshing...' : 'Refresh'}
+      </button>,
+    );
+
   const renderTokenStatsSettingsDetail = () =>
     renderSettingsDetailShell(
       'Token Stats',
@@ -7694,6 +8034,9 @@ function App() {
     );
 
   const renderSettingsContent = (showSectionTitle: boolean) => {
+    if (settingsDetailView === 'update') {
+      return renderUpdateSettingsDetail();
+    }
     if (settingsDetailView === 'ccSwitch') {
       return renderCCSwitchSettingsDetail();
     }
@@ -7737,27 +8080,6 @@ function App() {
             onChange={e => setHideToolCalls(e.target.checked)}
           />
         </label>
-        <button
-          type="button"
-          className="settings-row settings-detail-row"
-          onClick={() => {
-            setSettingsDetailView('ccSwitch');
-          }}
-        >
-          <span>CC Switch</span>
-          <span className="codicon codicon-chevron-right" />
-        </button>
-        <button
-          type="button"
-          className="settings-row settings-detail-row"
-          onClick={() => {
-            setTokenStatsError('');
-            setSettingsDetailView('tokenStats');
-          }}
-        >
-          <span>Token Stats</span>
-          <span className="codicon codicon-chevron-right" />
-        </button>
         </>
         ))}
         {renderSettingsSection('Code Display', (
@@ -7862,8 +8184,39 @@ function App() {
         </label>
         </>
         ))}
-        {renderSettingsSection('Storage', (
+        {renderSettingsSection('More', (
         <>
+        <button
+          type="button"
+          className="settings-row settings-detail-row"
+          onClick={() => {
+            setSettingsDetailView('update');
+          }}
+        >
+          <span>Update</span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
+        <button
+          type="button"
+          className="settings-row settings-detail-row"
+          onClick={() => {
+            setTokenStatsError('');
+            setSettingsDetailView('tokenStats');
+          }}
+        >
+          <span>Token Stats</span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
+        <button
+          type="button"
+          className="settings-row settings-detail-row"
+          onClick={() => {
+            setSettingsDetailView('ccSwitch');
+          }}
+        >
+          <span>CC Switch</span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
         <button
           type="button"
           className="settings-row settings-detail-row"
@@ -9817,6 +10170,10 @@ function App() {
   ) : (
     <span className="codicon codicon-refresh" />
   );
+  const isShortcutSettingsDetailActive = sidebarSettingsOpen && (
+    settingsDetailView === 'update' ||
+    settingsDetailView === 'tokenStats'
+  );
 
   const desktopActivityBar = isWide ? (
     <nav className="desktop-activity-bar" aria-label="Workspace navigation">
@@ -9866,7 +10223,25 @@ function App() {
         </button>
         <button
           type="button"
-          className={`desktop-activity-button${sidebarSettingsOpen ? ' active' : ''}`}
+          className={`desktop-activity-button${sidebarSettingsOpen && settingsDetailView === 'update' ? ' active' : ''}`}
+          onClick={() => openSettingsDetail('update')}
+          title="Update"
+          aria-label="Update"
+        >
+          <span className="codicon codicon-cloud-download" />
+        </button>
+        <button
+          type="button"
+          className={`desktop-activity-button${sidebarSettingsOpen && settingsDetailView === 'tokenStats' ? ' active' : ''}`}
+          onClick={() => openSettingsDetail('tokenStats')}
+          title="Token Stats"
+          aria-label="Token Stats"
+        >
+          <span className="codicon codicon-pulse" />
+        </button>
+        <button
+          type="button"
+          className={`desktop-activity-button${sidebarSettingsOpen && !isShortcutSettingsDetailActive ? ' active' : ''}`}
           onClick={handleDesktopSettingsSelect}
           title="Settings"
           aria-label="Settings"
@@ -9987,28 +10362,44 @@ function App() {
   ) : null;
 
   const archiveTarget = confirmTarget?.kind === 'archive' ? confirmTarget : null;
+  const npmPackageTarget = confirmTarget?.kind === 'npmPackage' ? confirmTarget : null;
+  const npmPackageConfirmPendingKey = npmPackageTarget
+    ? agentPackageActionKey(npmPackageTarget.hubId, npmPackageTarget.packageName)
+    : '';
   const confirmBusy = archiveTarget
     ? chatArchivingSessionId === archiveTarget.sessionId
-    : false;
+    : npmPackageTarget
+      ? agentPackageActionPendingKey === npmPackageConfirmPendingKey
+      : false;
   const confirmTitle = confirmTarget?.kind === 'clearCache'
     ? 'Clear local cache?'
+    : npmPackageTarget
+      ? `${agentPackageActionLabel(npmPackageTarget.action)} package?`
     : 'Archive session?';
   const confirmName = confirmTarget?.kind === 'clearCache'
     ? 'Token and server address will be preserved.'
+    : npmPackageTarget
+      ? npmPackageTarget.displayName || npmPackageTarget.packageName
     : archiveTarget?.title || 'Untitled session';
   const confirmCopy = confirmTarget?.kind === 'clearCache'
     ? 'The app will reload after local cached workspace data is cleared.'
+    : npmPackageTarget
+      ? `Hub: ${npmPackageTarget.hubId}. Package: ${npmPackageTarget.packageName}. Installed: ${npmPackageTarget.installedVersion || '-'}. Target: ${npmPackageTarget.action === 'uninstall' ? 'remove deprecated package' : npmPackageTarget.latestVersion || 'latest'}. Restart WheelMaker or start a new agent session for changes to take effect.`
     : 'Archived sessions leave the chat list.';
   const confirmIcon = confirmTarget?.kind === 'clearCache'
     ? 'codicon-trash'
+    : npmPackageTarget
+      ? npmPackageTarget.action === 'uninstall' ? 'codicon-trash' : 'codicon-cloud-download'
     : 'codicon-archive';
   const confirmPrimaryLabel = confirmTarget?.kind === 'clearCache'
     ? 'Clear Cache'
+    : npmPackageTarget
+      ? agentPackageActionLabel(npmPackageTarget.action)
     : 'Archive';
-  const confirmPrimaryClassName = confirmTarget?.kind === 'clearCache'
+  const confirmPrimaryClassName = confirmTarget?.kind === 'clearCache' || npmPackageTarget?.action === 'uninstall'
     ? 'app-confirm-btn primary danger'
     : 'app-confirm-btn primary';
-  const confirmIconClassName = confirmTarget?.kind === 'clearCache'
+  const confirmIconClassName = confirmTarget?.kind === 'clearCache' || npmPackageTarget?.action === 'uninstall'
     ? 'app-confirm-icon danger'
     : 'app-confirm-icon';
   const handleConfirmPrimary = () => {
@@ -10017,6 +10408,10 @@ function App() {
     }
     if (confirmTarget.kind === 'clearCache') {
       clearLocalCache();
+      return;
+    }
+    if (confirmTarget.kind === 'npmPackage') {
+      handleAgentPackageConfirmedAction(confirmTarget).catch(() => undefined);
       return;
     }
     handleArchiveProjectSession(

@@ -77,6 +77,7 @@ type Reporter struct {
 
 	connectionEpoch int64
 	monitorCore     *MonitorCore
+	npmCommand      *NPMCommand
 }
 
 // NewReporter creates a Reporter.
@@ -122,6 +123,7 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		sessionByID:  make(map[string]SessionHandler),
 		pending:      make(map[int64]chan envelope),
 		monitorCore:  NewMonitorCore(monitorBase),
+		npmCommand:   NewNPMCommand(),
 	}
 	r.requestSeq.Store(2)
 	return r
@@ -320,6 +322,8 @@ func (r *Reporter) handleRegistryRequest(conn *websocket.Conn, in envelope) {
 		r.replyMonitorDB(conn, in)
 	case "monitor.action":
 		r.replyMonitorAction(conn, in)
+	case "cmd.npm":
+		r.replyCmdNPM(conn, in)
 	case "fs.list":
 		r.replyFSList(conn, in)
 	case "fs.info":
@@ -638,6 +642,25 @@ func (r *Reporter) replyMonitorAction(conn *websocket.Conn, req envelope) {
 		return
 	}
 	_ = r.writeJSON(conn, "->", envelope{RequestID: req.RequestID, Type: "response", Method: req.Method, Payload: rp.MustRaw(map[string]any{"ok": true, "action": action})})
+}
+
+func (r *Reporter) replyCmdNPM(conn *websocket.Conn, req envelope) {
+	handler := r.npmCommand
+	if handler == nil {
+		handler = NewNPMCommand()
+		r.npmCommand = handler
+	}
+	payload, cmdErr := handler.Handle(context.Background(), req.Payload)
+	if cmdErr != nil {
+		_ = r.writeError(conn, req.RequestID, cmdErr.Code, cmdErr.Message)
+		return
+	}
+	_ = r.writeJSON(conn, "->", envelope{
+		RequestID: req.RequestID,
+		Type:      "response",
+		Method:    req.Method,
+		Payload:   rp.MustRaw(payload),
+	})
 }
 
 func (r *Reporter) replyChat(conn *websocket.Conn, req envelope) {

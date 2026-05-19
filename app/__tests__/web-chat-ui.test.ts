@@ -778,7 +778,7 @@ describe('web chat integration', () => {
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
-    expect(mainTsx).toContain("type SettingsDetailView = 'tokenStats' | 'ccSwitch' | 'database' | null;");
+    expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'tokenStats' | 'ccSwitch' | 'database' | null;");
     expect(mainTsx).toContain('const [settingsDetailView, setSettingsDetailView] = useState<SettingsDetailView>(null);');
     expect(mainTsx).toContain('const [mobileProjectActionMenu, setMobileProjectActionMenu] = useState<MobileProjectActionMenuState | null>(null);');
     expect(mainTsx).toContain('const refreshMobileChatProjectSessions = async () => {');
@@ -799,14 +799,14 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("renderSettingsSection('Appearance'");
     expect(mainTsx).toContain("renderSettingsSection('Chat'");
     expect(mainTsx).toContain("renderSettingsSection('Code Display'");
-    expect(mainTsx).toContain("renderSettingsSection('Storage'");
+    expect(mainTsx).toContain("renderSettingsSection('More'");
     const appearanceSettingsIndex = mainTsx.indexOf("renderSettingsSection('Appearance'");
     const chatSettingsIndex = mainTsx.indexOf("renderSettingsSection('Chat'");
     const codeDisplaySettingsIndex = mainTsx.indexOf("renderSettingsSection('Code Display'");
-    const storageSettingsIndex = mainTsx.indexOf("renderSettingsSection('Storage'");
+    const moreSettingsIndex = mainTsx.indexOf("renderSettingsSection('More'");
     expect(appearanceSettingsIndex).toBeLessThan(chatSettingsIndex);
     expect(chatSettingsIndex).toBeLessThan(codeDisplaySettingsIndex);
-    expect(codeDisplaySettingsIndex).toBeLessThan(storageSettingsIndex);
+    expect(codeDisplaySettingsIndex).toBeLessThan(moreSettingsIndex);
     expect(mainTsx).toContain("setSettingsDetailView('database');");
     expect(mainTsx).toContain("settingsDetailView === 'database'");
     expect(mainTsx).toContain('renderDatabaseSettingsDetail()');

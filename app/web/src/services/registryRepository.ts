@@ -12,6 +12,7 @@ import type {
   RegistryGitCommitFile,
   RegistryGitFileDiff,
   RegistryGitStatus,
+  RegistryNpmCommandResponse,
   RegistryProject,
   RegistryProjectAgentProfile,
   RegistryResumableSession,
@@ -658,6 +659,48 @@ export class RegistryRepository {
       timeoutMs: 45000,
     });
     return (resp.payload ?? {}) as RegistryTokenScanResult;
+  }
+
+  async scanNpmPackages(hubId: string): Promise<RegistryNpmCommandResponse> {
+    const resp = await this.client.request({
+      method: 'cmd.npm',
+      payload: {action: 'scan', hubId},
+      timeoutMs: 60000,
+    });
+    return (resp.payload ?? {}) as RegistryNpmCommandResponse;
+  }
+
+  async installNpmPackage(hubId: string, packageName: string, version = 'latest'): Promise<RegistryNpmCommandResponse> {
+    const resp = await this.client.request({
+      method: 'cmd.npm',
+      payload: {
+        action: 'install',
+        hubId,
+        packageName,
+        version,
+      },
+    });
+    return (resp.payload ?? {}) as RegistryNpmCommandResponse;
+  }
+
+  async uninstallNpmPackage(hubId: string, packageName: string): Promise<RegistryNpmCommandResponse> {
+    const resp = await this.client.request({
+      method: 'cmd.npm',
+      payload: {
+        action: 'uninstall',
+        hubId,
+        packageName,
+      },
+    });
+    return (resp.payload ?? {}) as RegistryNpmCommandResponse;
+  }
+
+  async queryNpmPackageTask(hubId: string): Promise<RegistryNpmCommandResponse> {
+    const resp = await this.client.request({
+      method: 'cmd.npm',
+      payload: {action: 'query', hubId},
+    });
+    return (resp.payload ?? {}) as RegistryNpmCommandResponse;
   }
 
   close(): void {

@@ -279,6 +279,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			_ = s.writeResponse(state.peer, in.RequestID, in.Method, "", map[string]any{"ok": true})
 		case "monitor.status", "monitor.log", "monitor.db", "monitor.action":
 			s.handleMonitorForwardRequest(state.peer, state, in)
+		case "cmd.npm":
+			s.handleHubCommandForwardRequest(state.peer, state, in)
 		case "chat.send",
 			"session.list", "session.read", "session.new", "session.resume.list", "session.resume.import", "session.reload", "session.archive", "session.send", "session.cancel", "session.markRead", "session.setConfig", "session.token.providers", "session.token.deepseek.stats", "session.token.scan",
 			"fs.list", "fs.info", "fs.read", "fs.search", "fs.grep",
@@ -327,6 +329,7 @@ func methodAllowed(role string, method string) bool {
 		return method == "registry.reportProjects" || method == "registry.updateProject" || method == "registry.session.updated" || method == "registry.session.message" || method == "hub.ping"
 	case "client":
 		return method == "project.list" || method == "project.syncCheck" || method == "batch" ||
+			method == "cmd.npm" ||
 			method == "chat.send" || strings.HasPrefix(method, "session.") ||
 			strings.HasPrefix(method, "fs.") || strings.HasPrefix(method, "git.")
 	case "monitor":
@@ -615,6 +618,69 @@ func (s *Server) handleMonitorForwardRequest(clientPeer *peerConn, state *connec
 	_ = clientPeer.write(resp)
 }
 
+func (s *Server) handleHubCommandForwardRequest(clientPeer *peerConn, state *connectionState, in envelope) {
+	resp := s.executeHubCommandRequest(state, in)
+	resp.RequestID = in.RequestID
+	_ = clientPeer.write(resp)
+}
+
+func (s *Server) executeHubCommandRequest(state *connectionState, in envelope) envelope {
+	type hubCommandPayload struct {
+		Action string `json:"action,omitempty"`
+		HubID  string `json:"hubId"`
+	}
+	var payload hubCommandPayload
+	if err := decodePayload(in.Payload, &payload); err != nil {
+		return s.errorEnvelope(in.Method, codeInvalidArgument, "invalid cmd.npm payload", nil)
+	}
+	hubID := strings.TrimSpace(payload.HubID)
+	if hubID == "" {
+		return s.errorEnvelope(in.Method, codeInvalidArgument, "hubId is required", nil)
+	}
+	if state.scopeHubID != "" && hubID != state.scopeHubID {
+		return s.errorEnvelope(in.Method, codeForbidden, "hub out of client scope", map[string]any{"hubId": hubID})
+	}
+
+	s.mu.RLock()
+	hub := s.hubs[hubID]
+	hubPeer := s.hubPeers[hubID]
+	s.mu.RUnlock()
+	if hub.HubID == "" {
+		return s.errorEnvelope(in.Method, codeNotFound, "hub not found", map[string]any{"hubId": hubID})
+	}
+	if hubPeer == nil {
+		return s.errorEnvelope(in.Method, codeUnavailable, "hub offline", map[string]any{"hubId": hubID})
+	}
+
+	forwardID := s.nextForwardID.Add(1)
+	waitCh := hubPeer.registerPending(forwardID)
+	err := hubPeer.write(envelope{
+		RequestID: forwardID,
+		Type:      "request",
+		Method:    in.Method,
+		Payload:   in.Payload,
+	})
+	if err != nil {
+		hubPeer.resolvePending(forwardID, envelope{})
+		return s.errorEnvelope(in.Method, codeInternal, "forward request write failed", nil)
+	}
+
+	timeout := defaultRequestTimeout
+	if strings.TrimSpace(payload.Action) == "scan" {
+		timeout = 60 * time.Second
+	}
+	select {
+	case resp, ok := <-waitCh:
+		if !ok {
+			return s.errorEnvelope(in.Method, codeInternal, "hub disconnected", nil)
+		}
+		return resp
+	case <-time.After(timeout):
+		hubPeer.resolvePending(forwardID, envelope{})
+		return s.errorEnvelope(in.Method, codeTimeout, "hub response timeout", nil)
+	}
+}
+
 func (s *Server) executeMonitorRequest(_ *connectionState, in envelope) envelope {
 	var payload monitorHubRefPayload
 	if err := decodePayload(in.Payload, &payload); err != nil {
@@ -734,6 +800,11 @@ func (s *Server) executeBatchRequest(state *connectionState, in envelope) envelo
 				"ok": true,
 			}),
 		}
+	case "cmd.npm":
+		if state.role != "client" {
+			return s.errorEnvelope(in.Method, codeForbidden, "method not allowed for role", map[string]any{"role": state.role})
+		}
+		return s.executeHubCommandRequest(state, in)
 	default:
 		return s.executeClientRequest(state, in)
 	}

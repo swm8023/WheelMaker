@@ -192,7 +192,6 @@ check_dependencies() {
   require_command go "Install Go 1.26+."
   require_command node "Install Node.js 22.11.0+."
   require_command npm "Install Node.js 22.11.0+ with npm."
-  require_command npx "Install npm/npx."
   if [[ "$TARGET_GOOS" == "darwin" ]]; then
     require_command launchctl "launchctl should be available on macOS."
   else
@@ -273,6 +272,34 @@ pull_latest() {
   step "git pull --ff-only origin ${branch}"
   git pull --ff-only origin "$branch"
   popd >/dev/null
+}
+
+ensure_acp_dependencies() {
+  if [[ "$SKIP_DEPS" -eq 1 ]]; then
+    step "skip ACP dependency install/check"
+    return
+  fi
+  require_command npm "Install Node.js 22.11.0+ with npm."
+
+  local deprecated_claude_pkg="@zed-industries/claude-agent-acp"
+  if npm list -g --depth=0 "$deprecated_claude_pkg" 2>/dev/null | grep -F "$deprecated_claude_pkg" >/dev/null 2>&1; then
+    step "remove deprecated package: ${deprecated_claude_pkg}"
+    npm uninstall -g "$deprecated_claude_pkg"
+  fi
+
+  local missing=()
+  if ! command -v codex-acp >/dev/null 2>&1; then
+    missing+=("@zed-industries/codex-acp")
+  fi
+  if ! command -v claude-agent-acp >/dev/null 2>&1; then
+    missing+=("@agentclientprotocol/claude-agent-acp")
+  fi
+  if [[ "${#missing[@]}" -eq 0 ]]; then
+    step "ACP dependencies already installed"
+    return
+  fi
+  step "install ACP dependencies: ${missing[*]}"
+  npm install -g "${missing[@]}"
 }
 
 ensure_app_dependencies() {
@@ -636,6 +663,7 @@ refresh() {
   [[ -d "$SERVER_ROOT" ]] || die "server directory not found: ${SERVER_ROOT}"
   check_dependencies
   pull_latest
+  ensure_acp_dependencies
   ensure_app_dependencies
 
   local output_hub="${BUILD_OUTPUT_ROOT}/wheelmaker"

@@ -8,6 +8,7 @@ import type {
   RegistryGitCommitFile,
   RegistryGitFileDiff,
   RegistryGitStatus,
+  RegistryNpmCommandResponse,
   RegistryProject,
   RegistrySessionConfigOption,
   RegistrySessionMessage,
@@ -408,6 +409,34 @@ export class RegistryWorkspaceService {
     }
     const targetProjectId = (projectId || '').trim() || this.session.selectedProjectId;
     return this.repository.scanTokenStats(targetProjectId);
+  }
+
+  async scanNpmPackages(hubId: string): Promise<RegistryNpmCommandResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.scanNpmPackages(hubId);
+  }
+
+  async installNpmPackage(hubId: string, packageName: string, version = 'latest'): Promise<RegistryNpmCommandResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.installNpmPackage(hubId, packageName, version);
+  }
+
+  async uninstallNpmPackage(hubId: string, packageName: string): Promise<RegistryNpmCommandResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.uninstallNpmPackage(hubId, packageName);
+  }
+
+  async queryNpmPackageTask(hubId: string): Promise<RegistryNpmCommandResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.queryNpmPackageTask(hubId);
   }
 
   onEvent(listener: (event: RegistryEnvelope) => void): () => void {

@@ -19,7 +19,6 @@ type ACPProviderPreset struct {
 	Name                   string
 	BinaryName             string
 	Args                   []string
-	NPMPackage             string
 	MissingPathErrTemplate string
 	SkillProjectDirs       []string
 	SkillProjectParentDirs []string
@@ -32,7 +31,6 @@ var (
 	CodexACPProviderPreset = ACPProviderPreset{
 		Name:             "codex",
 		BinaryName:       "codex-acp",
-		NPMPackage:       "@zed-industries/codex-acp",
 		SkillProjectDirs: []string{".agents/skills"},
 		SkillUserDirs:    []string{"~/.codex/skills", "~/.agents/skills", "~/.copilot/skills"},
 		SkillPluginDirGlobs: []string{
@@ -42,7 +40,6 @@ var (
 	ClaudeACPProviderPreset = ACPProviderPreset{
 		Name:                   "claude",
 		BinaryName:             "claude-agent-acp",
-		NPMPackage:             "@agentclientprotocol/claude-agent-acp",
 		SkillProjectDirs:       []string{".claude/skills"},
 		SkillProjectParentDirs: []string{".claude/skills"},
 		SkillUserDirs:          []string{"~/.claude/skills"},
@@ -129,14 +126,6 @@ func (p *acpProvider) Name() string { return p.preset.Name }
 
 func (p *acpProvider) Launch() (string, []string, []string, error) {
 	defaultArgs := cloneArgs(p.preset.Args)
-
-	if p.preset.NPMPackage != "" {
-		npxPath, err := p.lookPath("npx")
-		if err != nil {
-			return "", nil, nil, fmt.Errorf("%s: npx not found: %w", p.preset.Name, err)
-		}
-		return npxPath, []string{"--yes", p.preset.NPMPackage}, nil, nil
-	}
 
 	exePath, err := p.resolveBinary(p.preset.BinaryName, "")
 	if err != nil {
