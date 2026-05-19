@@ -1,5 +1,6 @@
 import {createRegistryRepository, type RegistryRepository} from './registryRepository';
 import {RegistryRequestError} from './registryClient';
+import type {RegistryDebugSink} from './registryClient';
 import type {
   RegistryEnvelope,
   RegistryFsInfo,
@@ -36,8 +37,10 @@ export class RegistryWorkspaceService {
   private unsubscribeRepositoryEvent: (() => void) | null = null;
   private unsubscribeRepositoryClose: (() => void) | null = null;
 
+  constructor(private readonly debugSink?: RegistryDebugSink) {}
+
   async connect(wsUrl: string, token: string): Promise<WorkspaceSession> {
-    const repository = createRegistryRepository();
+    const repository = createRegistryRepository(this.debugSink);
     try {
       await repository.initialize(wsUrl, token);
       const previousRepository = this.repository;

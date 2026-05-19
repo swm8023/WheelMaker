@@ -53,6 +53,9 @@ import {useChatLayoutMetrics} from './chat/chatLayoutMetrics';
 import {createChatActiveRuntimeSet} from './chat/chatActiveRuntimeSet';
 import {ChatVirtuosoTurnList, type ChatVirtuosoTurnListHandle} from './chat/ChatVirtuosoTurnList';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
+import {RegistryDebugPanel} from './debug/RegistryDebugPanel';
+import {createRegistryDebugStore} from './debug/registryDebug';
+import type {RegistryDebugRecord} from './debug/registryDebug';
 import {
   extractChatConfirmationReply,
   extractChatOptionReplies,
@@ -380,7 +383,8 @@ function ThinkingBlock({ content, isStreaming }: ThinkingBlockProps) {
 }
 
 const pwaFoundation = initializePWAFoundation();
-const service = new RegistryWorkspaceService();
+const registryDebugStore = createRegistryDebugStore();
+const service = new RegistryWorkspaceService(registryDebugStore.recordCaptureEvent);
 const workspaceStore = new WorkspaceStore();
 const workspaceController = new WorkspaceController(service, workspaceStore);
 const setiTheme = setiThemeJson as SetiTheme;
@@ -2231,6 +2235,20 @@ function App() {
       ? persistedGlobal.hideToolCalls
       : false,
   );
+  const [registryDebug, setRegistryDebug] = useState(
+    typeof persistedGlobal.registryDebug === 'boolean'
+      ? persistedGlobal.registryDebug
+      : false,
+  );
+  const [registryDebugPanelOpen, setRegistryDebugPanelOpen] = useState(
+    typeof persistedGlobal.registryDebug === 'boolean'
+      ? persistedGlobal.registryDebug
+      : false,
+  );
+  const [registryDebugRecords, setRegistryDebugRecords] = useState(registryDebugStore.getRecords());
+  const [selectedRegistryDebugRecordId, setSelectedRegistryDebugRecordId] = useState<number | null>(null);
+  const [selectedRegistryDebugSessionId, setSelectedRegistryDebugSessionId] = useState('All');
+  const [registryDebugIncludeMultiSessionRecords, setRegistryDebugIncludeMultiSessionRecords] = useState(false);
   const [gestureNavigation, setGestureNavigation] = useState(
     typeof persistedGlobal.gestureNavigation === 'boolean'
       ? persistedGlobal.gestureNavigation
@@ -3682,6 +3700,29 @@ function App() {
   }, [chatConfigMenuOptionId, chatConfigDisplay.visible]);
 
   useEffect(() => {
+    return registryDebugStore.subscribe((records: RegistryDebugRecord[]) => {
+      setRegistryDebugRecords(records);
+      setSelectedRegistryDebugRecordId(current =>
+        current !== null && records.some(record => record.id === current)
+          ? current
+          : records[records.length - 1]?.id ?? null,
+      );
+    });
+  }, []);
+
+  useEffect(() => {
+    registryDebugStore.setEnabled(registryDebug);
+    if (registryDebug) {
+      setRegistryDebugPanelOpen(true);
+    } else {
+      setRegistryDebugPanelOpen(false);
+      setSelectedRegistryDebugRecordId(null);
+      setSelectedRegistryDebugSessionId('All');
+      setRegistryDebugIncludeMultiSessionRecords(false);
+    }
+  }, [registryDebug]);
+
+  useEffect(() => {
     workspaceStore.rememberGlobalState({
       address,
       token,
@@ -3694,6 +3735,7 @@ function App() {
       wrapLines,
       showLineNumbers,
       hideToolCalls,
+      registryDebug,
       gestureNavigation,
       useLatestPromptTitle,
       tab,
@@ -3715,6 +3757,7 @@ function App() {
     wrapLines,
     showLineNumbers,
     hideToolCalls,
+    registryDebug,
     gestureNavigation,
     useLatestPromptTitle,
     tab,
@@ -8736,6 +8779,29 @@ function App() {
         </label>
         </>
         ))}
+        {renderSettingsSection('Debug', (
+        <>
+        <label className="settings-row sidebar-setting-row">
+          <span>Debug</span>
+          <input
+            type="checkbox"
+            checked={registryDebug}
+            onChange={event => setRegistryDebug(event.target.checked)}
+          />
+        </label>
+        <button
+          type="button"
+          className="settings-row settings-detail-row"
+          disabled={!registryDebug}
+          onClick={() => {
+            setRegistryDebugPanelOpen(true);
+          }}
+        >
+          <span>Open</span>
+          <span className="codicon codicon-debug-alt" />
+        </button>
+        </>
+        ))}
         {renderSettingsSection('Code Display', (
         <>
         <label className="settings-row sidebar-setting-row">
@@ -11244,6 +11310,19 @@ function App() {
       </div>
     </div>
   ) : null;
+  const registryDebugPanel = isWide && registryDebug && registryDebugPanelOpen ? (
+    <RegistryDebugPanel
+      records={registryDebugRecords}
+      selectedRecordId={selectedRegistryDebugRecordId}
+      onSelectedRecordIdChange={setSelectedRegistryDebugRecordId}
+      selectedSessionId={selectedRegistryDebugSessionId}
+      onSelectedSessionIdChange={setSelectedRegistryDebugSessionId}
+      includeMultiSessionRecords={registryDebugIncludeMultiSessionRecords}
+      onIncludeMultiSessionRecordsChange={setRegistryDebugIncludeMultiSessionRecords}
+      onClear={() => registryDebugStore.clear()}
+      onClose={() => setRegistryDebugPanelOpen(false)}
+    />
+  ) : null;
 
   return (
     <>
@@ -11261,6 +11340,7 @@ function App() {
         drawerOpen={drawerOpen}
         onCloseDrawer={() => setDrawerOpen(false)}
       />
+      {registryDebugPanel}
       {appConfirmDialog}
     </>
   );

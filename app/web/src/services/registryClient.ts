@@ -1,4 +1,7 @@
+import type {RegistryDebugCaptureEvent} from '../debug/registryDebug';
 import type {RegistryConnectInitPayload, RegistryEnvelope, RegistryErrorPayload} from '../types/registry';
+
+export type RegistryDebugSink = (event: RegistryDebugCaptureEvent) => void;
 
 type PendingRequest = {
   resolve: (value: RegistryEnvelope) => void;
@@ -38,12 +41,13 @@ export class RegistryClient {
   private readonly closeListeners = new Set<() => void>();
   private closing = false;
 
-  constructor(private readonly timeoutMs = 8000) {}
+  constructor(private readonly timeoutMs = 8000, private readonly debugSink?: RegistryDebugSink) {}
 
   async connect(url: string): Promise<void> {
     if (this.ws?.readyState === WebSocket.OPEN) {
       return;
     }
+    this.emitDebug({kind: 'lifecycle', lifecycle: {phase: 'connect_start', url}});
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(url);
       let settled = false;
@@ -77,12 +81,23 @@ export class RegistryClient {
         clearTimeout(connectTimer);
         this.ws = ws;
         this.bind(ws);
+        this.emitDebug({kind: 'lifecycle', lifecycle: {phase: 'connect_open', url}});
         resolve();
       };
       ws.onerror = () => {
         sawErrorEvent = true;
+        this.emitDebug({kind: 'lifecycle', lifecycle: {phase: 'connect_error', url}});
       };
       ws.onclose = event => {
+        this.emitDebug({
+          kind: 'lifecycle',
+          lifecycle: {
+            phase: 'connect_close',
+            url,
+            code: event.code,
+            reason: event.reason,
+          },
+        });
         if (!settled) {
           const suffix = sawErrorEvent ? ' (after websocket error event)' : '';
           fail(
@@ -119,13 +134,15 @@ export class RegistryClient {
     };
 
     const timeoutMs = args.timeoutMs ?? this.timeoutMs;
+    const raw = JSON.stringify(envelope);
     return new Promise<RegistryEnvelope>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
         reject(new Error(`registry request timed out (${timeoutMs}ms): ${args.method}`));
       }, timeoutMs);
       this.pending.set(requestId, {resolve, reject, timer});
-      this.ws?.send(JSON.stringify(envelope));
+      this.emitDebug({kind: 'outbound', envelope, raw});
+      this.ws?.send(raw);
     });
   }
 
@@ -136,7 +153,11 @@ export class RegistryClient {
       pending.reject(new Error(`connection closed before response: ${id}`));
     }
     this.pending.clear();
-    this.ws?.close();
+    const closingWs = this.ws;
+    closingWs?.close();
+    if (closingWs) {
+      this.emitDebug({kind: 'lifecycle', lifecycle: {phase: 'connect_close'}});
+    }
     this.ws = null;
     this.emitClosed();
     this.closing = false;
@@ -162,9 +183,11 @@ export class RegistryClient {
       let envelope: RegistryEnvelope;
       try {
         envelope = JSON.parse(event.data) as RegistryEnvelope;
-      } catch {
+      } catch (error) {
+        this.emitDebug({kind: 'parse_error', raw: event.data, error: error instanceof Error ? error.message : String(error)});
         return;
       }
+      this.emitDebug({kind: 'inbound', envelope, raw: event.data});
       if (envelope.type === 'event') {
         this.emitEvent(envelope);
         return;
@@ -183,6 +206,7 @@ export class RegistryClient {
     };
     ws.onclose = () => this.handleSocketClosed(ws);
     ws.onerror = () => {
+      this.emitDebug({kind: 'lifecycle', lifecycle: {phase: 'connect_error'}});
       // Error events may fire transiently; wait for onclose before treating as disconnect.
       if (ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) {
         this.handleSocketClosed(ws);
@@ -202,10 +226,15 @@ export class RegistryClient {
     }
   }
 
+  private emitDebug(event: RegistryDebugCaptureEvent): void {
+    this.debugSink?.(event);
+  }
+
   private handleSocketClosed(ws: WebSocket): void {
     if (this.ws !== ws) {
       return;
     }
+    this.emitDebug({kind: 'lifecycle', lifecycle: {phase: 'connect_close'}});
     this.ws = null;
     for (const [id, pending] of this.pending.entries()) {
       clearTimeout(pending.timer);

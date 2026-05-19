@@ -1,4 +1,4 @@
-import { RegistryClient } from './registryClient';
+import { RegistryClient, type RegistryDebugSink } from './registryClient';
 import {
   decodeSessionTurnToMessage,
   normalizeSessionReadPayload,
@@ -740,8 +740,8 @@ export class RegistryRepository {
   }
 }
 
-export const createRegistryRepository = (): RegistryRepository => {
-  return new RegistryRepository(new RegistryClient());
+export const createRegistryRepository = (debugSink?: RegistryDebugSink): RegistryRepository => {
+  return new RegistryRepository(new RegistryClient(8000, debugSink));
 };
 
 export type RegistryResponse<TPayload> = RegistryEnvelope<TPayload>;
