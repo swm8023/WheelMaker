@@ -5,7 +5,7 @@ Status: Approved
 
 ## Goal
 
-Add a Settings `Update` detail page that shows and manages WheelMaker agent-related global npm packages across online hubs.
+Add a Settings `Update` detail page that shows and manages WheelMaker agent-related global npm packages across hubs returned by `project.list.hubs`.
 
 The tool should show installed and latest versions, install missing supported packages, update stale supported packages, and uninstall known deprecated packages. It must stay a controlled maintenance surface, not a remote shell.
 
@@ -35,7 +35,7 @@ The current `codex` and `claude` providers default to `npx --yes <package>`. The
 - Do not add generic command execution.
 - Do not accept raw command, raw args, cwd, or env from the client.
 - Do not add config-driven package allowlists in the first version.
-- Do not let registry persist npm task state or aggregate scan results.
+- Do not let registry persist npm operation state or aggregate scan results.
 - Do not hot-refresh the hub provider registry after package installation.
 - Do not add mobile quick shortcuts outside Settings.
 - Do not manage PATH binaries, npx cache, Homebrew, Scoop, or non-npm package sources.
@@ -50,7 +50,7 @@ Add one hub-level controlled command method:
 
 The method is available to `client` role through an explicit allowlist. Registry must not allow `cmd.*` by prefix. Unknown `cmd.*` methods remain forbidden or unsupported.
 
-`cmd.npm` is not project-scoped. Each request carries a `hubId` in the payload. Registry validates that the target hub is online, then forwards the request to that hub. Registry does not fan out, does not aggregate results, does not generate task IDs, and does not store task state.
+`cmd.npm` is not project-scoped. Each request carries a `hubId` in the payload. Registry validates that the target hub is connected, then forwards the request to that hub. Registry does not fan out, does not aggregate results, does not generate task IDs, and does not store operation state.
 
 ### Payload
 
@@ -224,8 +224,9 @@ Deprecated packages are shown only when globally installed. They can only be uni
 
 ### Status Values
 
-Package and task statuses use snake_case:
+Package and operation statuses use snake_case:
 
+- `checking_latest`
 - `not_installed`
 - `up_to_date`
 - `update_available`
@@ -338,7 +339,7 @@ Do not force-install `@openai/codex`, `@anthropic-ai/claude-code`, `@github/copi
 - Unsupported `cmd.npm.action`: return `INVALID_ARGUMENT`.
 - Unsupported `packageName`: return `FORBIDDEN` or `INVALID_ARGUMENT`.
 - Unsupported `version`: return `INVALID_ARGUMENT`.
-- Hub task already running: return `CONFLICT`.
+- Hub operation already running: return `CONFLICT`.
 - `npm list` failure during scan: return hub-level scan error with no package rows.
 - `npm view` failure for one runtime package: keep the hub scan successful and mark that package as `latest_unknown` or `checking_failed` with an error summary.
 
@@ -368,15 +369,14 @@ Reporter and hub command tests:
 - reporter dispatches `cmd.npm` to the hub npm command handler.
 - scan returns runtime and deprecated package rows from fake npm data.
 - `npm list` failure produces a hub-level error.
-- node/npm/prefix failures become hub warnings when package data is available.
-- runtime package install accepts and starts a background task.
-- deprecated package uninstall accepts and starts a background task.
+- runtime package install accepts and starts a background operation.
+- deprecated package uninstall accepts and starts a background operation.
 - unsupported package names are rejected.
 - deprecated packages cannot be installed.
 - runtime packages cannot be uninstalled.
-- concurrent hub npm tasks return `CONFLICT`.
-- query returns `task: null` before any task exists.
-- failed task summaries follow the 500-character stderr/stdout fallback rule.
+- concurrent hub npm operations return `CONFLICT`.
+- scan starts `scan_latest` when latest cache is missing or expired.
+- failed operation summaries follow the 500-character stderr/stdout fallback rule.
 
 ### App
 
@@ -424,7 +424,7 @@ Update page behavior tests:
 - All package management is based on global npm package state only.
 - Runtime package names are hard-coded and cannot be supplied arbitrarily.
 - Deprecated package uninstall is supported only for hard-coded deprecated packages.
-- Hub allows only one npm task at a time.
+- Hub allows only one npm operation at a time.
 - Registry remains a simple `hubId` forwarder for `cmd.npm`.
 - `cmd.npm` is explicitly allowlisted; generic `cmd.*` is not exposed.
 - Desktop activity bar has `Update` and `Token Stats` shortcuts below Refresh and above Settings.
