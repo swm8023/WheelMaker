@@ -103,13 +103,15 @@ type updateReleaseManifest struct {
 }
 
 type updateGitSnapshot struct {
-	Branch      string `json:"branch"`
-	Remote      string `json:"remote"`
-	CurrentSHA  string `json:"currentSha"`
-	LatestSHA   string `json:"latestSha"`
-	BehindCount int    `json:"behindCount"`
-	AheadCount  int    `json:"aheadCount"`
-	Dirty       bool   `json:"dirty"`
+	Branch             string `json:"branch"`
+	Remote             string `json:"remote"`
+	CurrentSHA         string `json:"currentSha"`
+	LatestSHA          string `json:"latestSha"`
+	CurrentCommittedAt string `json:"currentCommittedAt,omitempty"`
+	LatestCommittedAt  string `json:"latestCommittedAt,omitempty"`
+	BehindCount        int    `json:"behindCount"`
+	AheadCount         int    `json:"aheadCount"`
+	Dirty              bool   `json:"dirty"`
 }
 
 type updateCommandResponse struct {
@@ -262,6 +264,12 @@ func (c *UpdateCommand) queryGit(ctx context.Context, release *updateReleaseMani
 		return updateCommandResponse{OK: false, Status: "checking_failed", Git: git, Error: err.Error(), CanUpdatePublish: true}
 	}
 	git.LatestSHA = latest
+	if currentCommittedAt, err := c.gitOutput(ctx, release.Repo, "show", "-s", "--format=%cI", release.SHA); err == nil {
+		git.CurrentCommittedAt = currentCommittedAt
+	}
+	if latestCommittedAt, err := c.gitOutput(ctx, release.Repo, "show", "-s", "--format=%cI", ref); err == nil {
+		git.LatestCommittedAt = latestCommittedAt
+	}
 	behind, err := c.gitCount(ctx, release.Repo, release.SHA+".."+ref)
 	if err != nil {
 		return updateCommandResponse{OK: false, Status: "checking_failed", Git: git, Error: err.Error(), CanUpdatePublish: true}

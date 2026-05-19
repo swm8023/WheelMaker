@@ -448,6 +448,25 @@ function wheelMakerBehindCopy(data: RegistryWheelMakerUpdateResponse | null): st
   return `${behind} ${behind === 1 ? 'commit' : 'commits'} behind`;
 }
 
+function wheelMakerReleaseRef(data: RegistryWheelMakerUpdateResponse | null): string {
+  const remote = data?.release?.remote || data?.git?.remote || 'origin';
+  const branch = data?.release?.branch || data?.git?.branch || '';
+  return branch ? `${remote}/${branch}` : remote;
+}
+
+function formatWheelMakerDateTime(value: string): string {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString([], {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function floatingControlSlotRatio(slot: PersistedFloatingControlSlot): number {
   switch (slot) {
     case 'upper':
@@ -8334,9 +8353,15 @@ function App() {
             const hub = agentCard?.hub;
             const task = agentCard?.task;
             const wheelMakerPending = wheelMakerUpdatePendingHubId === card.hubId;
+            const wheelMakerCurrentSha = wheelMakerData?.release?.sha || wheelMakerData?.git?.currentSha || '';
+            const wheelMakerLatestSha = wheelMakerData?.git?.latestSha || '';
+            const wheelMakerCurrentTime = formatWheelMakerDateTime(
+              wheelMakerData?.release?.publishedAt || wheelMakerData?.git?.currentCommittedAt || '',
+            );
+            const wheelMakerLatestTime = formatWheelMakerDateTime(wheelMakerData?.git?.latestCommittedAt || '');
             return (
               <div key={`update-hub:${card.hubId}`} className="settings-metadata-card agent-package-hub-card">
-                <div className="settings-metadata-line settings-metadata-line-tags">
+                <div className="settings-metadata-line settings-metadata-line-tags update-hub-header">
                   <span className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', card.hubId)}`}>
                     <span className="wide-project-hub-dot" aria-hidden="true" />
                     <span className="wide-project-hub-label">Hub: {card.hubId}</span>
@@ -8345,24 +8370,31 @@ function App() {
                     <span className="wide-session-agent-tag">Scanning</span>
                   ) : null}
                 </div>
-                <div className="settings-detail-group-title">WheelMaker</div>
                 <div className="wheelmaker-update-panel">
                   <div className="wheelmaker-update-main">
                     <div className="wheelmaker-update-title-line">
-                      <span className="settings-metadata-title">Release</span>
-                      <span className={`agent-package-status status-${wheelMakerStatus}`}>
-                        {wheelMaker?.loading ? 'Checking' : wheelMakerUpdateStatusLabel(wheelMakerStatus)}
-                      </span>
+                      <div className="wheelmaker-update-heading">
+                        <span className="wheelmaker-update-product">WheelMaker</span>
+                        <span className="wheelmaker-update-ref-tag">{wheelMakerReleaseRef(wheelMakerData)}</span>
+                      </div>
+                      <div className="wheelmaker-update-state">
+                        <span className={`agent-package-status status-${wheelMakerStatus}`}>
+                          {wheelMaker?.loading ? 'Checking' : wheelMakerUpdateStatusLabel(wheelMakerStatus)}
+                        </span>
+                        <span className="wheelmaker-update-behind">{wheelMakerBehindCopy(wheelMakerData)}</span>
+                      </div>
                     </div>
-                    <div className="wheelmaker-update-version-line">
-                      <span>Current: {shortGitSha(wheelMakerData?.release?.sha || '')}</span>
-                      <span>Latest: {shortGitSha(wheelMakerData?.git?.latestSha || '')}</span>
-                      <span>{wheelMakerBehindCopy(wheelMakerData)}</span>
-                    </div>
-                    <div className="wheelmaker-update-version-line">
-                      <span>Branch: {wheelMakerData?.release?.branch || wheelMakerData?.git?.branch || '-'}</span>
-                      <span>Remote: {wheelMakerData?.release?.remote || wheelMakerData?.git?.remote || '-'}</span>
-                      <span>Published: {wheelMakerData?.release?.publishedAt || '-'}</span>
+                    <div className="wheelmaker-update-sha-lines">
+                      <div className="wheelmaker-update-sha-line" title={`Current ${wheelMakerCurrentSha || '-'} ${wheelMakerCurrentTime}`}>
+                        <span className="wheelmaker-update-sha-label">Current</span>
+                        <span className="wheelmaker-update-sha-value">{shortGitSha(wheelMakerCurrentSha)}</span>
+                        <span className="wheelmaker-update-sha-time">{wheelMakerCurrentTime}</span>
+                      </div>
+                      <div className="wheelmaker-update-sha-line" title={`Latest ${wheelMakerLatestSha || '-'} ${wheelMakerLatestTime}`}>
+                        <span className="wheelmaker-update-sha-label">Latest</span>
+                        <span className="wheelmaker-update-sha-value">{shortGitSha(wheelMakerLatestSha)}</span>
+                        <span className="wheelmaker-update-sha-time">{wheelMakerLatestTime}</span>
+                      </div>
                     </div>
                     {wheelMaker?.error || wheelMakerData?.error ? (
                       <div className="settings-metadata-error">{wheelMaker?.error || wheelMakerData?.error}</div>

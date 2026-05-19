@@ -251,6 +251,8 @@ export interface RegistryWheelMakerGitSnapshot {
   remote: string;
   currentSha: string;
   latestSha: string;
+  currentCommittedAt?: string;
+  latestCommittedAt?: string;
   behindCount: number;
   aheadCount: number;
   dirty: boolean;

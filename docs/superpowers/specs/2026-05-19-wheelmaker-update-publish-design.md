@@ -10,7 +10,7 @@ Extend the existing Settings `Update` page so each online hub can report and tri
 ## Scope
 
 - Show `WheelMaker` above `Agent Packages` on each Update hub card.
-- Show current published SHA, latest remote SHA, status, and behind commit count.
+- Show current published SHA/time, latest remote SHA/time, status, and behind commit count.
 - Add `cmd.update` as an explicit client role registry method.
 - Keep Registry as a hubId forwarder only; it does not create tasks or store update state.
 - Write and read one release manifest at `~/.wheelmaker/release.json`.
@@ -96,6 +96,7 @@ The WheelMaker row shows:
 
 - current published SHA
 - latest remote SHA when known
+- current publish time and latest remote commit time when known
 - status label
 - behind commit count
 - one `Update+Publish` button when the hub can accept the request

@@ -663,6 +663,10 @@ body,
   gap: 8px;
 }
 
+.update-hub-header {
+  padding-bottom: 1px;
+}
+
 .agent-package-hub-meta {
   display: flex;
   min-width: 0;
@@ -676,38 +680,119 @@ body,
 .wheelmaker-update-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  padding-top: 8px;
+  align-items: stretch;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-left: 3px solid color-mix(in srgb, var(--accent) 68%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 88%, var(--accent));
+  padding: 9px 10px;
 }
 
 .wheelmaker-update-main {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 7px;
 }
 
 .wheelmaker-update-title-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 10px;
+}
+
+.wheelmaker-update-heading,
+.wheelmaker-update-state {
   display: flex;
   align-items: center;
   min-width: 0;
   gap: 6px;
 }
 
-.wheelmaker-update-version-line {
-  display: flex;
+.wheelmaker-update-heading {
+  flex: 1 1 auto;
+}
+
+.wheelmaker-update-state {
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+
+.wheelmaker-update-product {
+  flex: 0 0 auto;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.wheelmaker-update-ref-tag {
   min-width: 0;
-  flex-wrap: wrap;
-  gap: 6px 12px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: color-mix(in srgb, var(--text) 78%, var(--accent));
+  padding: 1px 6px;
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.wheelmaker-update-behind {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--muted);
   font-size: 11px;
-  line-height: 1.25;
+}
+
+.wheelmaker-update-sha-lines {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.wheelmaker-update-sha-line {
+  display: grid;
+  grid-template-columns: 52px auto minmax(0, 1fr);
+  align-items: baseline;
+  min-width: 0;
+  gap: 8px;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.wheelmaker-update-sha-label {
+  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+}
+
+.wheelmaker-update-sha-value {
+  color: var(--text);
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  font-size: 11px;
+}
+
+.wheelmaker-update-sha-time {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wheelmaker-update-action-btn {
+  align-self: center;
   min-width: 108px;
-  height: 32px;
+  height: 34px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 14%, var(--panel));

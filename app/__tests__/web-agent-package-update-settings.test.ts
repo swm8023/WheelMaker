@@ -51,6 +51,9 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain("kind: 'wheelMakerUpdate'");
     expect(mainTsx).toContain('requestWheelMakerUpdatePublish');
     expect(mainTsx).toContain('wheelMakerUpdateStatusLabel');
+    expect(mainTsx).toContain('wheelMakerReleaseRef');
+    expect(mainTsx).toContain('formatWheelMakerDateTime');
+    expect(mainTsx).toContain('wheelMakerData?.git?.latestCommittedAt');
     expect(mainTsx).toContain('Agent Packages');
     expect(mainTsx).toContain('refreshAgentPackages');
     expect(mainTsx).toContain('deriveAgentPackageHubIds');
@@ -66,13 +69,44 @@ describe('agent package update settings UI source structure', () => {
 
     expect(stylesCss).toContain('.agent-package-hub-list');
     expect(stylesCss).toContain('.wheelmaker-update-panel');
-    expect(stylesCss).toContain('.wheelmaker-update-version-line');
+    expect(stylesCss).toContain('.wheelmaker-update-ref-tag');
+    expect(stylesCss).toContain('.wheelmaker-update-sha-line');
     expect(stylesCss).toContain('.wheelmaker-update-action-btn');
     expect(stylesCss).toContain('.agent-package-row');
     expect(stylesCss).toContain('.agent-package-name-line');
     expect(stylesCss).toContain('.agent-package-agent-tags');
     expect(stylesCss).toContain('.agent-package-version-status');
     expect(stylesCss).toContain('.agent-package-action-btn');
+  });
+
+  test('makes WheelMaker release identity and SHA rows visually distinct', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    const wheelMakerBlockStart = mainTsx.indexOf('className="wheelmaker-update-panel"');
+    const agentPackagesStart = mainTsx.indexOf('Agent Packages', wheelMakerBlockStart);
+    expect(wheelMakerBlockStart).toBeGreaterThanOrEqual(0);
+    expect(agentPackagesStart).toBeGreaterThan(wheelMakerBlockStart);
+    const wheelMakerBlock = mainTsx.slice(wheelMakerBlockStart, agentPackagesStart);
+    expect(wheelMakerBlock).toContain('className="wheelmaker-update-product"');
+    expect(wheelMakerBlock).toContain('className="wheelmaker-update-ref-tag"');
+    expect(wheelMakerBlock).toContain('wheelMakerReleaseRef(wheelMakerData)');
+    expect(wheelMakerBlock).toContain('className="wheelmaker-update-sha-line"');
+    expect(wheelMakerBlock).toContain('wheelMakerCurrentTime');
+    expect(wheelMakerBlock).toContain('wheelMakerLatestTime');
+
+    const panelBlock = stylesCss.match(/\.wheelmaker-update-panel \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(panelBlock).toContain('border-left: 3px solid');
+    expect(panelBlock).toContain('grid-template-columns: minmax(0, 1fr) auto;');
+
+    const shaLineBlock = stylesCss.match(/\.wheelmaker-update-sha-line \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(shaLineBlock).toContain('white-space: nowrap;');
+    expect(shaLineBlock).toContain('grid-template-columns: 52px auto minmax(0, 1fr);');
+
+    const refTagBlock = stylesCss.match(/\.wheelmaker-update-ref-tag \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(refTagBlock).toContain('text-overflow: ellipsis;');
+    expect(refTagBlock).toContain('font-family: \'JetBrains Mono\', Consolas, \'Courier New\', monospace;');
   });
 
   test('places agent tags beside display names and lets versions span under the action button', () => {

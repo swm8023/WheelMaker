@@ -79,6 +79,14 @@ func TestUpdateCommandQueryFetchesRemoteAndCountsBehind(t *testing.T) {
 				Stdout:   "remote-sha\n",
 				ExitCode: 0,
 			},
+			"git show -s --format=%cI local-sha": {
+				Stdout:   "2026-05-19T08:00:00Z\n",
+				ExitCode: 0,
+			},
+			"git show -s --format=%cI origin/main": {
+				Stdout:   "2026-05-19T09:00:00Z\n",
+				ExitCode: 0,
+			},
 			"git rev-list --count local-sha..origin/main": {
 				Stdout:   "3\n",
 				ExitCode: 0,
@@ -109,9 +117,14 @@ func TestUpdateCommandQueryFetchesRemoteAndCountsBehind(t *testing.T) {
 	if out.Git == nil || out.Git.LatestSHA != "remote-sha" || out.Git.BehindCount != 3 || out.Git.AheadCount != 0 {
 		t.Fatalf("git=%+v, want remote-sha behind=3 ahead=0", out.Git)
 	}
+	if out.Git.CurrentCommittedAt != "2026-05-19T08:00:00Z" || out.Git.LatestCommittedAt != "2026-05-19T09:00:00Z" {
+		t.Fatalf("git commit times=%+v, want current/latest commit times", out.Git)
+	}
 	wantCalls := []updateCommandCall{
 		{Dir: repoDir, Name: "git", Args: []string{"fetch", "--prune", "origin", "main"}},
 		{Dir: repoDir, Name: "git", Args: []string{"rev-parse", "origin/main"}},
+		{Dir: repoDir, Name: "git", Args: []string{"show", "-s", "--format=%cI", "local-sha"}},
+		{Dir: repoDir, Name: "git", Args: []string{"show", "-s", "--format=%cI", "origin/main"}},
 		{Dir: repoDir, Name: "git", Args: []string{"rev-list", "--count", "local-sha..origin/main"}},
 		{Dir: repoDir, Name: "git", Args: []string{"rev-list", "--count", "origin/main..local-sha"}},
 		{Dir: repoDir, Name: "git", Args: []string{"status", "--porcelain"}},
