@@ -76,7 +76,7 @@ describe('web drag scroll behavior', () => {
       'utf8',
     );
 
-    expect(virtualList).toContain('followOutput={isAtBottom => (isAtBottom && shouldAutoscrollNow() ? \'auto\' : false)}');
+    expect(virtualList).toContain("followOutput={() => (shouldAutoscrollNow() ? 'auto' : false)}");
     expect(virtualList).toContain('totalListHeightChanged={handleTotalListHeightChanged}');
     expect(virtualList).toContain('requestScrollToLastDisplayItem(');
     expect(scrollIntent).not.toContain('resolveChatBottomFollowAction');
@@ -84,6 +84,18 @@ describe('web drag scroll behavior', () => {
     expect(mainTsx).not.toContain('resolveChatBottomFollowAction');
     expect(mainTsx).not.toContain('chatBottomFollowAction');
     expect(mainTsx).not.toContain('autoscrollChatToBottom');
+  });
+
+  test('uses the app follow intent instead of stale Virtuoso bottom state for chat output following', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const virtualList = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'chat', 'ChatVirtuosoTurnList.tsx'),
+      'utf8',
+    );
+
+    expect(virtualList).toContain("followOutput={() => (shouldAutoscrollNow() ? 'auto' : false)}");
+    expect(virtualList).toContain('if (shouldAutoscrollNow()) {');
+    expect(virtualList).not.toContain('if (atBottomRef.current && shouldAutoscrollNow())');
   });
 
   test('shows the scroll-to-bottom button from the actual chat scroll container position', () => {

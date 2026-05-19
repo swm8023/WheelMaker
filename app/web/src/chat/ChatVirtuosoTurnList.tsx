@@ -117,7 +117,6 @@ export const ChatVirtuosoTurnList = React.forwardRef<
   renderItem,
 }: ChatVirtuosoTurnListProps, ref) {
   const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
-  const atBottomRef = React.useRef(true);
   const [scrollParent, setScrollParent] = React.useState<HTMLElement | null>(null);
 
   React.useLayoutEffect(() => {
@@ -145,10 +144,6 @@ export const ChatVirtuosoTurnList = React.forwardRef<
       }
     };
   }, [runtimeKey, scrollRef]);
-
-  React.useLayoutEffect(() => {
-    atBottomRef.current = true;
-  }, [runtimeKey]);
 
   const heightEstimates = React.useMemo(
     () => displayIndex.items.map(item => resolveEstimatedItemHeight(item, rowGap)),
@@ -181,7 +176,6 @@ export const ChatVirtuosoTurnList = React.forwardRef<
 
   const handleAtBottomStateChange = React.useCallback(
     (atBottom: boolean) => {
-      atBottomRef.current = atBottom;
       onAtBottomChange?.(atBottom);
     },
     [onAtBottomChange],
@@ -198,7 +192,6 @@ export const ChatVirtuosoTurnList = React.forwardRef<
         offset: virtuosoContext.bottomBuffer,
         behavior,
       });
-      atBottomRef.current = true;
       onAtBottomChange?.(true);
     },
     [displayIndex.items.length, onAtBottomChange, virtuosoContext.bottomBuffer],
@@ -215,7 +208,7 @@ export const ChatVirtuosoTurnList = React.forwardRef<
   );
 
   const handleTotalListHeightChanged = React.useCallback(() => {
-    if (atBottomRef.current && shouldAutoscrollNow()) {
+    if (shouldAutoscrollNow()) {
       virtuosoRef.current?.autoscrollToBottom();
       requestScrollToLastDisplayItem('auto');
     }
@@ -280,7 +273,7 @@ export const ChatVirtuosoTurnList = React.forwardRef<
       computeItemKey={(index, item) => item.key}
       increaseViewportBy={{top: viewportIncrease, bottom: viewportIncrease}}
       minOverscanItemCount={{top: minOverscanItemCount, bottom: minOverscanItemCount}}
-      followOutput={isAtBottom => (isAtBottom && shouldAutoscrollNow() ? 'auto' : false)}
+      followOutput={() => (shouldAutoscrollNow() ? 'auto' : false)}
       totalListHeightChanged={handleTotalListHeightChanged}
       itemContent={(index, displayItem) => {
         const size = heightEstimates[index] ?? defaultItemHeight;

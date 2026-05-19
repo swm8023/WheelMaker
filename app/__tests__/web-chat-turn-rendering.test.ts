@@ -54,7 +54,7 @@ describe('web chat turn rendering', () => {
     expect(virtualList).toContain('initialTopMostItemIndex={initialTopMostItemIndex}');
     expect(virtualList).toContain('increaseViewportBy={{top: viewportIncrease, bottom: viewportIncrease}}');
     expect(virtualList).toContain('atBottomStateChange={handleAtBottomStateChange}');
-    expect(virtualList).toContain("followOutput={isAtBottom => (isAtBottom && shouldAutoscrollNow() ? 'auto' : false)}");
+    expect(virtualList).toContain("followOutput={() => (shouldAutoscrollNow() ? 'auto' : false)}");
     expect(virtualList).toContain('totalListHeightChanged={handleTotalListHeightChanged}');
     expect(virtualList).toContain('className="chat-virtuoso-footer"');
     expect(virtualList).not.toContain('@tanstack/react-virtual');

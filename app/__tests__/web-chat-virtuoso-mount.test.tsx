@@ -3,10 +3,13 @@ import ReactTestRenderer from 'react-test-renderer';
 import {ChatVirtuosoTurnList} from '../web/src/chat/ChatVirtuosoTurnList';
 import type {ChatDisplayIndexItem} from '../web/src/chat/chatDisplayIndex';
 
+const mockVirtuosoProps: any[] = [];
+
 jest.mock('react-virtuoso', () => {
   const React = require('react');
   return {
     Virtuoso: React.forwardRef((props: any, ref: any) => {
+      mockVirtuosoProps.push(props);
       React.useImperativeHandle(ref, () => ({
         autoscrollToBottom: () => undefined,
         scrollToIndex: () => undefined,
@@ -37,6 +40,10 @@ function turnItem(turnIndex: number): ChatDisplayIndexItem {
 }
 
 describe('chat virtuoso mount fallback', () => {
+  beforeEach(() => {
+    mockVirtuosoProps.length = 0;
+  });
+
   test('renders chat rows while the custom scroll parent ref is not attached yet', async () => {
     const scrollRef = {current: null};
     let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
@@ -114,6 +121,39 @@ describe('chat virtuoso mount fallback', () => {
       }
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
+  test('follows app autoscroll intent even when Virtuoso bottom state is stale', async () => {
+    const scrollRef = {current: {} as HTMLElement};
+    let allowAutoscroll = true;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    try {
+      await ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(
+          <ChatVirtuosoTurnList
+            scrollRef={scrollRef}
+            displayIndex={{items: [turnItem(1), turnItem(2)]}}
+            runtimeKey="project-a/session-a"
+            shouldAutoscroll={() => allowAutoscroll}
+            renderItem={item => (
+              <span>{item.key}</span>
+            )}
+          />,
+        );
+      });
+
+      const props = mockVirtuosoProps[mockVirtuosoProps.length - 1];
+      expect(props.followOutput(false)).toBe('auto');
+      allowAutoscroll = false;
+      expect(props.followOutput(true)).toBe(false);
+    } finally {
+      if (renderer) {
+        await ReactTestRenderer.act(() => {
+          renderer!.unmount();
+        });
+      }
     }
   });
 });

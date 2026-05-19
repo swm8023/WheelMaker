@@ -364,6 +364,11 @@ describe('web chat integration', () => {
     expect(sessionUpdatedBlock).toContain('if (payload.session.running === false) {');
     expect(sessionUpdatedBlock).toContain('const mergedSession = mergeKnownChatSessionForProject(eventProjectId, payload.session);');
     expect(sessionUpdatedBlock).toContain('rememberChatSessionSummary(eventProjectId, mergedSession);');
+    const sessionMessageBlockEnd = mainTsx.indexOf('const unsubscribeClose = service.onClose', sessionMessageBlockStart);
+    const sessionMessageBlock = mainTsx.slice(sessionMessageBlockStart, sessionMessageBlockEnd);
+    expect(sessionMessageBlock).not.toContain('applySelectedChatKey(');
+    expect(sessionMessageBlock).not.toContain('workspaceStore.rememberSelectedChatSessionKey(');
+    expect(sessionMessageBlock).toContain("if (message.method === 'prompt_done' && isSelectedSession) {");
     expect(mainTsx).toContain("className={`desktop-activity-button refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}");
     expect(mainTsx).not.toContain('project-presence');
     expect(mainTsx).not.toContain('project-dirty');
