@@ -2242,21 +2242,20 @@ body,
   --agent-accent: var(--accent);
   display: inline-flex;
   align-items: center;
-  min-height: 20px;
-  max-width: 96px;
+  max-width: 68px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border: 1px solid color-mix(in srgb, var(--agent-accent) 42%, transparent);
+  border: 1px solid color-mix(in srgb, var(--agent-accent) 28%, transparent);
   border-radius: 999px;
-  padding: 2px 8px;
-  color: color-mix(in srgb, var(--text) 72%, var(--agent-accent));
-  background: color-mix(in srgb, var(--agent-accent) 12%, transparent);
-  font-size: 9.5px;
-  font-weight: 800;
+  padding: 0 5px;
+  color: color-mix(in srgb, var(--text) 78%, var(--agent-accent));
+  background: color-mix(in srgb, var(--agent-accent) 6%, transparent);
+  font-size: 8.5px;
+  font-weight: 600;
   letter-spacing: 0;
-  line-height: 1.35;
-  text-transform: uppercase;
+  line-height: 1.25;
+  text-transform: none;
 }
 
 .wide-session-agent-0 { --agent-accent: #5aa9e6; }
