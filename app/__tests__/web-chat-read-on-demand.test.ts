@@ -20,11 +20,10 @@ describe('web chat read-on-demand behavior', () => {
     expect(mainTsx).toContain('incremental?: boolean;');
     expect(mainTsx).toContain('forceFull?: boolean;');
     expect(mainTsx).toContain('const useIncremental = requestedIncremental && !fallbackToFullRead;');
-    expect(mainTsx).toContain('const shouldSyncSelectedSession =');
-    expect(mainTsx).toContain("tabRef.current === 'chat'");
-    expect(mainTsx).toContain('incremental: true,');
-    expect(mainTsx).toContain('preserveUserSelection: true,');
-    expect(mainTsx).toContain('selectionSnapshot: encodeChatSessionKey(preferredSelectedChatKey),');
+    expect(mainTsx).toContain('const syncChatSessionsAfterReconnect = async (');
+    expect(mainTsx).toContain('chatActiveRuntimeSetRef.current.keys()');
+    expect(mainTsx).toContain('runtimeKeys.add(selectedRuntimeKey);');
+    expect(mainTsx).toContain('syncChatSessionsAfterReconnect(preferredSelectedChatKey).catch(() => undefined);');
     expect(mainTsx).toContain('useIncremental ? checkpointTurnIndex : 0,');
     expect(mainTsx).toContain('applySessionReadResult(');
     expect(mainTsx).toContain("const chatVisibleRuntimeKeyRef = useRef('');");

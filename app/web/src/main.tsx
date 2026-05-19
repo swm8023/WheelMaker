@@ -5649,11 +5649,46 @@ function App() {
         setVisibleChatMessagesForRuntimeKey(resultRuntimeKey, nextMessages);
       }
       persistChatSessionContent(resultSessionId, activeProjectId, result.session);
+      if (
+        encodeChatSessionKey(selectedChatKeyRef.current) === resultRuntimeKey &&
+        resultSession &&
+        (resultSession.lastDoneTurnIndex ?? 0) > (resultSession.lastReadTurnIndex ?? 0)
+      ) {
+        markChatSessionRead(
+          activeProjectId,
+          resultSessionId,
+          resultSession.lastDoneTurnIndex ?? 0,
+        ).catch(() => undefined);
+      }
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       return false;
     }
+  };
+
+  const syncChatSessionsAfterReconnect = async (
+    preferredSelectedChatKey: ChatSessionKey | null | undefined,
+  ) => {
+    const selectedRuntimeKey =
+      encodeChatSessionKey(preferredSelectedChatKey) ||
+      chatActiveRuntimeSetRef.current.selectedKey();
+    const runtimeKeys = new Set(chatActiveRuntimeSetRef.current.keys());
+    if (selectedRuntimeKey) {
+      runtimeKeys.add(selectedRuntimeKey);
+    }
+
+    await Promise.all(Array.from(runtimeKeys).map(runtimeKey => {
+      const key = decodeChatSessionKey(runtimeKey);
+      if (!key) {
+        return Promise.resolve();
+      }
+      const cursor = ensureChatTurnStore(runtimeKey).cursor.turnIndex;
+      const selectionSnapshot = runtimeKey === selectedRuntimeKey ? runtimeKey : '';
+      return chatReadRepairQueueRef.current.request(runtimeKey, cursor, async () => {
+        await refreshSessionTurns(key.sessionId, key.projectId, selectionSnapshot);
+      });
+    }));
   };
 
   const loadChatSessions = async (
@@ -6376,16 +6411,7 @@ function App() {
         }
       }
       if (silentReconnect) {
-        const shouldSyncSelectedSession =
-          tabRef.current === 'chat' &&
-          !!preferredSelectedChatKey;
-        if (shouldSyncSelectedSession) {
-          await loadChatSession(preferredSelectedChatKey.sessionId, preferredSelectedChatKey.projectId, {
-            incremental: true,
-            preserveUserSelection: true,
-            selectionSnapshot: encodeChatSessionKey(preferredSelectedChatKey),
-          });
-        }
+        syncChatSessionsAfterReconnect(preferredSelectedChatKey).catch(() => undefined);
       } else if (tabRef.current === 'chat') {
         loadChatSessions(
           preferredSelectedChatKey?.projectId ?? result.hydrated.projectId,

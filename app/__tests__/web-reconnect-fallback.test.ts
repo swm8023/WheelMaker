@@ -18,11 +18,10 @@ describe('web reconnect fallback behavior', () => {
       /connect\(\{\s*silentReconnect:\s*true\s*\}\)\.catch\(\(\)\s*=>\s*undefined\);/,
     );
     expect(mainTsx).toContain('if (!connected && !keepWorkspaceVisible) {');
-    expect(mainTsx).toContain("tabRef.current === 'chat'");
-    expect(mainTsx).toContain('const shouldSyncSelectedSession =');
-    expect(mainTsx).toContain('incremental: true,');
-    expect(mainTsx).toContain('preserveUserSelection: true,');
-    expect(mainTsx).toContain('selectionSnapshot: encodeChatSessionKey(preferredSelectedChatKey),');
+    expect(mainTsx).toContain('const syncChatSessionsAfterReconnect = async (');
+    expect(mainTsx).toContain('chatActiveRuntimeSetRef.current.keys()');
+    expect(mainTsx).toContain('runtimeKeys.add(selectedRuntimeKey);');
+    expect(mainTsx).toContain('syncChatSessionsAfterReconnect(preferredSelectedChatKey).catch(() => undefined);');
     expect(mainTsx).toContain('await refreshChatIndex();');
   });
 
