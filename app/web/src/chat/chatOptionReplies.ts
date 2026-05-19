@@ -42,6 +42,12 @@ type ChatConfirmationReplyMatch = {
   end: number;
 };
 
+type ChatConfirmationSentenceCandidate = {
+  sentence: string;
+  start: number;
+  end: number;
+};
+
 function optionLabelKind(label: string): ChatOptionReplyKind | null {
   if (LETTER_OPTION_LABELS.includes(label.toUpperCase())) {
     return 'letter';
@@ -199,6 +205,65 @@ function confirmationReplyText(sentence: string): ChatConfirmationReply['replyTe
   return null;
 }
 
+function resolveMarkdownBoldQuestionCandidate(
+  line: string,
+  sentenceStart: number,
+  questionEnd: number,
+): ChatConfirmationSentenceCandidate | null {
+  if (line.slice(questionEnd, questionEnd + 2) !== '**') {
+    return null;
+  }
+  const beforeQuestion = line.slice(sentenceStart, questionEnd);
+  const markerIndex = beforeQuestion.lastIndexOf('**');
+  if (markerIndex < 0) {
+    return null;
+  }
+  const markerStart = sentenceStart + markerIndex;
+  const textStart = markerStart + 2;
+  const sentence = line.slice(textStart, questionEnd).trim();
+  if (!sentence) {
+    return null;
+  }
+  return {
+    sentence,
+    start: markerStart,
+    end: questionEnd + 2,
+  };
+}
+
+function resolveConfirmationSentenceCandidate(
+  line: string,
+  lineStart: number,
+  sentenceMatch: RegExpExecArray,
+): ChatConfirmationSentenceCandidate | null {
+  const rawSentence = sentenceMatch[0];
+  const leadingWhitespace = rawSentence.match(/^\s*/)?.[0].length ?? 0;
+  const sentenceStart = sentenceMatch.index + leadingWhitespace;
+  const questionEnd = sentenceMatch.index + rawSentence.length;
+  const markdownWrappedCandidate = resolveMarkdownBoldQuestionCandidate(
+    line,
+    sentenceStart,
+    questionEnd,
+  );
+  if (markdownWrappedCandidate) {
+    return {
+      sentence: markdownWrappedCandidate.sentence,
+      start: lineStart + markdownWrappedCandidate.start,
+      end: lineStart + markdownWrappedCandidate.end,
+    };
+  }
+
+  const sentence = rawSentence.trim();
+  if (!sentence) {
+    return null;
+  }
+  return {
+    sentence,
+    start: lineStart + sentenceStart,
+    end: lineStart + sentenceStart + sentence.length,
+  };
+}
+
 function findLatestConfirmationReplyMatch(text: string): ChatConfirmationReplyMatch | null {
   if (!text || extractChatOptionReplies(text).length > 0) {
     return null;
@@ -227,24 +292,21 @@ function findLatestConfirmationReplyMatch(text: string): ChatConfirmationReplyMa
     let sentenceMatch: RegExpExecArray | null;
     QUESTION_SENTENCE_PATTERN.lastIndex = 0;
     while ((sentenceMatch = QUESTION_SENTENCE_PATTERN.exec(line)) !== null) {
-      const rawSentence = sentenceMatch[0];
-      const leadingWhitespace = rawSentence.match(/^\s*/)?.[0].length ?? 0;
-      const sentence = rawSentence.trim();
-      if (!sentence) {
+      const candidate = resolveConfirmationSentenceCandidate(line, lineStart, sentenceMatch);
+      if (!candidate) {
         continue;
       }
-      const start = lineStart + sentenceMatch.index + leadingWhitespace;
-      if (start < tailStart) {
+      if (candidate.start < tailStart) {
         continue;
       }
-      const replyText = confirmationReplyText(sentence);
+      const replyText = confirmationReplyText(candidate.sentence);
       if (!replyText) {
         continue;
       }
       latest = {
-        reply: {sentence, replyText},
-        start,
-        end: start + sentence.length,
+        reply: {sentence: candidate.sentence, replyText},
+        start: candidate.start,
+        end: candidate.end,
       };
     }
   }

@@ -198,4 +198,18 @@ describe('chat option reply extraction', () => {
       {type: 'confirmation', reply: {sentence: '你同意这个定义吗？', replyText: '同意'}},
     ]);
   });
+
+  test('consumes paired markdown bold markers around confirmation replies', () => {
+    const text = '前文 **你同意这个定义吗？** 后文';
+
+    expect(extractChatConfirmationReply(text)).toEqual({
+      sentence: '你同意这个定义吗？',
+      replyText: '同意',
+    });
+    expect(splitChatConfirmationReplyText(text)).toEqual([
+      {type: 'markdown', text: '前文 '},
+      {type: 'confirmation', reply: {sentence: '你同意这个定义吗？', replyText: '同意'}},
+      {type: 'markdown', text: ' 后文'},
+    ]);
+  });
 });
