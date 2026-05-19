@@ -229,6 +229,7 @@ func (c *UpdateCommand) readReleaseManifest() (*updateReleaseManifest, error) {
 	if err != nil {
 		return nil, err
 	}
+	raw = bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF})
 	var manifest updateReleaseManifest
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return nil, fmt.Errorf("release manifest is invalid: %w", err)

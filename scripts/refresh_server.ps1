@@ -268,7 +268,9 @@ function Write-ReleaseManifest {
   Write-Step ("write release manifest: {0}" -f $path)
   if ($WhatIf) { Write-Host ("[whatif] write {0}" -f $path); return }
   New-Item -ItemType Directory -Path $script:WheelmakerHome -Force | Out-Null
-  $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $path -Encoding UTF8
+  $json = $manifest | ConvertTo-Json -Depth 4
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($path, $json, $utf8NoBom)
 }
 
 function Read-ConfigJson {

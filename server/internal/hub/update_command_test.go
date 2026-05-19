@@ -170,6 +170,38 @@ func TestUpdateCommandQueryPendingSignalDoesNotFetch(t *testing.T) {
 	}
 }
 
+func TestUpdateCommandReadReleaseManifestAcceptsUTF8BOM(t *testing.T) {
+	baseDir := t.TempDir()
+	repoDir := filepath.Join(baseDir, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	raw, err := json.Marshal(updateReleaseManifest{
+		SchemaVersion: 1,
+		Repo:          repoDir,
+		Branch:        "main",
+		Remote:        "origin",
+		SHA:           "local-sha",
+		PublishedAt:   "2026-05-19T10:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("marshal release: %v", err)
+	}
+	withBOM := append([]byte{0xEF, 0xBB, 0xBF}, raw...)
+	if err := os.WriteFile(filepath.Join(baseDir, "release.json"), withBOM, 0o644); err != nil {
+		t.Fatalf("write release: %v", err)
+	}
+	cmd := newUpdateCommandWithRunner(baseDir, &fakeUpdateRunner{})
+
+	manifest, err := cmd.readReleaseManifest()
+	if err != nil {
+		t.Fatalf("readReleaseManifest: %v", err)
+	}
+	if manifest.Repo != repoDir || manifest.Branch != "main" || manifest.SHA != "local-sha" {
+		t.Fatalf("manifest=%+v, want parsed manifest", manifest)
+	}
+}
+
 func rawUpdateCommandPayload(t *testing.T, payload map[string]any) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(payload)

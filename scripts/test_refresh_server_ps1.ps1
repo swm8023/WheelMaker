@@ -31,6 +31,8 @@ Assert-Contains "function Write-ReleaseManifest"
 Assert-Contains "npm run build:web:release"
 Assert-Contains "release.json"
 Assert-Contains '"schemaVersion" = 1'
+Assert-Contains 'System.Text.UTF8Encoding($false)'
+Assert-Contains "[System.IO.File]::WriteAllText"
 Assert-Contains "Pull-Latest"
 Assert-Contains "Ensure-AcpDependencies"
 Assert-Contains "git stash push -u -m"
