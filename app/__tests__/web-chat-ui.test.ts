@@ -285,7 +285,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('No Selected Session');
     expect(mainTsx).toContain('No Selected Diff');
     expect(mainTsx).toContain('data-active={drawerOpen}');
-    expect(mainTsx).toContain("CHAT - {selectedChatSession?.title || 'New Session'}");
+    expect(mainTsx).toContain("CHAT - {selectedChatDisplayTitle || 'New Session'}");
     expect(mainTsx).toContain("{selectedFile || 'Select a file'}");
     expect(mainTsx).toContain("{selectedDiff || 'Select a changed file'}");
     expect(mainTsx).toContain('aria-expanded={drawerOpen}');
@@ -422,6 +422,17 @@ describe('web chat integration', () => {
     expect(chatProjectNameBlock).toContain('selectedChatKey?.projectId');
     expect(chatProjectNameBlock).toContain('projects.find(item => item.projectId === selectedProjectId)?.name');
     expect(chatProjectNameBlock).toContain('breadcrumbProjectName');
+    expect(mainTsx).toContain("import { resolveChatSessionTitle } from './chat/chatSessionTitle';");
+    expect(mainTsx).toContain('const [useLatestPromptTitle, setUseLatestPromptTitle] = useState(');
+    expect(mainTsx).toContain('const selectedChatDisplayTitle = useMemo(');
+    expect(mainTsx).toContain("resolveChatSessionTitle(selectedChatSession?.title ?? '', useLatestPromptTitle)");
+    expect(mainTsx).toContain('resolveSessionDisplayTitle(session)');
+    expect(mainTsx).not.toContain('session.title || session.sessionId');
+    expect(mainTsx).not.toContain('selectedChatSession?.title ||');
+    expect(mainTsx).toContain("() => selectedChatDisplayTitle || 'No Selected Session'");
+    expect(mainTsx).toContain('checked={useLatestPromptTitle}');
+    expect(mainTsx).toContain('onChange={event => setUseLatestPromptTitle(event.target.checked)}');
+    expect(mainTsx).toContain('className="chat-title-option"');
     expect(mainTsx).toContain('renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)');
     expect(mainTsx).toContain('renderBreadcrumbTitle(breadcrumbProjectName, fileBreadcrumbLabel)');
     expect(mainTsx).toContain('renderBreadcrumbTitle(breadcrumbProjectName, gitBreadcrumbLabel)');
@@ -659,6 +670,8 @@ describe('web chat integration', () => {
       /\.chat-send-button \.codicon \{[\s\S]*font-size: 15px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-scroll-bottom-button {');
+    expect(stylesCss).toContain('.chat-title-tools {');
+    expect(stylesCss).toContain('.chat-title-option {');
     expect(stylesCss).toContain('.chat-composer-toolbar {');
     expect(stylesCss).toMatch(
       /\.chat-composer-toolbar \{[\s\S]*min-height: 24px;[\s\S]*\}/,

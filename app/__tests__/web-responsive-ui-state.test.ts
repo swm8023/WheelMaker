@@ -167,14 +167,24 @@ describe('web responsive ui state', () => {
     );
 
     expect(persistenceTs).toContain('desktopSidebarWidth: number;');
+    expect(persistenceTs).toContain('useLatestPromptTitle: boolean;');
     expect(persistenceTs).toContain("desktopSidebarWidth: 'desktopSidebarWidth',");
+    expect(persistenceTs).toContain("useLatestPromptTitle: 'useLatestPromptTitle',");
     expect(persistenceTs).toContain('desktopSidebarWidth: 380,');
+    expect(persistenceTs).toContain('useLatestPromptTitle: false,');
+    expect(persistenceTs).toContain('useLatestPromptTitle: typeof input.useLatestPromptTitle === \'boolean\' ? input.useLatestPromptTitle : base.useLatestPromptTitle,');
     expect(persistenceTs).toContain('desktopSidebarWidth: sanitizeDesktopSidebarWidth(input.desktopSidebarWidth, base.desktopSidebarWidth),');
     expect(persistenceTs).toContain(
       '{k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(this.state.global.desktopSidebarWidth), updatedAt: now}',
     );
     expect(persistenceTs).toContain(
+      '{k: GLOBAL_KEYS.useLatestPromptTitle, v: serialize(this.state.global.useLatestPromptTitle), updatedAt: now}',
+    );
+    expect(persistenceTs).toContain(
       '{k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(next.desktopSidebarWidth), updatedAt: now}',
+    );
+    expect(persistenceTs).toContain(
+      '{k: GLOBAL_KEYS.useLatestPromptTitle, v: serialize(next.useLatestPromptTitle), updatedAt: now}',
     );
   });
 });

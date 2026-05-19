@@ -2962,6 +2962,38 @@ body,
   min-width: 0;
 }
 
+.chat-title-tools {
+  margin-left: auto;
+}
+
+.chat-title-option {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.chat-title-option input {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.chat-title-option:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 32%, var(--border));
+}
+
 .view-tool {
   height: 26px;
   width: 26px;

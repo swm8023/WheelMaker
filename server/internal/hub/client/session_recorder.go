@@ -47,6 +47,11 @@ type sessionViewSummary struct {
 	ConfigOptions     []acp.ConfigOption `json:"configOptions,omitempty"`
 }
 
+type sessionTitleFacts struct {
+	First string `json:"first"`
+	Last  string `json:"last"`
+}
+
 type sessionSyncProjection struct {
 	LatestPersistedTurnIndex int64 `json:"latestPersistedTurnIndex"`
 	LastDoneTurnIndex        int64 `json:"lastDoneTurnIndex,omitempty"`
@@ -658,7 +663,7 @@ func (r *SessionRecorder) upsertSessionProjectionWithPublish(ctx context.Context
 	title = strings.TrimSpace(title)
 	if title != "" {
 		if !titleIfEmptyOnly || strings.TrimSpace(rec.Title) == "" {
-			rec.Title = title
+			rec.Title = updateSessionTitleFacts(rec.Title, title)
 		}
 	}
 	rec.LastActiveAt = updatedAt
@@ -817,6 +822,50 @@ func sessionSyncJSON(latestPersistedTurnIndex int64) string {
 	raw, err := json.Marshal(sessionSyncProjection{LatestPersistedTurnIndex: latestPersistedTurnIndex})
 	if err != nil {
 		return "{}"
+	}
+	return string(raw)
+}
+
+func updateSessionTitleFacts(rawTitle, promptTitle string) string {
+	promptTitle = strings.TrimSpace(promptTitle)
+	if promptTitle == "" {
+		return strings.TrimSpace(rawTitle)
+	}
+	facts, ok := sessionTitleFactsFromJSON(rawTitle)
+	if !ok {
+		legacyTitle := strings.TrimSpace(rawTitle)
+		facts = sessionTitleFacts{
+			First: legacyTitle,
+			Last:  legacyTitle,
+		}
+	}
+	if strings.TrimSpace(facts.First) == "" {
+		facts.First = promptTitle
+	}
+	facts.Last = promptTitle
+	return sessionTitleFactsJSON(facts)
+}
+
+func sessionTitleFactsFromJSON(rawTitle string) (sessionTitleFacts, bool) {
+	rawTitle = strings.TrimSpace(rawTitle)
+	if rawTitle == "" || !strings.HasPrefix(rawTitle, "{") {
+		return sessionTitleFacts{}, false
+	}
+	var facts sessionTitleFacts
+	if err := json.Unmarshal([]byte(rawTitle), &facts); err != nil {
+		return sessionTitleFacts{}, false
+	}
+	facts.First = strings.TrimSpace(facts.First)
+	facts.Last = strings.TrimSpace(facts.Last)
+	return facts, true
+}
+
+func sessionTitleFactsJSON(facts sessionTitleFacts) string {
+	facts.First = strings.TrimSpace(facts.First)
+	facts.Last = strings.TrimSpace(facts.Last)
+	raw, err := json.Marshal(facts)
+	if err != nil {
+		return ""
 	}
 	return string(raw)
 }

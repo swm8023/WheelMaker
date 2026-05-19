@@ -2356,6 +2356,20 @@ func sessionViewCreatedEvent(sessionID, title string) SessionViewEvent {
 	}
 }
 
+type testSessionTitleFacts struct {
+	First string `json:"first"`
+	Last  string `json:"last"`
+}
+
+func decodeSessionTitleFacts(t *testing.T, raw string) testSessionTitleFacts {
+	t.Helper()
+	var facts testSessionTitleFacts
+	if err := json.Unmarshal([]byte(raw), &facts); err != nil {
+		t.Fatalf("json.Unmarshal title facts %q: %v", raw, err)
+	}
+	return facts
+}
+
 func sessionViewPromptEvent(sessionID, text string, blocks []acp.ContentBlock) SessionViewEvent {
 	params := acp.SessionPromptParams{SessionID: sessionID}
 	if len(blocks) > 0 {
@@ -3341,8 +3355,43 @@ func TestSessionViewListIncludesProjectionFields(t *testing.T) {
 	if len(sessions) != 1 {
 		t.Fatalf("sessions len = %d, want 1", len(sessions))
 	}
-	if sessions[0].Title != "latest prompt" {
-		t.Fatalf("sessions[0].Title = %q, want %q", sessions[0].Title, "latest prompt")
+	titleFacts := decodeSessionTitleFacts(t, sessions[0].Title)
+	if titleFacts.First != "Task" || titleFacts.Last != "latest prompt" {
+		t.Fatalf("title facts = %#v, want first Task and last latest prompt", titleFacts)
+	}
+}
+
+func TestSessionViewPromptTitleFactsMigrateLegacyTitle(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	addRuntimeSession(c, "sess-legacy", "Legacy Title", "claude", time.Now().UTC().Add(-time.Minute), time.Now().UTC())
+	if err := c.store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-legacy",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		AgentType:    "claude",
+		Title:        "Legacy Title",
+		CreatedAt:    time.Now().UTC().Add(-time.Minute),
+		LastActiveAt: time.Now().UTC().Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("SaveSession legacy: %v", err)
+	}
+
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-legacy", "new prompt", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+
+	sessions, err := c.listSessionViews(ctx)
+	if err != nil {
+		t.Fatalf("listSessionViews: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions len = %d, want 1", len(sessions))
+	}
+	titleFacts := decodeSessionTitleFacts(t, sessions[0].Title)
+	if titleFacts.First != "Legacy Title" || titleFacts.Last != "new prompt" {
+		t.Fatalf("title facts = %#v, want first legacy title and last new prompt", titleFacts)
 	}
 }
 
@@ -3367,8 +3416,9 @@ func TestSessionViewPersistSessionDoesNotOverrideLatestPromptTitle(t *testing.T)
 	if len(sessionsBefore) != 1 {
 		t.Fatalf("sessionsBefore len = %d, want 1", len(sessionsBefore))
 	}
-	if sessionsBefore[0].Title != "latest prompt title" {
-		t.Fatalf("sessionsBefore[0].Title = %q, want %q", sessionsBefore[0].Title, "latest prompt title")
+	beforeFacts := decodeSessionTitleFacts(t, sessionsBefore[0].Title)
+	if beforeFacts.First != "Created Title" || beforeFacts.Last != "latest prompt title" {
+		t.Fatalf("sessionsBefore title facts = %#v, want first Created Title and last latest prompt title", beforeFacts)
 	}
 
 	sess, err := c.SessionByID(ctx, "sess-1")
@@ -3389,8 +3439,9 @@ func TestSessionViewPersistSessionDoesNotOverrideLatestPromptTitle(t *testing.T)
 	if len(sessionsAfter) != 1 {
 		t.Fatalf("sessionsAfter len = %d, want 1", len(sessionsAfter))
 	}
-	if sessionsAfter[0].Title != "latest prompt title" {
-		t.Fatalf("sessionsAfter[0].Title = %q, want %q", sessionsAfter[0].Title, "latest prompt title")
+	afterFacts := decodeSessionTitleFacts(t, sessionsAfter[0].Title)
+	if afterFacts.First != "Created Title" || afterFacts.Last != "latest prompt title" {
+		t.Fatalf("sessionsAfter title facts = %#v, want first Created Title and last latest prompt title", afterFacts)
 	}
 }
 
@@ -5444,7 +5495,9 @@ func TestHandleSessionRequestSessionArchiveWritesPackAndDeletesActiveSession(t *
 
 	manifest := readArchiveManifestForTest(t, historyRoot, "proj1")
 	entry := manifest.Sessions["sess-archive"]
-	if entry.SessionID != "sess-archive" || entry.ProjectName != "proj1" || entry.Title != "hello" {
+	titleFacts := decodeSessionTitleFacts(t, entry.Title)
+	if entry.SessionID != "sess-archive" || entry.ProjectName != "proj1" ||
+		titleFacts.First != "Archive Target" || titleFacts.Last != "hello" {
 		t.Fatalf("unexpected manifest entry identity: %#v", entry)
 	}
 	if entry.Storage != "pack" || entry.File != "archive.pack" || entry.Codec != "gzip" {

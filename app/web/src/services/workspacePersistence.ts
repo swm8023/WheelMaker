@@ -60,6 +60,7 @@ export type PersistedGlobalState = {
   wrapLines: boolean;
   showLineNumbers: boolean;
   hideToolCalls: boolean;
+  useLatestPromptTitle: boolean;
   tab: PersistedTab;
   selectedProjectId: string;
   selectedChatProjectId: string;
@@ -126,6 +127,7 @@ const GLOBAL_KEYS = {
   wrapLines: 'wrapLines',
   showLineNumbers: 'showLineNumbers',
   hideToolCalls: 'hideToolCalls',
+  useLatestPromptTitle: 'useLatestPromptTitle',
   tab: 'tab',
   selectedProjectId: 'selectedProjectId',
   selectedChatProjectId: 'selectedChatProjectId',
@@ -151,6 +153,7 @@ function defaultGlobalState(): PersistedGlobalState {
     wrapLines: false,
     showLineNumbers: true,
     hideToolCalls: false,
+    useLatestPromptTitle: false,
     tab: 'file',
     selectedProjectId: '',
     selectedChatProjectId: '',
@@ -279,6 +282,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     wrapLines: typeof input.wrapLines === 'boolean' ? input.wrapLines : base.wrapLines,
     showLineNumbers: typeof input.showLineNumbers === 'boolean' ? input.showLineNumbers : base.showLineNumbers,
     hideToolCalls: typeof input.hideToolCalls === 'boolean' ? input.hideToolCalls : base.hideToolCalls,
+    useLatestPromptTitle: typeof input.useLatestPromptTitle === 'boolean' ? input.useLatestPromptTitle : base.useLatestPromptTitle,
     tab: input.tab === 'chat' || input.tab === 'git' ? input.tab : 'file',
     selectedProjectId: typeof input.selectedProjectId === 'string' ? input.selectedProjectId : base.selectedProjectId,
     selectedChatProjectId: typeof input.selectedChatProjectId === 'string' ? input.selectedChatProjectId : base.selectedChatProjectId,
@@ -715,6 +719,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.wrapLines, v: serialize(this.state.global.wrapLines), updatedAt: now},
       {k: GLOBAL_KEYS.showLineNumbers, v: serialize(this.state.global.showLineNumbers), updatedAt: now},
       {k: GLOBAL_KEYS.hideToolCalls, v: serialize(this.state.global.hideToolCalls), updatedAt: now},
+      {k: GLOBAL_KEYS.useLatestPromptTitle, v: serialize(this.state.global.useLatestPromptTitle), updatedAt: now},
       {k: GLOBAL_KEYS.tab, v: serialize(this.state.global.tab), updatedAt: now},
       {k: GLOBAL_KEYS.selectedProjectId, v: serialize(this.state.global.selectedProjectId), updatedAt: now},
       {k: GLOBAL_KEYS.selectedChatProjectId, v: serialize(this.state.global.selectedChatProjectId), updatedAt: now},
@@ -996,6 +1001,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.wrapLines, v: serialize(next.wrapLines), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.showLineNumbers, v: serialize(next.showLineNumbers), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.hideToolCalls, v: serialize(next.hideToolCalls), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.useLatestPromptTitle, v: serialize(next.useLatestPromptTitle), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.tab, v: serialize(next.tab), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedProjectId, v: serialize(next.selectedProjectId), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedChatProjectId, v: serialize(next.selectedChatProjectId), updatedAt: now});

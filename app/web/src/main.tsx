@@ -35,6 +35,7 @@ import {
   encodeChatSessionKey,
   type ChatSessionKey,
 } from './chat/chatSessionKey';
+import { resolveChatSessionTitle } from './chat/chatSessionTitle';
 import {decodeSessionTurnToMessage, normalizeSessionMessagePayload} from './chat/chatWire';
 import {
   applySessionReadResult,
@@ -2085,6 +2086,11 @@ function App() {
       ? persistedGlobal.hideToolCalls
       : false,
   );
+  const [useLatestPromptTitle, setUseLatestPromptTitle] = useState(
+    typeof persistedGlobal.useLatestPromptTitle === 'boolean'
+      ? persistedGlobal.useLatestPromptTitle
+      : false,
+  );
   const codeFontFamily = useMemo(
     () => resolveCodeFontFamily(codeFont),
     [codeFont],
@@ -3480,6 +3486,7 @@ function App() {
       wrapLines,
       showLineNumbers,
       hideToolCalls,
+      useLatestPromptTitle,
       tab,
       selectedProjectId: projectId,
       floatingControlSlot,
@@ -3499,6 +3506,7 @@ function App() {
     wrapLines,
     showLineNumbers,
     hideToolCalls,
+    useLatestPromptTitle,
     tab,
     projectId,
     floatingControlSlot,
@@ -3569,9 +3577,23 @@ function App() {
     () => splitPathForDisplay(selectedFile).fileName || 'No Selected File',
     [selectedFile],
   );
+  const resolveSessionDisplayTitle = useCallback(
+    (session?: Pick<RegistrySessionSummary, 'sessionId' | 'title'> | null) =>
+      resolveChatSessionTitle(session?.title ?? '', useLatestPromptTitle) ||
+      session?.sessionId ||
+      '',
+    [useLatestPromptTitle],
+  );
+  const selectedChatDisplayTitle = useMemo(
+    () =>
+      resolveChatSessionTitle(selectedChatSession?.title ?? '', useLatestPromptTitle) ||
+      selectedChatSession?.sessionId ||
+      '',
+    [selectedChatSession, useLatestPromptTitle],
+  );
   const chatBreadcrumbLabel = useMemo(
-    () => (selectedChatSession?.title || '').trim() || 'No Selected Session',
-    [selectedChatSession],
+    () => selectedChatDisplayTitle || 'No Selected Session',
+    [selectedChatDisplayTitle],
   );
   const gitBreadcrumbLabel = useMemo(
     () => splitPathForDisplay(selectedDiff).fileName || 'No Selected Diff',
@@ -5441,7 +5463,7 @@ function App() {
       kind: 'archive',
       projectId: targetProjectId,
       sessionId: normalizedSessionId,
-      title: (session.title || '').trim(),
+      title: resolveSessionDisplayTitle(session),
     });
   };
 
@@ -5916,8 +5938,9 @@ function App() {
       }
     }
 
-    const title = session?.title?.trim()
-      ? `Chat: ${session.title}`
+    const sessionDisplayTitle = resolveSessionDisplayTitle(session);
+    const title = sessionDisplayTitle
+      ? `Chat: ${sessionDisplayTitle}`
       : 'WheelMaker Chat';
     pwaFoundation.pushDemo
       .showLocalNotification({ title, body, url: '/' })
@@ -7998,7 +8021,7 @@ function App() {
                                 }}
                               >
                                 <span className="codicon codicon-history" />
-                                <span>{session.title || session.sessionId}</span>
+                                <span>{resolveSessionDisplayTitle(session) || session.sessionId}</span>
                               </button>
                             ))
                           : null}
@@ -8059,7 +8082,7 @@ function App() {
                           >
                             {renderSessionStateMarker(session, targetProjectId)}
                             <span className="wide-session-title">
-                              {session.title || session.sessionId}
+                              {resolveSessionDisplayTitle(session) || session.sessionId}
                             </span>
                             {sessionAgent ? (
                               <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', sessionAgent)}`}>
@@ -8279,7 +8302,7 @@ function App() {
                                 }}
                               >
                                 <span className="codicon codicon-history" />
-                                <span>{session.title || session.sessionId}</span>
+                                <span>{resolveSessionDisplayTitle(session) || session.sessionId}</span>
                               </button>
                             ))
                           : null}
@@ -8329,7 +8352,7 @@ function App() {
                         >
                           {renderSessionStateMarker(session, targetProjectId)}
                           <span className="wide-session-title">
-                            {session.title || session.sessionId}
+                            {resolveSessionDisplayTitle(session) || session.sessionId}
                           </span>
                           {sessionAgent ? (
                             <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', sessionAgent)}`}>
@@ -9048,14 +9071,24 @@ function App() {
     if (tab === 'chat') {
       return (
         <div className="content">
-          <div className="block-title">
+          <div className="block-title with-tools">
             {isWide ? (
-              <>
-                CHAT - {selectedChatSession?.title || 'New Session'}
-              </>
+              <span className="title-text">
+                CHAT - {selectedChatDisplayTitle || 'New Session'}
+              </span>
             ) : (
               renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)
             )}
+            <div className="view-tools chat-title-tools">
+              <label className="chat-title-option" title="Use latest prompt as title">
+                <input
+                  type="checkbox"
+                  checked={useLatestPromptTitle}
+                  onChange={event => setUseLatestPromptTitle(event.target.checked)}
+                />
+                <span>Latest title</span>
+              </label>
+            </div>
           </div>
           <div
             className="chat-main"
