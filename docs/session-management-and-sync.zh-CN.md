@@ -187,7 +187,7 @@ type Cursor = { turnIndex: number };
 - `session.read` 返回的 turns 视为服务端权威结果，覆盖响应区间，并和等待期间收到的实时消息 reconcile，避免旧缓存覆盖新流式内容。
 - `session.message` 只更新 turn store，不更新 title、preview、running、done、read、unread 状态。
 - UI 列表状态只看 Session Summary：`running=true` 显示进行中；否则当 `lastDoneTurnIndex > lastReadTurnIndex` 时，`lastDoneSuccess=false` 显示失败未查看，其他情况显示完成未查看。
-- 选中 session 的显示视图由 raw source store 派生完整轻量 Display Index，再由 `@tanstack/react-virtual` 只挂载 visible + overscan items。上滑/下滑只改变 virtualizer range，不触发 server read。
+- 选中 session 的显示视图由 raw source store 派生完整轻量 Display Index，再由 `react-virtuoso` 只挂载 visible + overscan items。上滑/下滑只改变 virtualizer range，不触发 server read。
 - 尾部锁定时新 turn 和 streaming 高度增长跟随到底；用户离开底部后保持当前锚点并显示回到底部 affordance。
 
 打开项目、切换 tab、切换 session 时，补读流程异步执行，不阻塞 UI 交互。

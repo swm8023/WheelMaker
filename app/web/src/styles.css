@@ -3390,17 +3390,17 @@ body,
   gap: 16px;
 }
 
-.chat-virtual-list {
+.chat-virtuoso-list {
   flex: 0 0 auto;
   width: 100%;
 }
 
-.chat-virtual-row {
+.chat-virtuoso-row {
   box-sizing: border-box;
   width: 100%;
 }
 
-.chat-virtual-footer {
+.chat-virtuoso-footer {
   flex: 0 0 auto;
   width: 100%;
 }

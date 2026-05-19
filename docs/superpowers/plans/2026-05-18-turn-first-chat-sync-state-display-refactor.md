@@ -6,7 +6,7 @@
 
 **Architecture:** Server exposes raw `RegistrySessionTurn` in both realtime and read paths, with top-level `sessionId` and read summary. App stores raw turns in source stores and IndexedDB, keeps a default-5 Active Turn Runtime Set, performs serialized read repair from Finished Cursor, builds a lightweight Display Index for the selected session, and decodes raw turns only for mounted virtualized rendering/copy/status.
 
-**Tech Stack:** Go server, WMT2 file store, TypeScript React app/web, `@tanstack/react-virtual`, IndexedDB workspace cache, Jest, Go tests.
+**Tech Stack:** Go server, WMT2 file store, TypeScript React app/web, `react-virtuoso`, IndexedDB workspace cache, Jest, Go tests.
 
 ---
 
@@ -53,9 +53,9 @@ App sync:
 App status/display:
 
 - Modify `app/web/src/chatSessionState.ts`: list state only from summary.
-- Delete/retire `app/web/src/chat/chatTurnWindow.ts`: replace manual raw turn range rendering with Display Index plus `ChatVirtualTurnList`.
+- Delete/retire `app/web/src/chat/chatTurnWindow.ts`: replace manual raw turn range rendering with Display Index plus `ChatVirtuosoTurnList`.
 - Modify `app/web/src/chat/chatCopyRange.ts`: decode full active source range, reject `session/gap`.
-- Modify render branches in `app/web/src/main.tsx`: render `ChatVirtualTurnList` and delegate mounted-item decoding/rendering to chat display modules.
+- Modify render branches in `app/web/src/main.tsx`: render `ChatVirtuosoTurnList` and delegate mounted-item decoding/rendering to chat display modules.
 - Modify related Jest tests.
 
 Docs:
@@ -508,24 +508,23 @@ Expected: PASS.
 
 - Delete or retire: `app/web/src/chat/chatTurnWindow.ts` as the primary render window.
 - Create: `app/web/src/chat/chatDisplayIndex.ts`
-- Create: `app/web/src/chat/chatTurnHeightCache.ts`
-- Create: `app/web/src/chat/ChatVirtualTurnList.tsx`
+- Create: `app/web/src/chat/ChatVirtuosoTurnList.tsx`
 - Modify: `app/package.json`
 - Modify: `app/package-lock.json`
 - Delete or rewrite: `app/__tests__/web-chat-turn-window.test.ts`
 - Create: `app/__tests__/web-chat-display-index.test.ts`
-- Create: `app/__tests__/web-chat-virtual-scroll.test.ts`
+- Create: `app/__tests__/web-chat-virtuoso-scroll.test.ts`
 - Modify: `app/web/src/main.tsx`
 
-- [ ] **Step 1: Add TanStack virtualizer dependency**
+- [ ] **Step 1: Add Virtuoso dependency**
 
-Add `@tanstack/react-virtual` to `app/package.json` dependencies and update `app/package-lock.json`.
+Add `react-virtuoso` to `app/package.json` dependencies and update `app/package-lock.json`. Do not add a second virtualizer dependency.
 
 Run:
 
 ```powershell
 cd app
-npm install @tanstack/react-virtual
+npm install react-virtuoso
 ```
 
 Expected: package and lockfile updated without changing unrelated dependencies.
@@ -564,37 +563,29 @@ Hidden tool/thought turns should not enter Display Index and therefore should no
 
 Protocol rendering such as prompt request/done separators, plans, tool states, and gaps must be classified in Display Index. Assistant text affordances such as A/B/C choices and Chinese confirmation replies stay on the owning `kind: "text"` item through `affordance`, not as separate virtualized rows.
 
-- [ ] **Step 4: Add lazy height cache**
+- [ ] **Step 4: Provide lightweight height estimates**
 
-Create `chatTurnHeightCache.ts` with an in-memory cache keyed by:
+Do not create a second app-owned height cache. The Display Index provides `estimatedHeight`; `react-virtuoso` owns mounted item measurement internally. Exact measurement is allowed only for mounted visible + overscan items. The implementation must not pre-render, mount, or fully decode all turns to compute exact scrollbar height.
 
-```ts
-type ChatHeightCacheKey = {
-  sessionId: string;
-  itemKey: string;
-  contentRevision: string;
-};
-```
+- [ ] **Step 5: Create ChatVirtuosoTurnList wrapper**
 
-The virtualized list uses `measuredHeight ?? estimatedHeight`. Exact measurement is allowed only for mounted visible + overscan items. The implementation must not pre-render, mount, or fully decode all turns to compute exact scrollbar height.
+Create `ChatVirtuosoTurnList.tsx` and keep Virtuoso API usage inside this wrapper.
 
-- [ ] **Step 5: Create ChatVirtualTurnList wrapper**
-
-Create `ChatVirtualTurnList.tsx` and keep TanStack API usage inside this wrapper.
-
-Use `useVirtualizer`:
+Use `Virtuoso`:
 
 ```tsx
-const virtualizer = useVirtualizer({
-  count: items.length,
-  getScrollElement: () => parentRef.current,
-  getItemKey: index => items[index].key,
-  estimateSize: index => heightCache.get(items[index]) ?? items[index].estimatedHeight,
-  overscan: 12,
-});
+<Virtuoso
+  customScrollParent={scrollParent}
+  data={displayIndex.items}
+  computeItemKey={(index, item) => item.key}
+  defaultItemHeight={defaultItemHeight}
+  heightEstimates={heightEstimates}
+  initialTopMostItemIndex={{index: 'LAST', align: 'end'}}
+  followOutput={isAtBottom => (isAtBottom && shouldAutoscroll() ? 'auto' : false)}
+/>
 ```
 
-The wrapper owns `virtualizer.getTotalSize()`, `virtualizer.getVirtualItems()`, `virtualizer.measureElement`, tail-lock detection, and scroll-to-bottom mechanics. `main.tsx` should not call TanStack APIs directly.
+The wrapper owns Virtuoso range calculation, mounted item measurement, tail-lock detection, and scroll-to-bottom mechanics. `main.tsx` should not call Virtuoso APIs directly.
 
 - [ ] **Step 6: Render only mounted virtual items**
 
@@ -628,7 +619,7 @@ Run:
 
 ```powershell
 cd app
-npm test -- --runInBand __tests__/web-chat-display-index.test.ts __tests__/web-chat-virtual-scroll.test.ts
+npm test -- --runInBand __tests__/web-chat-display-index.test.ts __tests__/web-chat-turn-rendering.test.ts
 ```
 
 Expected: PASS.
@@ -719,7 +710,7 @@ Run:
 
 ```powershell
 cd app
-npm test -- --runInBand __tests__/web-chat-turn-stores.test.ts __tests__/web-chat-sync-reconcile.test.ts __tests__/web-chat-session-state.test.ts __tests__/web-chat-display-index.test.ts __tests__/web-chat-virtual-scroll.test.ts __tests__/web-chat-copy-range.test.ts
+npm test -- --runInBand __tests__/web-chat-turn-stores.test.ts __tests__/web-chat-sync-reconcile.test.ts __tests__/web-chat-session-state.test.ts __tests__/web-chat-display-index.test.ts __tests__/web-chat-turn-rendering.test.ts __tests__/web-chat-copy-range.test.ts
 ```
 
 Expected: PASS.
@@ -742,7 +733,7 @@ Implementation is complete only when:
 - Server/app use raw turn wire with no `sessionId` inside turns.
 - Old wire/cache formats are not treated as compatible.
 - Incompatible local persistent cache clears everything except token/auth credentials and recreates IndexedDB tables.
-- `@tanstack/react-virtual` is added to `app/package.json` and locked in `app/package-lock.json`.
+- `react-virtuoso` is added to `app/package.json` and locked in `app/package-lock.json`; no second virtualizer dependency is present.
 - `main.tsx` is reduced to orchestration; wire parsing, active runtime set, read repair, durable persist, display index, and virtualizer mechanics live in dedicated modules.
 - Active Turn Runtime Set default capacity is 5.
 - Set outside `session.message` does not parse content or mutate turn cache.
@@ -750,7 +741,7 @@ Implementation is complete only when:
 - Read repair is serialized and uses only Finished Cursor.
 - Durable cache stores raw finished prefix in `turnsJson` and persists with 5s debounce plus required flushes.
 - Session list state comes only from Session Summary.
-- Selected React view is bounded by `@tanstack/react-virtual`, not by a manual raw turn range.
+- Selected React view is bounded by `react-virtuoso`, not by a manual raw turn range.
 - Display Index is lightweight and does not store full decoded messages or markdown render output.
 - Display Index covers the full selected active session after hide/show filters.
 - Scrollbar is driven by logical Display Index height, not mounted DOM node count.

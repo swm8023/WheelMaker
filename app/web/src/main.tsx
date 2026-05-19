@@ -50,7 +50,7 @@ import {createChatDurablePersistQueue} from './chat/chatDurablePersist';
 import {createChatReadRepairQueue} from './chat/chatReadRepair';
 import {buildChatDisplayIndex} from './chat/chatDisplayIndex';
 import {createChatActiveRuntimeSet} from './chat/chatActiveRuntimeSet';
-import {ChatVirtualTurnList, type ChatVirtualTurnListHandle} from './chat/ChatVirtualTurnList';
+import {ChatVirtuosoTurnList, type ChatVirtuosoTurnListHandle} from './chat/ChatVirtuosoTurnList';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
 import {
   extractChatConfirmationReply,
@@ -70,7 +70,11 @@ import {
 } from './chat/chatScrollIntent';
 import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { mergeChatSessionList, shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
-import { resolveChatListSelection, shouldApplyPreservedChatLoad } from './chat/chatSelectionGuard';
+import {
+  resolveChatListSelection,
+  resolveSelectedChatVisibilityRecovery,
+  shouldApplyPreservedChatLoad,
+} from './chat/chatSelectionGuard';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
 import { resolveLayoutMode } from './services/responsiveLayout';
@@ -2272,7 +2276,7 @@ function App() {
   const gitSelectedBranchesRef = useRef<string[]>([]);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
-  const chatVirtualListRef = useRef<ChatVirtualTurnListHandle | null>(null);
+  const chatVirtuosoListRef = useRef<ChatVirtuosoTurnListHandle | null>(null);
   const chatDisplayItemCountRef = useRef(0);
   const chatAutoScrollFollowRef = useRef(true);
   const chatPointerScrollingRef = useRef(false);
@@ -2288,6 +2292,8 @@ function App() {
   const projectSessionSentinelRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const chatSelectedIdRef = useRef('');
   const selectedChatKeyRef = useRef<ChatSessionKey | null>(null);
+  const chatVisibleRuntimeKeyRef = useRef('');
+  const chatSelectedLoadAttemptRuntimeKeyRef = useRef('');
   const chatFinishedCursorRef = useRef<Record<string, number>>({});
   const chatMessageStoreRef = useRef<Record<string, RegistryChatMessage[]>>({});
   const chatTurnStoreRef = useRef<Record<string, ChatTurnStoreState>>({});
@@ -2559,6 +2565,7 @@ function App() {
     options?: { resetToLatest?: boolean; followLatest?: boolean },
   ) => {
     if (!runtimeKey) {
+      chatVisibleRuntimeKeyRef.current = '';
       chatMessagesRef.current = [];
       setChatMessages([]);
       return;
@@ -2571,6 +2578,7 @@ function App() {
       setChatShowScrollToBottom(false);
     }
     if (encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
+      chatVisibleRuntimeKeyRef.current = runtimeKey;
       chatMessagesRef.current = fullMessages;
       setChatMessages(fullMessages);
     }
@@ -2621,7 +2629,7 @@ function App() {
       if (!shouldAutoscrollChat(force)) {
         return;
       }
-      chatVirtualListRef.current?.scrollToBottom('auto');
+      chatVirtuosoListRef.current?.scrollToBottom('auto');
       chatAutoScrollFollowRef.current = true;
       setChatShowScrollToBottom(false);
     });
@@ -2635,7 +2643,7 @@ function App() {
       if (!shouldAutoscrollChat(false)) {
         return;
       }
-      chatVirtualListRef.current?.autoscrollToBottom();
+      chatVirtuosoListRef.current?.autoscrollToBottom();
     });
   }, [shouldAutoscrollChat]);
 
@@ -4820,6 +4828,8 @@ function App() {
         ? chatSessionKeyFromParts(projectIdRef.current, preferredSelection)
         : null,
     );
+    chatVisibleRuntimeKeyRef.current = '';
+    chatSelectedLoadAttemptRuntimeKeyRef.current = '';
     chatFinishedCursorRef.current = {};
     chatMessageStoreRef.current = {};
     chatTurnStoreRef.current = {};
@@ -5260,6 +5270,59 @@ function App() {
       setError(err instanceof Error ? err.message : String(err));
     }
   };
+
+  useEffect(() => {
+    const selectedKey = selectedChatKeyRef.current;
+    const runtimeKey = encodeChatSessionKey(selectedKey);
+    if (!selectedKey || !runtimeKey) {
+      return;
+    }
+    if (tab !== 'chat' || !connected || chatLoading) {
+      return;
+    }
+    const shouldInspectCache =
+      chatVisibleRuntimeKeyRef.current !== runtimeKey ||
+      chatMessagesRef.current.length === 0;
+    const cachedMessages = shouldInspectCache
+      ? hydrateChatSessionContentFromCache(selectedKey.sessionId, selectedKey.projectId)
+      : [];
+    const selectedVisibilityRecovery = resolveSelectedChatVisibilityRecovery({
+      tab,
+      connected,
+      chatLoading,
+      selectedRuntimeKey: runtimeKey,
+      visibleRuntimeKey: chatVisibleRuntimeKeyRef.current,
+      visibleMessageCount: chatMessagesRef.current.length,
+      cachedMessageCount: cachedMessages.length,
+      attemptedRuntimeKey: chatSelectedLoadAttemptRuntimeKeyRef.current,
+    });
+
+    if (selectedVisibilityRecovery === 'restore-cache') {
+      activateChatRuntime(runtimeKey, {selected: true});
+      setVisibleChatMessagesForRuntimeKey(runtimeKey, cachedMessages, {resetToLatest: true});
+      return;
+    }
+
+    if (selectedVisibilityRecovery === 'read-session') {
+      chatSelectedLoadAttemptRuntimeKeyRef.current = runtimeKey;
+      if (chatVisibleRuntimeKeyRef.current !== runtimeKey) {
+        setVisibleChatMessagesForRuntimeKey(runtimeKey, [], {resetToLatest: true});
+      }
+      loadChatSession(selectedKey.sessionId, selectedKey.projectId, {
+        incremental: true,
+        preserveUserSelection: true,
+        selectionSnapshot: runtimeKey,
+      }).then(loaded => {
+        if (!loaded && chatSelectedLoadAttemptRuntimeKeyRef.current === runtimeKey) {
+          chatSelectedLoadAttemptRuntimeKeyRef.current = '';
+        }
+      }).catch(() => {
+        if (chatSelectedLoadAttemptRuntimeKeyRef.current === runtimeKey) {
+          chatSelectedLoadAttemptRuntimeKeyRef.current = '';
+        }
+      });
+    }
+  }, [tab, connected, selectedChatEncodedKey, chatMessages.length, chatLoading, setVisibleChatMessagesForRuntimeKey]);
   const resetChatComposer = () => {
     chatComposerTextRef.current = '';
     chatAttachmentsRef.current = [];
@@ -8929,7 +8992,7 @@ function App() {
       </div>
     );
   };
-  const renderChatVirtualItem = (displayItem: typeof chatDisplayIndex.items[number]) => {
+  const renderChatVirtuosoItem = (displayItem: typeof chatDisplayIndex.items[number]) => {
     const sourceMessage = displayItem.kind === 'turn'
       ? chatMessages[displayItem.sourceIndex]
       : undefined;
@@ -9078,15 +9141,15 @@ function App() {
                 </div>
               ) : null}
               {chatDisplayIndex.items.length > 0 ? (
-                <ChatVirtualTurnList
-                  ref={chatVirtualListRef}
+                <ChatVirtuosoTurnList
+                  ref={chatVirtuosoListRef}
                   scrollRef={chatScrollRef}
                   displayIndex={chatDisplayIndex}
                   runtimeKey={selectedChatEncodedKey}
                   atBottomThreshold={CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD}
                   onAtBottomChange={handleChatAtBottomChange}
                   shouldAutoscroll={shouldAutoscrollChat}
-                  renderItem={renderChatVirtualItem}
+                  renderItem={renderChatVirtuosoItem}
                 />
               ) : null}
             </div>

@@ -10,26 +10,12 @@ export type ChatDisplayIndexItem = {
 
 export type ChatDisplayIndex = {
   items: ChatDisplayIndexItem[];
-  totalEstimatedHeight: number;
 };
 
 export type ChatDisplayIndexOptions = {
   shouldRender?: (message: RegistryChatMessage) => boolean;
   pendingKey?: string;
   pendingEstimatedHeight?: number;
-};
-
-export type ChatDisplayRangeOptions = {
-  scrollOffset: number;
-  viewportHeight: number;
-  overscan?: number;
-};
-
-export type ChatDisplayRange = {
-  startIndex: number;
-  endIndex: number;
-  paddingTop: number;
-  paddingBottom: number;
 };
 
 function positiveTurnIndex(message: RegistryChatMessage): number {
@@ -100,44 +86,5 @@ export function buildChatDisplayIndex(
       estimatedHeight: Math.max(56, Math.trunc(options.pendingEstimatedHeight ?? 120)),
     });
   }
-  return {
-    items,
-    totalEstimatedHeight: items.reduce((sum, item) => sum + item.estimatedHeight, 0),
-  };
-}
-
-export function getChatDisplayIndexRange(
-  index: ChatDisplayIndex,
-  options: ChatDisplayRangeOptions,
-): ChatDisplayRange {
-  const itemCount = index.items.length;
-  if (itemCount === 0) {
-    return {startIndex: 0, endIndex: 0, paddingTop: 0, paddingBottom: 0};
-  }
-  const scrollStart = Math.max(0, options.scrollOffset - Math.max(0, options.overscan ?? 0));
-  const scrollEnd = Math.max(
-    scrollStart,
-    options.scrollOffset + Math.max(0, options.viewportHeight) + Math.max(0, options.overscan ?? 0),
-  );
-  let offset = 0;
-  let startIndex = 0;
-  while (
-    startIndex < itemCount &&
-    offset + index.items[startIndex].estimatedHeight <= scrollStart
-  ) {
-    offset += index.items[startIndex].estimatedHeight;
-    startIndex += 1;
-  }
-  let endIndex = startIndex;
-  let endOffset = offset;
-  while (endIndex < itemCount && endOffset < scrollEnd) {
-    endOffset += index.items[endIndex].estimatedHeight;
-    endIndex += 1;
-  }
-  return {
-    startIndex,
-    endIndex,
-    paddingTop: offset,
-    paddingBottom: Math.max(0, index.totalEstimatedHeight - endOffset),
-  };
+  return {items};
 }

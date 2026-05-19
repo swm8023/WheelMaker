@@ -11,7 +11,7 @@
 - session 列表中的进行中、完成、失败未查看状态必须正确。
 - 当前 session 的 streaming turn 必须稳定更新，同一 turn 原地覆盖，不产生重复或断裂。
 - 当前 active session 可以全量加载 turns 到内存，简化同步模型。
-- React/DOM 不能全量渲染历史，只挂载 `@tanstack/react-virtual` 的 visible + overscan items。
+- React/DOM 不能全量渲染历史，只挂载 `react-virtuoso` 的 visible + overscan items。
 - 上滑/下滑只调整窗口，不触发 server read。
 - 用户在底部时，新 turn 自动跟随；用户上翻后，新 turn 不强制跳底。
 - 服务端和 app/web 同步升级，不保留旧 message/read wire 兼容。
@@ -420,7 +420,7 @@ Session list 状态只由服务端 Session Summary 更新：
 
 第一阶段 full selected active session raw turns 已在内存，滚动策略只控制 React/DOM 渲染和可见 projection。不能为了滚动条或高度计算提前 decode、markdown render 或挂载全量 turns。
 
-本迭代使用 `@tanstack/react-virtual` 封装 `ChatVirtualTurnList`。不再维护手写 raw turn range 作为主要滚动状态；raw `turnIndex` 仍作为 Display Item metadata、copy range、gap/cursor 判断和 scroll-to-item 定位边界。
+本迭代使用 `react-virtuoso` 封装 `ChatVirtuosoTurnList`。不再维护手写 raw turn range 作为主要滚动状态；raw `turnIndex` 仍作为 Display Item metadata、copy range、gap/cursor 判断和 scroll-to-item 定位边界。
 
 ### 11.1 Source、Display Index 与 View
 
@@ -439,7 +439,7 @@ Display Index =
 
 Virtualized Chat View =
   Display Index
-  -> @tanstack/react-virtual computes visible + overscan items
+  -> react-virtuoso computes visible + overscan items
   -> decode/render only mounted items
   -> measure mounted item heights
 ```
@@ -470,7 +470,7 @@ type ChatDisplayItem = {
 约束：
 
 - Source stores 仍只保存 raw turns。
-- React/DOM 只挂载 virtualizer 当前 visible + overscan 的 items。
+- React/DOM 只挂载 Virtuoso 当前 visible + overscan 的 items。
 - `Display Index` 覆盖 selected active session 的完整 source turns，但每个 item 必须轻量。
 - `content` 全量 JSON parse 只允许用于 shallow envelope：识别 `method`、`param.type`、`status`、是否 copyable、是否隐藏等。
 - Markdown、代码块、复杂组件 props、复制文本等重 decode 只能发生在 visible + overscan items。
@@ -489,35 +489,37 @@ type ChatDisplayItem = {
 
 ### 11.3 Scrollbar 与高度估算
 
-右侧 scrollbar 必须由 `@tanstack/react-virtual` 基于 `Display Index` 的逻辑总高度维护，而不是由已挂载 DOM 节点总高度自然决定。
+右侧 scrollbar 必须由 `react-virtuoso` 基于 `Display Index` 的逻辑总高度维护，而不是由已挂载 DOM 节点总高度自然决定。
 
-`ChatVirtualTurnList` 封装边界：
+`ChatVirtuosoTurnList` 封装边界：
 
 ```ts
-type ChatVirtualTurnListProps = {
-  items: ChatDisplayItem[];
-  renderItem: (item: ChatDisplayItem) => React.ReactNode;
-  followTail: boolean;
-  onFollowTailChange: (next: boolean) => void;
+type ChatVirtuosoTurnListProps = {
+  scrollRef: React.RefObject<HTMLElement | null>;
+  displayIndex: ChatDisplayIndex;
+  runtimeKey: string;
+  renderItem: (item: ChatDisplayIndexItem) => React.ReactNode;
+  onAtBottomChange: (atBottom: boolean) => void;
+  shouldAutoscroll: () => boolean;
 };
 ```
 
 实现约束：
 
-- 使用 `useVirtualizer`.
-- `count = items.length`.
-- `getItemKey(index) = items[index].key`.
-- `estimateSize(index) = heightCache.get(items[index]) ?? items[index].estimatedHeight`.
-- 每个 mounted item 调用 `virtualizer.measureElement`.
-- outer spacer 高度使用 `virtualizer.getTotalSize()`.
-- `main.tsx` 不直接操作 TanStack API；只传 `Display Index` 和 renderer。
+- 使用 `Virtuoso` 组件，不保留手写 range、padding spacer 或旧虚拟列表代码。
+- `data = displayIndex.items`。
+- `computeItemKey = item.key`。
+- `defaultItemHeight` / `heightEstimates` 由 `DisplayIndexItem.estimatedHeight` 提供给 Virtuoso。
+- `customScrollParent` 指向 chat scroll container。
+- `atBottomStateChange`、`totalListHeightChanged`、`scrollToIndex({index: "LAST"})` 和 `autoscrollToBottom()` 都封装在 wrapper 内。
+- `main.tsx` 不直接操作 Virtuoso API；只传 `Display Index`、renderer 和滚动意图。
 
 高度策略：
 
 - 未渲染 item 使用 `estimatedHeight`。
-- visible + overscan item 挂载后测量真实 DOM 高度。
-- 测量结果以 `sessionId + item.key + contentRevision` 写入内存 height cache。
-- virtualizer 使用 `measuredHeight ?? estimatedHeight` 计算逻辑总高度和 scrollbar thumb。
+- visible + overscan item 挂载后的真实 DOM 高度由 Virtuoso 内部测量与缓存。
+- App 不维护第二套高度缓存或手写 range height cache。
+- Virtuoso 使用内部测量值和传入估算值计算逻辑总高度和 scrollbar thumb。
 - 流式 tail item 的高度更新用 `requestAnimationFrame` 或节流合并，避免每个 chunk 都触发布局抖动。
 - 禁止为了获得精确 scrollbar 而提前 decode/render 全量 turns。
 
@@ -543,7 +545,7 @@ type ScrollAnchor = {
 更新流程：
 
 1. 在修改 display index、height cache 或 tail 内容前记录 anchor。
-2. 应用数据变化并让 virtualizer 完成布局。
+2. 应用数据变化并让 Virtuoso 完成布局。
 3. 如果处于 Tail Lock，滚动到底部。
 4. 否则恢复 anchor 的 viewport offset。
 
@@ -553,13 +555,13 @@ type ScrollAnchor = {
 
 1. 计算 latest source turn index。
 2. 构建完整轻量 `Display Index`。
-3. `ChatVirtualTurnList` 初始定位到最后一个 `DisplayItem`，`align: "end"`。
+3. `ChatVirtuosoTurnList` 初始定位到最后一个 `DisplayItem`，`align: "end"`。
 4. 初始状态进入 Tail Lock。
 
 默认参数：
 
-- Overscan：12 items 起步；如默认不足，按接近一屏到两屏内容调优。
-- Tail bottom threshold：距底部 48px 内视为 Tail Lock。
+- Overscan：通过 `increaseViewportBy` / `minOverscanItemCount` 控制，按接近一屏到两屏内容调优。
+- Tail bottom threshold：由 `atBottomThreshold` 控制，默认 80px。
 - Estimate defaults 由 `ChatDisplayItem.kind` 决定，长文本可用 raw `content.length` 粗估，但不得 markdown render。
 
 ### 11.6 上滑
@@ -567,17 +569,17 @@ type ScrollAnchor = {
 当用户向上滚动：
 
 1. 不移动手写 raw turn range。
-2. `@tanstack/react-virtual` 根据 scroll offset 计算 visible + overscan items。
+2. `react-virtuoso` 根据 scroll offset 计算 visible + overscan items。
 3. mounted item 才 decode/render/measure。
 4. 不触发 server read，因为 active session 已全量在内存。
-5. 不裁剪 `Display Index`；DOM bounded 由 virtualizer 保证。
+5. 不裁剪 `Display Index`；DOM bounded 由 Virtuoso 保证。
 
 ### 11.7 下滑
 
 当用户向下滚动：
 
 1. 不移动手写 raw turn range。
-2. `@tanstack/react-virtual` 根据 scroll offset 计算 visible + overscan items。
+2. `react-virtuoso` 根据 scroll offset 计算 visible + overscan items。
 3. mounted item 才 decode/render/measure。
 4. 如果 scroll container 到达底部阈值，进入 Tail Lock。
 5. 不触发 server read。
@@ -587,7 +589,7 @@ type ScrollAnchor = {
 如果 selected session 在 Tail Lock：
 
 - 新 turn 进入 source store 后，增量更新 `Display Index`。
-- virtualizer 滚动到最后一个 item，保持底部。
+- Virtuoso 滚动到最后一个 item，保持底部。
 
 如果 selected session 不在 Tail Lock：
 
@@ -622,8 +624,7 @@ type ScrollAnchor = {
 - `chatActiveRuntimeSet.ts`：维护默认 N=5 的 Active Turn Runtime Set，处理 session 激活、淘汰、重连后 read trigger。
 - `workspacePersistence.ts` / `workspaceStore.ts`：只负责 raw `turnsJson`、`cursorJson`、schema/version 检查、除 token 外的全量本地缓存清理、重建表、5 秒 debounce persist 和 flush。
 - `chatDisplayIndex.ts`：从 raw source store 派生轻量 Display Index，只做浅分类和 metadata，不保存完整 decoded message。
-- `chatTurnHeightCache.ts`：保存 virtualizer 的 lazy measurement 和估算高度，不预渲染所有 turn。
-- `ChatVirtualTurnList.tsx`：封装 `@tanstack/react-virtual`，拥有 visible + overscan range、`measureElement`、tail lock、scroll-to-bottom；`main.tsx` 不直接操作 TanStack API。
+- `ChatVirtuosoTurnList.tsx`：封装 `react-virtuoso`，拥有 visible + overscan、内部高度测量、tail lock、scroll-to-bottom；`main.tsx` 不直接操作 Virtuoso API。
 - `main.tsx`：保留项目/session 选择、事件分发和 React 状态编排，不再直接实现 read repair、IndexedDB raw turn 合并、显示索引和滚动窗口。
 
 服务端侧也需要收敛边界：

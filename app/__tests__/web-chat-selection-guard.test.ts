@@ -1,5 +1,6 @@
 import {
   resolveChatListSelection,
+  resolveSelectedChatVisibilityRecovery,
   shouldApplyPreservedChatLoad,
 } from '../web/src/chat/chatSelectionGuard';
 import { chatSessionKeyFromParts, encodeChatSessionKey } from '../web/src/chat/chatSessionKey';
@@ -58,5 +59,44 @@ describe('web chat selection guards', () => {
         persistedKey: chatSessionKeyFromParts('project-a', 'session-missing'),
       }),
     ).toEqual({sessionId: 'session-newest', canMutateSelection: true});
+  });
+
+  test('recovers selected chat visibility after a reload leaves the panel empty', () => {
+    expect(
+      resolveSelectedChatVisibilityRecovery({
+        tab: 'chat',
+        connected: true,
+        chatLoading: false,
+        selectedRuntimeKey: 'project-a/session-a',
+        visibleRuntimeKey: '',
+        visibleMessageCount: 0,
+        cachedMessageCount: 3,
+        attemptedRuntimeKey: '',
+      }),
+    ).toBe('restore-cache');
+    expect(
+      resolveSelectedChatVisibilityRecovery({
+        tab: 'chat',
+        connected: true,
+        chatLoading: false,
+        selectedRuntimeKey: 'project-a/session-a',
+        visibleRuntimeKey: 'project-a/session-a',
+        visibleMessageCount: 0,
+        cachedMessageCount: 0,
+        attemptedRuntimeKey: '',
+      }),
+    ).toBe('read-session');
+    expect(
+      resolveSelectedChatVisibilityRecovery({
+        tab: 'chat',
+        connected: true,
+        chatLoading: false,
+        selectedRuntimeKey: 'project-a/session-a',
+        visibleRuntimeKey: 'project-a/session-a',
+        visibleMessageCount: 0,
+        cachedMessageCount: 0,
+        attemptedRuntimeKey: 'project-a/session-a',
+      }),
+    ).toBe('none');
   });
 });

@@ -1,7 +1,6 @@
-import {
-  buildChatDisplayIndex,
-  getChatDisplayIndexRange,
-} from '../web/src/chat/chatDisplayIndex';
+import fs from 'fs';
+import path from 'path';
+import {buildChatDisplayIndex} from '../web/src/chat/chatDisplayIndex';
 import type {RegistryChatMessage} from '../web/src/types/registry';
 
 function message(
@@ -31,7 +30,6 @@ describe('chat display index', () => {
 
     expect(index.items.map(item => item.turnIndex)).toEqual([1, 2, 3]);
     expect(index.items.map(item => item.sourceIndex)).toEqual([1, 2, 0]);
-    expect(index.totalEstimatedHeight).toBeGreaterThan(0);
     expect(Object.keys(index.items[0]).sort()).toEqual([
       'estimatedHeight',
       'key',
@@ -60,22 +58,16 @@ describe('chat display index', () => {
     ]);
   });
 
-  test('calculates visible range from estimated heights and overscan', () => {
-    const index = buildChatDisplayIndex([
-      message(1, 'agent_message_chunk', 'a'.repeat(240)),
-      message(2, 'agent_message_chunk', 'b'.repeat(240)),
-      message(3, 'agent_message_chunk', 'c'.repeat(240)),
-    ]);
+  test('does not keep a manual virtual range implementation', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, '..', 'web', 'src', 'chat', 'chatDisplayIndex.ts'),
+      'utf8',
+    );
 
-    const range = getChatDisplayIndexRange(index, {
-      scrollOffset: index.items[0].estimatedHeight + 1,
-      viewportHeight: 1,
-      overscan: 0,
-    });
-
-    expect(range.startIndex).toBe(1);
-    expect(range.endIndex).toBe(2);
-    expect(range.paddingTop).toBe(index.items[0].estimatedHeight);
-    expect(range.paddingBottom).toBe(index.items[2].estimatedHeight);
+    expect(source).not.toContain('getChatDisplayIndexRange');
+    expect(source).not.toContain('ChatDisplayRange');
+    expect(source).not.toContain('paddingTop');
+    expect(source).not.toContain('paddingBottom');
+    expect(source).not.toContain('totalEstimatedHeight');
   });
 });

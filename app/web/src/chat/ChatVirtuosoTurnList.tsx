@@ -5,14 +5,14 @@ import type {ChatDisplayIndex, ChatDisplayIndexItem} from './chatDisplayIndex';
 const DEFAULT_AT_BOTTOM_THRESHOLD = 80;
 const DEFAULT_BOTTOM_BUFFER = 12;
 
-type ChatVirtualScrollBehavior = 'auto' | 'smooth';
+type ChatVirtuosoScrollBehavior = 'auto' | 'smooth';
 
 type ChatVirtuosoContext = {
   bottomBuffer: number;
   rowGap: number;
 };
 
-export type ChatVirtualItem = {
+export type ChatVirtuosoItem = {
   end: number;
   index: number;
   key: string;
@@ -21,12 +21,12 @@ export type ChatVirtualItem = {
   start: number;
 };
 
-export type ChatVirtualTurnListHandle = {
+export type ChatVirtuosoTurnListHandle = {
   autoscrollToBottom: () => void;
-  scrollToBottom: (behavior?: ChatVirtualScrollBehavior) => void;
+  scrollToBottom: (behavior?: ChatVirtuosoScrollBehavior) => void;
 };
 
-export type ChatVirtualTurnListProps = {
+export type ChatVirtuosoTurnListProps = {
   scrollRef: React.RefObject<HTMLElement | null>;
   displayIndex: ChatDisplayIndex;
   runtimeKey: string;
@@ -36,7 +36,7 @@ export type ChatVirtualTurnListProps = {
   atBottomThreshold?: number;
   onAtBottomChange?: (atBottom: boolean) => void;
   shouldAutoscroll?: () => boolean;
-  renderItem: (item: ChatDisplayIndexItem, virtualItem: ChatVirtualItem) => React.ReactNode;
+  renderItem: (item: ChatDisplayIndexItem, virtualItem: ChatVirtuosoItem) => React.ReactNode;
 };
 
 const ChatVirtuosoList: Components<ChatDisplayIndexItem, ChatVirtuosoContext>['List'] =
@@ -45,7 +45,7 @@ const ChatVirtuosoList: Components<ChatDisplayIndexItem, ChatVirtuosoContext>['L
       <div
         {...props}
         ref={ref}
-        className="chat-virtual-list"
+        className="chat-virtuoso-list"
         style={style}
       >
         {children}
@@ -61,7 +61,7 @@ const ChatVirtuosoItem: Components<ChatDisplayIndexItem, ChatVirtuosoContext>['I
 }) => (
   <div
     {...props}
-    className="chat-virtual-row"
+    className="chat-virtuoso-row"
     style={{
       ...style,
       paddingBottom: `${context.rowGap}px`,
@@ -76,7 +76,7 @@ const ChatVirtuosoFooter: Components<ChatDisplayIndexItem, ChatVirtuosoContext>[
 }) => (
   <div
     aria-hidden="true"
-    className="chat-virtual-footer"
+    className="chat-virtuoso-footer"
     style={{
       height: `${context.bottomBuffer}px`,
     }}
@@ -101,10 +101,10 @@ function resolveDefaultItemHeight(heightEstimates: number[], rowGap: number): nu
   return Math.max(1, Math.round(totalHeight / heightEstimates.length));
 }
 
-export const ChatVirtualTurnList = React.forwardRef<
-  ChatVirtualTurnListHandle,
-  ChatVirtualTurnListProps
->(function ChatVirtualTurnList({
+export const ChatVirtuosoTurnList = React.forwardRef<
+  ChatVirtuosoTurnListHandle,
+  ChatVirtuosoTurnListProps
+>(function ChatVirtuosoTurnList({
   scrollRef,
   displayIndex,
   runtimeKey,
@@ -115,7 +115,7 @@ export const ChatVirtualTurnList = React.forwardRef<
   onAtBottomChange,
   shouldAutoscroll,
   renderItem,
-}: ChatVirtualTurnListProps, ref) {
+}: ChatVirtuosoTurnListProps, ref) {
   const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
   const atBottomRef = React.useRef(true);
   const [scrollParent, setScrollParent] = React.useState<HTMLElement | null>(null);
@@ -170,7 +170,7 @@ export const ChatVirtualTurnList = React.forwardRef<
     autoscrollToBottom: () => {
       virtuosoRef.current?.autoscrollToBottom();
     },
-    scrollToBottom: (behavior: ChatVirtualScrollBehavior = 'auto') => {
+    scrollToBottom: (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
       if (displayIndex.items.length === 0) {
         return;
       }
@@ -179,7 +179,7 @@ export const ChatVirtualTurnList = React.forwardRef<
   }), [displayIndex.items.length]);
 
   if (!scrollParent) {
-    return <div className="chat-virtual-list" />;
+    return <div className="chat-virtuoso-list" />;
   }
 
   return (

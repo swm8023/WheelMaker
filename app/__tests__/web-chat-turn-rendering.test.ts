@@ -9,7 +9,7 @@ function readMain(): string {
 function readVirtualList(): string {
   const projectRoot = path.join(__dirname, '..');
   return fs.readFileSync(
-    path.join(projectRoot, 'web', 'src', 'chat', 'ChatVirtualTurnList.tsx'),
+    path.join(projectRoot, 'web', 'src', 'chat', 'ChatVirtuosoTurnList.tsx'),
     'utf8',
   );
 }
@@ -25,7 +25,7 @@ describe('web chat turn rendering', () => {
 
     expect(main).toContain('const ChatTurnView = React.memo');
     expect(main).toContain('const chatDisplayIndex = useMemo(() => buildChatDisplayIndex(chatMessages');
-    expect(main).toContain('<ChatVirtualTurnList');
+    expect(main).toContain('<ChatVirtuosoTurnList');
     expect(main).not.toContain('const chatPromptGroups = useMemo');
     expect(main).not.toContain('const renderedChatPromptGroups = useMemo');
     expect(main).not.toContain('{renderedChatPromptGroups}');
@@ -36,7 +36,7 @@ describe('web chat turn rendering', () => {
     const virtualList = readVirtualList();
 
     expect(virtualList).toContain("import {Virtuoso, type Components, type VirtuosoHandle} from 'react-virtuoso';");
-    expect(virtualList).toContain('export type ChatVirtualTurnListHandle = {');
+    expect(virtualList).toContain('export type ChatVirtuosoTurnListHandle = {');
     expect(virtualList).toContain('React.useImperativeHandle(ref, () => ({');
     expect(virtualList).toContain("scrollToIndex({index: 'LAST', align: 'end', behavior});");
     expect(virtualList).toContain('virtuosoRef.current?.autoscrollToBottom();');
@@ -52,18 +52,18 @@ describe('web chat turn rendering', () => {
     expect(virtualList).toContain('atBottomStateChange={handleAtBottomStateChange}');
     expect(virtualList).toContain("followOutput={isAtBottom => (isAtBottom && shouldAutoscrollNow() ? 'auto' : false)}");
     expect(virtualList).toContain('totalListHeightChanged={handleTotalListHeightChanged}');
-    expect(virtualList).toContain('className="chat-virtual-footer"');
+    expect(virtualList).toContain('className="chat-virtuoso-footer"');
     expect(virtualList).not.toContain('@tanstack/react-virtual');
     expect(virtualList).not.toContain('chatVirtualMeasurements');
     expect(virtualList).not.toContain('shouldAdjustChatVirtualItemSizeChange');
     expect(main).toContain("import {buildChatDisplayIndex} from './chat/chatDisplayIndex';");
-    expect(main).toContain("import {ChatVirtualTurnList, type ChatVirtualTurnListHandle} from './chat/ChatVirtualTurnList';");
-    expect(main).toContain('const chatVirtualListRef = useRef<ChatVirtualTurnListHandle | null>(null);');
-    expect(main).toContain("chatVirtualListRef.current?.scrollToBottom('auto');");
-    expect(main).toContain('chatVirtualListRef.current?.autoscrollToBottom();');
+    expect(main).toContain("import {ChatVirtuosoTurnList, type ChatVirtuosoTurnListHandle} from './chat/ChatVirtuosoTurnList';");
+    expect(main).toContain('const chatVirtuosoListRef = useRef<ChatVirtuosoTurnListHandle | null>(null);');
+    expect(main).toContain("chatVirtuosoListRef.current?.scrollToBottom('auto');");
+    expect(main).toContain('chatVirtuosoListRef.current?.autoscrollToBottom();');
     expect(main).toContain('const handleChatAtBottomChange = useCallback((atBottom: boolean) => {');
     expect(main).toContain('setChatShowScrollToBottom(!atBottom);');
-    expect(main).toContain('ref={chatVirtualListRef}');
+    expect(main).toContain('ref={chatVirtuosoListRef}');
     expect(main).toContain('atBottomThreshold={CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD}');
     expect(main).toContain('onAtBottomChange={handleChatAtBottomChange}');
     expect(main).toContain('shouldAutoscroll={shouldAutoscrollChat}');

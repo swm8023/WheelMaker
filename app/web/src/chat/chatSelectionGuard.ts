@@ -9,6 +9,8 @@ export type ChatListSelectionResolution = {
   canMutateSelection: boolean;
 };
 
+export type SelectedChatVisibilityRecovery = 'none' | 'restore-cache' | 'read-session';
+
 export function shouldApplyPreservedChatLoad(
   currentKey: ChatSessionKey | null | undefined,
   selectionSnapshot: string,
@@ -67,4 +69,37 @@ export function resolveChatListSelection(input: {
   sessionId = sessionId || firstAvailableSessionId;
 
   return {sessionId, canMutateSelection: true};
+}
+
+export function resolveSelectedChatVisibilityRecovery(input: {
+  tab: string;
+  connected: boolean;
+  chatLoading: boolean;
+  selectedRuntimeKey: string;
+  visibleRuntimeKey: string;
+  visibleMessageCount: number;
+  cachedMessageCount: number;
+  attemptedRuntimeKey: string;
+}): SelectedChatVisibilityRecovery {
+  if (
+    input.tab !== 'chat' ||
+    !input.connected ||
+    input.chatLoading ||
+    !input.selectedRuntimeKey
+  ) {
+    return 'none';
+  }
+
+  const visibleBelongsToSelection = input.visibleRuntimeKey === input.selectedRuntimeKey;
+  const selectedVisible = visibleBelongsToSelection && input.visibleMessageCount > 0;
+  if (selectedVisible) {
+    return 'none';
+  }
+  if (input.cachedMessageCount > 0) {
+    return 'restore-cache';
+  }
+  if (input.attemptedRuntimeKey === input.selectedRuntimeKey) {
+    return 'none';
+  }
+  return 'read-session';
 }

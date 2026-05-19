@@ -109,7 +109,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const chatAutoScrollFollowRef = useRef(true);');
     expect(mainTsx).toContain('const chatPointerScrollingRef = useRef(false);');
     expect(mainTsx).toContain('const chatUserScrollLockUntilRef = useRef(0);');
-    expect(mainTsx).toContain('const chatVirtualListRef = useRef<ChatVirtualTurnListHandle | null>(null);');
+    expect(mainTsx).toContain('const chatVirtuosoListRef = useRef<ChatVirtuosoTurnListHandle | null>(null);');
     expect(mainTsx).toContain('const chatDisplayItemCountRef = useRef(0);');
     expect(mainTsx).not.toContain('const chatProgrammaticScrollRef = useRef(false);');
     expect(mainTsx).toContain('const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;');
@@ -120,9 +120,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('setChatShowScrollToBottom(!atBottom);');
     expect(mainTsx).toContain('const scrollChatToBottom = useCallback((force = false) => {');
     expect(mainTsx).toContain('shouldAutoScrollChatToBottom({');
-    expect(mainTsx).toContain("chatVirtualListRef.current?.scrollToBottom('auto');");
+    expect(mainTsx).toContain("chatVirtuosoListRef.current?.scrollToBottom('auto');");
     expect(mainTsx).toContain('const autoscrollChatToBottom = useCallback(() => {');
-    expect(mainTsx).toContain('chatVirtualListRef.current?.autoscrollToBottom();');
+    expect(mainTsx).toContain('chatVirtuosoListRef.current?.autoscrollToBottom();');
     expect(mainTsx).not.toContain('container.scrollTop = nextScrollTop;');
     expect(mainTsx).toContain('const forceChatScrollToBottom = useCallback(() => {');
     expect(mainTsx).toContain('chatAutoScrollFollowRef.current = true;');
@@ -134,8 +134,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("if (chatBottomFollowAction === 'scrollToBottom') {");
     expect(mainTsx).toContain('}, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, chatDisplayIndex.items.length, resizeChatComposerTextarea, scrollChatToBottom, autoscrollChatToBottom]);');
     expect(mainTsx).toContain('onWheel={event => { if (event.deltaY < 0) { markChatUserScrollIntent(); } }}');
-    expect(mainTsx).toContain('<ChatVirtualTurnList');
-    expect(mainTsx).toContain('ref={chatVirtualListRef}');
+    expect(mainTsx).toContain('<ChatVirtuosoTurnList');
+    expect(mainTsx).toContain('ref={chatVirtuosoListRef}');
     expect(mainTsx).toContain('atBottomThreshold={CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD}');
     expect(mainTsx).toContain('onAtBottomChange={handleChatAtBottomChange}');
     expect(mainTsx).toContain('shouldAutoscroll={shouldAutoscrollChat}');
@@ -190,7 +190,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.chat-block \{[\s\S]*overflow-y: scroll;[\s\S]*scrollbar-gutter: stable;[\s\S]*padding: 18px 18px 0;[\s\S]*\}/,
     );
-    expect(stylesCss).toContain('.chat-virtual-footer {');
+    expect(stylesCss).toContain('.chat-virtuoso-footer {');
     expect(stylesCss).toMatch(
       /\.chat-composer \{[\s\S]*--chat-composer-frame-top: 12px;[\s\S]*--chat-composer-fade-distance: 28px;[\s\S]*margin-top: calc\(-1 \* var\(--chat-composer-frame-top\)\);[\s\S]*padding: var\(--chat-composer-frame-top\) 14px 12px;[\s\S]*background: transparent;/,
     );

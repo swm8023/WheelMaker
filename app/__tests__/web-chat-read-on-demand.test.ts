@@ -27,6 +27,11 @@ describe('web chat read-on-demand behavior', () => {
     expect(mainTsx).toContain('selectionSnapshot: encodeChatSessionKey(preferredSelectedChatKey),');
     expect(mainTsx).toContain('useIncremental ? checkpointTurnIndex : 0,');
     expect(mainTsx).toContain('applySessionReadResult(');
+    expect(mainTsx).toContain("const chatVisibleRuntimeKeyRef = useRef('');");
+    expect(mainTsx).toContain("const chatSelectedLoadAttemptRuntimeKeyRef = useRef('');");
+    expect(mainTsx).toContain('resolveSelectedChatVisibilityRecovery({');
+    expect(mainTsx).toContain("if (selectedVisibilityRecovery === 'restore-cache') {");
+    expect(mainTsx).toContain("if (selectedVisibilityRecovery === 'read-session') {");
     expect(workspacePersistenceTs).toContain('selectedChatProjectId: string;');
     expect(workspacePersistenceTs).toContain('selectedChatSessionId: string;');
     expect(workspaceStoreTs).toContain('getSelectedChatSessionId(projectId: string): string {');

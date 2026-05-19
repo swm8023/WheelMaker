@@ -19,7 +19,7 @@ In scope:
 - Durable raw turn cache as a whole-session blob.
 - Serialized Read Repair.
 - Session list state from server Session Summary.
-- Full lightweight Display Index and bounded `@tanstack/react-virtual` rendering.
+- Full lightweight Display Index and bounded `react-virtuoso` rendering.
 - `session/gap` rendering and prompt copy behavior.
 
 Out of scope:
@@ -440,13 +440,13 @@ Within a valid copy range, the client MUST copy only copyable decoded turn types
 
 If a prompt copy range contains `session/gap`, copy MUST be disabled.
 
-### UI-019 TanStack Virtualizer
+### UI-019 Virtuoso Virtualizer
 
-The displayed chat list MUST use `@tanstack/react-virtual` through a local wrapper component named `ChatVirtualTurnList` or equivalent local module. Browser scrollbar behavior MUST NOT be derived only from the currently mounted DOM nodes.
+The displayed chat list MUST use `react-virtuoso` through a local wrapper component named `ChatVirtuosoTurnList` or equivalent local module. Browser scrollbar behavior MUST NOT be derived only from the currently mounted DOM nodes.
 
 ### UI-019A Main Orchestration Boundary
 
-`main.tsx` MUST NOT directly own wire parsing, active runtime set internals, read repair state machine, durable persist debounce, Display Index construction, or TanStack virtualizer mechanics. These responsibilities MUST live in focused chat/persistence modules with `main.tsx` acting as the selected-session and event-flow orchestrator.
+`main.tsx` MUST NOT directly own wire parsing, active runtime set internals, read repair state machine, durable persist debounce, Display Index construction, or Virtuoso list mechanics. These responsibilities MUST live in focused chat/persistence modules with `main.tsx` acting as the selected-session and event-flow orchestrator.
 
 ### UI-020 Display Index
 
@@ -525,7 +525,7 @@ The implementation is accepted when these scenarios pass:
 19. Realtime `prompt_done` for background active session does not call markRead.
 20. Session list visual state changes only after Session Summary merge.
 21. Initial selected chat builds a full lightweight Display Index but mounts only the tail virtualized view.
-22. Scrolling up/down is handled by `@tanstack/react-virtual` without server read or manual raw turn range movement.
+22. Scrolling up/down is handled by `react-virtuoso` without server read or manual raw turn range movement.
 23. Hiding tool calls does not affect raw turn cursor/copy semantics and does not contribute visible scroll height.
 24. New turns follow only when the selected virtualized list is in tail-lock mode.
 25. `session/gap` is shown as a placeholder and disables prompt copy.
