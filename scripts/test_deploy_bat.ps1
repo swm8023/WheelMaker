@@ -26,33 +26,12 @@ function Assert-NotContains {
   }
 }
 
-function Assert-Ordered {
-  param(
-    [Parameter(Mandatory = $true)][string]$Text,
-    [Parameter(Mandatory = $true)][string]$First,
-    [Parameter(Mandatory = $true)][string]$Second
-  )
-
-  $firstIndex = $Text.IndexOf($First, [StringComparison]::OrdinalIgnoreCase)
-  $secondIndex = $Text.IndexOf($Second, [StringComparison]::OrdinalIgnoreCase)
-
-  if ($firstIndex -lt 0) {
-    throw "deploy.bat does not contain expected text: $First"
-  }
-  if ($secondIndex -lt 0) {
-    throw "deploy.bat does not contain expected text: $Second"
-  }
-  if ($firstIndex -ge $secondIndex) {
-    throw "deploy.bat should run '$First' before '$Second'"
-  }
-}
-
 Assert-Contains -Text $deployBat -Needle "update + build + stop + deploy + start + publish web"
-Assert-Contains -Text $deployBat -Needle 'pushd "%~dp0app"'
-Assert-Contains -Text $deployBat -Needle "npm run build:web:release"
-Assert-Contains -Text $deployBat -Needle "[FAILED] web publish exited with code"
+Assert-Contains -Text $deployBat -Needle 'scripts\refresh_server.ps1'
+Assert-NotContains -Text $deployBat -Needle 'pushd "%~dp0app"'
+Assert-NotContains -Text $deployBat -Needle "npm run build:web:release"
+Assert-NotContains -Text $deployBat -Needle "[FAILED] web publish exited with code"
 Assert-NotContains -Text $deployBat -Needle "call npm ci --include=dev"
 Assert-NotContains -Text $deployBat -Needle "syncing app Web dependencies"
-Assert-Ordered -Text $deployBat -First "scripts\refresh_server.ps1" -Second "npm run build:web:release"
 
-Write-Host "deploy.bat web publish checks passed"
+Write-Host "deploy.bat internal web publish checks passed"

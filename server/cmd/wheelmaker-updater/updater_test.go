@@ -64,12 +64,8 @@ func TestNextRunAfterNow(t *testing.T) {
 func TestRunUpdateRound_RunsRefreshScript(t *testing.T) {
 	repoDir := t.TempDir()
 	scriptsDir := filepath.Join(repoDir, "scripts")
-	appDir := filepath.Join(repoDir, "app")
 	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
 		t.Fatalf("mkdir scripts: %v", err)
-	}
-	if err := os.MkdirAll(appDir, 0o755); err != nil {
-		t.Fatalf("mkdir app: %v", err)
 	}
 	refreshPath := filepath.Join(scriptsDir, "refresh_server.ps1")
 	if err := os.WriteFile(refreshPath, []byte(""), 0o644); err != nil {
@@ -89,7 +85,6 @@ func TestRunUpdateRound_RunsRefreshScript(t *testing.T) {
 	}
 	want := []string{
 		repoDir + "|powershell -NoProfile -ExecutionPolicy Bypass -File " + refreshPath + " -InstallDir C:/Users/test/.wheelmaker/bin -SkipUpdaterInstall -SkipServiceConfig",
-		appDir + "|npm run build:web:release",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands mismatch\n got: %#v\nwant: %#v", got, want)
@@ -134,7 +129,7 @@ func TestRunUpdateRound_DarwinRunsRefreshShell(t *testing.T) {
 	}
 }
 
-func TestRunUpdateRound_DarwinManualSignalSkipsUpdateAndWebPublish(t *testing.T) {
+func TestRunUpdateRound_DarwinManualSignalSkipsUpdateAndPublishesWeb(t *testing.T) {
 	old := runtimeGOOS
 	runtimeGOOS = "darwin"
 	defer func() { runtimeGOOS = old }()
@@ -157,8 +152,11 @@ func TestRunUpdateRound_DarwinManualSignalSkipsUpdateAndWebPublish(t *testing.T)
 	}
 
 	args := strings.Join(f.calls[0].args, " ")
-	if !strings.Contains(args, "--skip-update") || !strings.Contains(args, "--skip-web-publish") {
-		t.Fatalf("manual signal should skip update and web publish, got: %s", args)
+	if !strings.Contains(args, "--skip-update") {
+		t.Fatalf("manual signal should skip update, got: %s", args)
+	}
+	if strings.Contains(args, "--skip-web-publish") {
+		t.Fatalf("manual signal should still publish web through refresh_server.sh, got: %s", args)
 	}
 }
 
@@ -200,7 +198,7 @@ func TestRunUpdateRound_LinuxRunsRefreshShell(t *testing.T) {
 	}
 }
 
-func TestRunUpdateRound_LinuxManualSignalSkipsUpdateAndWebPublish(t *testing.T) {
+func TestRunUpdateRound_LinuxManualSignalSkipsUpdateAndPublishesWeb(t *testing.T) {
 	old := runtimeGOOS
 	runtimeGOOS = "linux"
 	defer func() { runtimeGOOS = old }()
@@ -223,8 +221,11 @@ func TestRunUpdateRound_LinuxManualSignalSkipsUpdateAndWebPublish(t *testing.T) 
 	}
 
 	args := strings.Join(f.calls[0].args, " ")
-	if !strings.Contains(args, "--skip-update") || !strings.Contains(args, "--skip-web-publish") {
-		t.Fatalf("manual signal should skip update and web publish, got: %s", args)
+	if !strings.Contains(args, "--skip-update") {
+		t.Fatalf("manual signal should skip update, got: %s", args)
+	}
+	if strings.Contains(args, "--skip-web-publish") {
+		t.Fatalf("manual signal should still publish web through refresh_server.sh, got: %s", args)
 	}
 }
 
@@ -233,7 +234,7 @@ func TestRequiredCommandsForOS(t *testing.T) {
 		t.Fatalf("windows commands=%#v", got)
 	}
 	darwin := requiredCommandsForOS("darwin")
-	for _, want := range []string{"bash", "git", "go", "node", "npm", "npx", "launchctl"} {
+	for _, want := range []string{"bash", "git", "go", "node", "npm", "launchctl"} {
 		found := false
 		for _, got := range darwin {
 			if got == want {
@@ -244,8 +245,13 @@ func TestRequiredCommandsForOS(t *testing.T) {
 			t.Fatalf("darwin commands missing %s: %#v", want, darwin)
 		}
 	}
+	for _, got := range darwin {
+		if got == "npx" {
+			t.Fatalf("darwin commands should not require npx: %#v", darwin)
+		}
+	}
 	linux := requiredCommandsForOS("linux")
-	for _, want := range []string{"bash", "git", "go", "node", "npm", "npx", "systemctl"} {
+	for _, want := range []string{"bash", "git", "go", "node", "npm", "systemctl"} {
 		found := false
 		for _, got := range linux {
 			if got == want {
@@ -254,6 +260,11 @@ func TestRequiredCommandsForOS(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("linux commands missing %s: %#v", want, linux)
+		}
+	}
+	for _, got := range linux {
+		if got == "npx" {
+			t.Fatalf("linux commands should not require npx: %#v", linux)
 		}
 	}
 }

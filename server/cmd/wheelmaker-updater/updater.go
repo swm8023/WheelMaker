@@ -192,24 +192,14 @@ func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner
 		return err
 	}
 
-	if !skipUpdate && !invocation.refreshPublishesWeb {
-		appDir := filepath.Join(cfg.RepoDir, "app")
-		logger.Info("[updater] publish web release begin")
-		if _, err := runner.CombinedOutput(ctx, appDir, "npm", "run", "build:web:release"); err != nil {
-			return err
-		}
-		logger.Info("[updater] publish web release complete")
-	}
-
 	logger.Info("[updater] run refresh script complete")
 	return nil
 }
 
 type refreshInvocation struct {
-	scriptPath          string
-	command             string
-	args                []string
-	refreshPublishesWeb bool
+	scriptPath string
+	command    string
+	args       []string
 }
 
 func refreshInvocationForOS(cfg UpdaterConfig, skipUpdate bool, goos string) (refreshInvocation, error) {
@@ -228,10 +218,9 @@ func refreshInvocationForOS(cfg UpdaterConfig, skipUpdate bool, goos string) (re
 			args = append(args, "-SkipUpdate")
 		}
 		return refreshInvocation{
-			scriptPath:          refreshScript,
-			command:             "powershell",
-			args:                args,
-			refreshPublishesWeb: false,
+			scriptPath: refreshScript,
+			command:    "powershell",
+			args:       args,
 		}, nil
 	case "darwin", "linux":
 		refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server.sh")
@@ -243,13 +232,12 @@ func refreshInvocationForOS(cfg UpdaterConfig, skipUpdate bool, goos string) (re
 			"--skip-service-config",
 		}
 		if skipUpdate {
-			args = append(args, "--skip-update", "--skip-web-publish")
+			args = append(args, "--skip-update")
 		}
 		return refreshInvocation{
-			scriptPath:          refreshScript,
-			command:             "bash",
-			args:                args,
-			refreshPublishesWeb: true,
+			scriptPath: refreshScript,
+			command:    "bash",
+			args:       args,
 		}, nil
 	default:
 		return refreshInvocation{}, fmt.Errorf("unsupported updater platform: %s", goos)
@@ -290,9 +278,9 @@ func requiredCommandsForOS(goos string) []string {
 	case "windows":
 		return []string{"powershell"}
 	case "darwin":
-		return []string{"bash", "git", "go", "node", "npm", "npx", "launchctl"}
+		return []string{"bash", "git", "go", "node", "npm", "launchctl"}
 	case "linux":
-		return []string{"bash", "git", "go", "node", "npm", "npx", "systemctl"}
+		return []string{"bash", "git", "go", "node", "npm", "systemctl"}
 	default:
 		return nil
 	}

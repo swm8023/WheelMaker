@@ -33,6 +33,9 @@ Assert-Contains "systemctl --user"
 Assert-Contains "TARGET_GOOS"
 Assert-Contains 'GOOS="$TARGET_GOOS"'
 Assert-Contains "npm run build:web:release"
+Assert-Contains "write_release_manifest"
+Assert-Contains "release.json"
+Assert-Contains '"schemaVersion": 1'
 Assert-Contains "npm ci --include=dev"
 Assert-Contains "--skip-web-publish"
 Assert-Contains "Node.js 22.11.0+"
@@ -48,5 +51,18 @@ Assert-Contains "git stash push -u -m"
 Assert-Contains "wheelmaker deploy auto-stash before pull"
 Assert-NotContains "skip git pull and continue"
 Assert-NotContains "require_command npx"
+
+$publishIndex = $text.IndexOf("publish_web", [StringComparison]::Ordinal)
+$manifestIndex = $text.LastIndexOf("write_release_manifest", [StringComparison]::Ordinal)
+$startIndex = $text.LastIndexOf("start_agents", [StringComparison]::Ordinal)
+if ($publishIndex -lt 0 -or $manifestIndex -lt 0 -or $startIndex -lt 0) {
+  throw "refresh_server.sh missing expected release call order markers"
+}
+if ($publishIndex -ge $manifestIndex) {
+  throw "refresh_server.sh should write release manifest after web publish"
+}
+if ($manifestIndex -ge $startIndex) {
+  throw "refresh_server.sh should write release manifest before start"
+}
 
 Write-Host "refresh_server.sh source checks passed"

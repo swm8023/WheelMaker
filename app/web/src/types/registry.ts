@@ -228,6 +228,47 @@ export interface RegistryNpmCommandResponse {
   task: RegistryNpmTask | null;
 }
 
+export type RegistryWheelMakerUpdateStatus =
+  | 'up_to_date'
+  | 'update_available'
+  | 'update_pending'
+  | 'not_published'
+  | 'checking_failed'
+  | 'ahead_of_remote'
+  | 'diverged';
+
+export interface RegistryWheelMakerRelease {
+  schemaVersion: number;
+  repo: string;
+  branch: string;
+  remote: string;
+  sha: string;
+  publishedAt: string;
+}
+
+export interface RegistryWheelMakerGitSnapshot {
+  branch: string;
+  remote: string;
+  currentSha: string;
+  latestSha: string;
+  behindCount: number;
+  aheadCount: number;
+  dirty: boolean;
+}
+
+export interface RegistryWheelMakerUpdateResponse {
+  ok: boolean;
+  accepted?: boolean;
+  requestedAt?: string;
+  status: RegistryWheelMakerUpdateStatus | string;
+  hubId: string;
+  release?: RegistryWheelMakerRelease;
+  git?: RegistryWheelMakerGitSnapshot;
+  pendingSignal: boolean;
+  canUpdatePublish: boolean;
+  error?: string;
+}
+
 export interface RegistrySessionMessageEventPayload {
   sessionId: string;
   turn: RegistrySessionTurn;

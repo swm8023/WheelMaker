@@ -47,6 +47,27 @@ export function packageStatusLabel(status: RegistryNpmPackageStatus | string): s
   }
 }
 
+export function wheelMakerUpdateStatusLabel(status: string): string {
+  switch (status) {
+    case 'up_to_date':
+      return 'Up to date';
+    case 'update_available':
+      return 'Update available';
+    case 'update_pending':
+      return 'Update pending';
+    case 'not_published':
+      return 'Not published';
+    case 'checking_failed':
+      return 'Checking failed';
+    case 'ahead_of_remote':
+      return 'Ahead of remote';
+    case 'diverged':
+      return 'Diverged';
+    default:
+      return status || 'Unknown';
+  }
+}
+
 export function withAgentPackageTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,

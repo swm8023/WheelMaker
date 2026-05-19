@@ -26,6 +26,11 @@ function Assert-NotContains {
 Assert-Contains "function Ensure-AppDependencies"
 Assert-Contains "npm ci --include=dev"
 Assert-Contains "Ensure-AppDependencies"
+Assert-Contains "function Publish-Web"
+Assert-Contains "function Write-ReleaseManifest"
+Assert-Contains "npm run build:web:release"
+Assert-Contains "release.json"
+Assert-Contains '"schemaVersion" = 1'
 Assert-Contains "Pull-Latest"
 Assert-Contains "Ensure-AcpDependencies"
 Assert-Contains "git stash push -u -m"
@@ -35,8 +40,11 @@ Assert-NotContains "skip git pull and continue"
 $pullIndex = $text.IndexOf("Pull-Latest", [StringComparison]::Ordinal)
 $appDepsIndex = $text.LastIndexOf("Ensure-AppDependencies", [StringComparison]::Ordinal)
 $buildIndex = $text.IndexOf("Build-Binary -Out", [StringComparison]::Ordinal)
+$publishIndex = $text.LastIndexOf("Publish-Web", [StringComparison]::Ordinal)
+$manifestIndex = $text.LastIndexOf("Write-ReleaseManifest", [StringComparison]::Ordinal)
+$restartIndex = $text.LastIndexOf("Restart-Services", [StringComparison]::Ordinal)
 
-if ($pullIndex -lt 0 -or $appDepsIndex -lt 0 -or $buildIndex -lt 0) {
+if ($pullIndex -lt 0 -or $appDepsIndex -lt 0 -or $buildIndex -lt 0 -or $publishIndex -lt 0 -or $manifestIndex -lt 0 -or $restartIndex -lt 0) {
   throw "refresh_server.ps1 missing expected call order markers"
 }
 if ($pullIndex -ge $appDepsIndex) {
@@ -44,6 +52,15 @@ if ($pullIndex -ge $appDepsIndex) {
 }
 if ($appDepsIndex -ge $buildIndex) {
   throw "refresh_server.ps1 should sync app dependencies before builds"
+}
+if ($buildIndex -ge $publishIndex) {
+  throw "refresh_server.ps1 should publish web after building binaries"
+}
+if ($publishIndex -ge $manifestIndex) {
+  throw "refresh_server.ps1 should write release manifest after web publish"
+}
+if ($manifestIndex -ge $restartIndex) {
+  throw "refresh_server.ps1 should write release manifest before restart"
 }
 
 Write-Host "refresh_server.ps1 app dependency checks passed"

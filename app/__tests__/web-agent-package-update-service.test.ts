@@ -61,4 +61,27 @@ describe('agent package update registry service', () => {
       payload: {action: 'query', hubId: 'hub-a'},
     });
   });
+
+  test('sends cmd.update query and update-publish with controlled payloads', async () => {
+    const client = {
+      request: jest.fn().mockResolvedValue({
+        type: 'response',
+        payload: {ok: true, status: 'update_pending', pendingSignal: true},
+      }),
+    } as unknown as RegistryClient;
+    const repository = new RegistryRepository(client);
+
+    await repository.queryWheelMakerUpdate('hub-a');
+    await repository.requestWheelMakerUpdatePublish('hub-a');
+
+    expect(client.request).toHaveBeenNthCalledWith(1, {
+      method: 'cmd.update',
+      payload: {action: 'query', hubId: 'hub-a'},
+      timeoutMs: 60000,
+    });
+    expect(client.request).toHaveBeenNthCalledWith(2, {
+      method: 'cmd.update',
+      payload: {action: 'update-publish', hubId: 'hub-a'},
+    });
+  });
 });

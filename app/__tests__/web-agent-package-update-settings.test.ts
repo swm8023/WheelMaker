@@ -44,6 +44,13 @@ describe('agent package update settings UI source structure', () => {
 
     expect(mainTsx).toContain('const renderUpdateSettingsDetail = () =>');
     expect(mainTsx).toContain("'Update'");
+    expect(mainTsx).toContain('WheelMaker');
+    expect(mainTsx).toContain('refreshWheelMakerUpdates');
+    expect(mainTsx).toContain('service.queryWheelMakerUpdate');
+    expect(mainTsx).toContain('service.requestWheelMakerUpdatePublish');
+    expect(mainTsx).toContain("kind: 'wheelMakerUpdate'");
+    expect(mainTsx).toContain('requestWheelMakerUpdatePublish');
+    expect(mainTsx).toContain('wheelMakerUpdateStatusLabel');
     expect(mainTsx).toContain('Agent Packages');
     expect(mainTsx).toContain('refreshAgentPackages');
     expect(mainTsx).toContain('deriveAgentPackageHubIds');
@@ -58,6 +65,9 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('packageStatusLabel');
 
     expect(stylesCss).toContain('.agent-package-hub-list');
+    expect(stylesCss).toContain('.wheelmaker-update-panel');
+    expect(stylesCss).toContain('.wheelmaker-update-version-line');
+    expect(stylesCss).toContain('.wheelmaker-update-action-btn');
     expect(stylesCss).toContain('.agent-package-row');
     expect(stylesCss).toContain('.agent-package-name-line');
     expect(stylesCss).toContain('.agent-package-agent-tags');

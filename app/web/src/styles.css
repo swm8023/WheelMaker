@@ -673,6 +673,59 @@ body,
   line-height: 1.25;
 }
 
+.wheelmaker-update-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  padding-top: 8px;
+}
+
+.wheelmaker-update-main {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.wheelmaker-update-title-line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+
+.wheelmaker-update-version-line {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.wheelmaker-update-action-btn {
+  min-width: 108px;
+  height: 32px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.wheelmaker-update-action-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.wheelmaker-update-action-btn:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
 .agent-package-version-line {
   grid-column: 1 / -1;
   grid-row: 3;
@@ -743,16 +796,23 @@ body,
 }
 
 .agent-package-status.status-update_available,
-.agent-package-status.status-not_installed {
+.agent-package-status.status-not_installed,
+.agent-package-status.status-update_pending {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
 }
 
 .agent-package-status.status-deprecated,
 .agent-package-status.status-failed,
-.agent-package-status.status-checking_failed {
+.agent-package-status.status-checking_failed,
+.agent-package-status.status-diverged {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+}
+
+.agent-package-status.status-not_published,
+.agent-package-status.status-ahead_of_remote {
+  color: var(--muted);
 }
 
 .agent-package-name-line {

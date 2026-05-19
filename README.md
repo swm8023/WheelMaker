@@ -62,8 +62,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1
 
 The refresh flow will:
 
-- pull with `git pull --ff-only` when the worktree is clean
+- pull with `git pull --ff-only`, stashing local changes first if needed
 - install ACP CLI dependencies if needed
+- run `npm ci --include=dev` for the Web app before Web publish
 - build `wheelmaker.exe`, `wheelmaker-monitor.exe`, and `wheelmaker-updater.exe`
 - deploy binaries to `~\.wheelmaker\bin\`
 - preserve or initialize `~\.wheelmaker\config.json`
@@ -72,6 +73,8 @@ The refresh flow will:
   - `WheelMaker`
   - `WheelMakerMonitor`
   - `WheelMakerUpdater`
+- publish the Web UI to `~\.wheelmaker\web`
+- write `~\.wheelmaker\release.json` with the published Git SHA
 - start the services and enable auto-start
 
 If `config.json` is created for the first time, the script stops before restart so you can fill it in and run the same command again.
@@ -85,7 +88,7 @@ Requirements:
 - **Go 1.26+**
 - **Node.js 22.11+**
 - `git`
-- `npm` and `npx`
+- `npm`
 - `launchctl` on macOS, or `systemctl --user` on Linux
 - the agent CLIs you plan to use, already installed and logged in for the current user
 
@@ -103,12 +106,13 @@ bash update-publish.sh
 
 The refresh flow will:
 
-- pull with `git pull --ff-only` when the worktree is clean
+- pull with `git pull --ff-only`, stashing local changes first if needed
 - run `npm ci --include=dev` after updating so new app package dependencies are installed before Web publish
 - build the current machine architecture binaries
 - install `wheelmaker`, `wheelmaker-monitor`, and `wheelmaker-updater` to `~/.wheelmaker/bin`
 - preserve or initialize `~/.wheelmaker/config.json`
 - publish the Web UI to `~/.wheelmaker/web`
+- write `~/.wheelmaker/release.json` with the published Git SHA
 - generate LaunchAgent plist files under `~/Library/LaunchAgents` on macOS, or systemd user units under `~/.config/systemd/user` on Linux
 - start these runtime jobs:
   - `com.wheelmaker.hub`
@@ -378,18 +382,24 @@ On iOS, the installed app opens from the home screen in a standalone-style windo
 Default refresh flow:
 
 ```text
-update -> build -> stop -> deploy -> restart
+update -> deps -> build -> stop -> deploy -> publish web -> write release manifest -> restart
 ```
 
 Optional skips:
 
 - `-SkipUpdate`
+- `-SkipDeps`
 - `-SkipBuild`
 - `-SkipStop`
 - `-SkipDeploy`
+- `-SkipInstall`
+- `-SkipWebPublish`
 - `-SkipRestart`
 
-You can also trigger the updater manually:
+There are two updater trigger paths:
+
+- `update-publish.bat` / `update-publish.sh` writes a `full-update` signal. The updater runs pull, deps, build, install, Web publish, release manifest write, then restarts Hub and Monitor.
+- `scripts\signal_update_now.ps1` writes a plain local refresh signal. The updater skips pull/deps and refreshes the current checkout, including build, install, Web publish, release manifest write, and Hub/Monitor restart.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/signal_update_now.ps1 -DelaySeconds 30
@@ -552,7 +562,8 @@ npm run build:web:release
 Script overview:
 
 - `scripts\refresh_server.ps1` — service-first build and deployment
-- `scripts\signal_update_now.ps1` — async updater trigger
+- `scripts\signal_update_now.ps1` — async local refresh trigger
+- `update-publish.bat` / `update-publish.sh` — async full update and Web publish trigger
 - `app\scripts\export_web_release.ps1` — export Web assets to `~\.wheelmaker\web`
 
 ## License

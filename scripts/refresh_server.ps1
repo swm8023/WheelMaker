@@ -14,6 +14,7 @@
   [switch]$SkipUpdaterInstall,
   [switch]$SkipRestart,
   [switch]$SkipServiceConfig,
+  [switch]$SkipWebPublish,
   [string]$ServiceUser = ("{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME),
   [string]$ServicePassword = "",
   [switch]$WhatIf
@@ -211,6 +212,63 @@ function Ensure-AppDependencies {
   } finally {
     Pop-Location
   }
+}
+
+function Publish-Web {
+  $script:WebPublished = $false
+  if ($SkipWebPublish) { Write-Step "skip web publish"; return }
+  if ($SkipBuild -or $SkipInstall) { Write-Step "skip web publish because build or install is skipped"; return }
+  Assert-Command -Name "npm" -Hint "Install Node.js 22+."
+
+  $appRoot = Join-Path $script:RepoRoot "app"
+  if (-not (Test-Path $appRoot)) { throw ("app directory not found: {0}" -f $appRoot) }
+  Write-Step "publish Web UI"
+  if ($WhatIf) { Write-Host "[whatif] npm run build:web:release"; return }
+  Push-Location $appRoot
+  try {
+    Invoke-Checked -FilePath "npm" -Arguments @("run", "build:web:release") -FailureMessage "web publish failed"
+  } finally {
+    Pop-Location
+  }
+  $script:WebPublished = $true
+}
+
+function Get-GitValue {
+  param([Parameter(Mandatory = $true)][string[]]$Arguments, [string]$FailureMessage = "")
+  Push-Location $script:RepoRoot
+  try {
+    $value = ((& git @Arguments) | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0) {
+      if ([string]::IsNullOrWhiteSpace($FailureMessage)) {
+        throw ("git {0} failed (exit={1})" -f ($Arguments -join " "), $LASTEXITCODE)
+      }
+      throw ("{0} (exit={1})" -f $FailureMessage, $LASTEXITCODE)
+    }
+    return ([string]$value).Trim()
+  } finally { Pop-Location }
+}
+
+function Write-ReleaseManifest {
+  param([bool]$WebPublished)
+  if (-not $WebPublished) { Write-Step "skip release manifest"; return }
+  if ($SkipBuild -or $SkipInstall -or $SkipWebPublish) { Write-Step "skip release manifest"; return }
+  Assert-Command -Name "git" -Hint "Install Git and ensure git.exe is available."
+
+  $sha = Get-GitValue -Arguments @("rev-parse", "HEAD") -FailureMessage "git rev-parse HEAD failed"
+  $branch = Get-GitValue -Arguments @("branch", "--show-current") -FailureMessage "git branch --show-current failed"
+  $manifest = [ordered]@{
+    "schemaVersion" = 1
+    "repo" = $script:RepoRoot
+    "branch" = $branch
+    "remote" = "origin"
+    "sha" = $sha
+    "publishedAt" = (Get-Date).ToUniversalTime().ToString("o")
+  }
+  $path = Join-Path $script:WheelmakerHome "release.json"
+  Write-Step ("write release manifest: {0}" -f $path)
+  if ($WhatIf) { Write-Host ("[whatif] write {0}" -f $path); return }
+  New-Item -ItemType Directory -Path $script:WheelmakerHome -Force | Out-Null
+  $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $path -Encoding UTF8
 }
 
 function Read-ConfigJson {
@@ -794,6 +852,7 @@ $script:MonitorInstalledBinary = Join-Path $script:InstallDirResolved "wheelmake
 $script:UpdaterOutputBinary = Join-Path $script:BuildOutputRoot "wheelmaker-updater.exe"
 $script:UpdaterInstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker-updater.exe"
 $script:UpdaterServiceArguments = Get-UpdaterServiceArguments
+$script:WebPublished = $false
 
 if ($SkipUpdate) {
   $SkipGitPull = $true
@@ -847,6 +906,9 @@ if (-not $SkipInstall) {
   $config = Read-ConfigJson -Path $script:ConfigPath
   Validate-ExistingConfig -Config $config
 }
+
+Publish-Web
+Write-ReleaseManifest -WebPublished $script:WebPublished
 
 if ($configWasCreated -and -not $SkipRestart) {
   Write-Warn ("config was created from example at {0}; edit it first, then rerun scripts\refresh_server.ps1 or run ~/.wheelmaker/start.bat" -f $script:ConfigPath)

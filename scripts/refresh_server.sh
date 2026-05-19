@@ -163,6 +163,7 @@ GO_ARCH="$(go env GOARCH 2>/dev/null || uname -m)"
 BUILD_OUTPUT_ROOT="${WHEELMAKER_HOME}/build/${TARGET_GOOS}_${GO_ARCH}"
 CONFIG_PATH="${WHEELMAKER_HOME}/config.json"
 CONFIG_EXAMPLE_PATH="${SERVER_ROOT}/config.example.json"
+RELEASE_PATH="${WHEELMAKER_HOME}/release.json"
 PLIST_DIR="${HOME}/Library/LaunchAgents"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 LOG_DIR="${WHEELMAKER_HOME}/log"
@@ -362,12 +363,49 @@ install_binary() {
 publish_web() {
   if [[ "$SKIP_WEB_PUBLISH" -eq 1 ]]; then
     step "skip web publish"
-    return
+    return 1
+  fi
+  if [[ "$SKIP_BUILD" -eq 1 || "$SKIP_INSTALL" -eq 1 ]]; then
+    step "skip web publish because build or install is skipped"
+    return 1
   fi
   step "publish Web UI"
   pushd "$APP_ROOT" >/dev/null
   npm run build:web:release
   popd >/dev/null
+  return 0
+}
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+write_release_manifest() {
+  if [[ "${1:-0}" != "1" ]]; then
+    step "skip release manifest"
+    return
+  fi
+  if [[ "$SKIP_BUILD" -eq 1 || "$SKIP_INSTALL" -eq 1 || "$SKIP_WEB_PUBLISH" -eq 1 ]]; then
+    step "skip release manifest"
+    return
+  fi
+  require_command git "Install Git."
+  local branch
+  local sha
+  branch="$(git -C "$REPO_ROOT" branch --show-current)"
+  sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  step "write release manifest: ${RELEASE_PATH}"
+  mkdir -p "$WHEELMAKER_HOME"
+  cat > "$RELEASE_PATH" <<EOF
+{
+  "schemaVersion": 1,
+  "repo": "$(json_escape "$REPO_ROOT")",
+  "branch": "$(json_escape "$branch")",
+  "remote": "origin",
+  "sha": "$(json_escape "$sha")",
+  "publishedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
 }
 
 write_hub_plist() {
@@ -700,7 +738,11 @@ refresh() {
   fi
 
   configure_runtime_services
-  publish_web
+  local web_published=0
+  if publish_web; then
+    web_published=1
+  fi
+  write_release_manifest "$web_published"
 
   if [[ "$config_created" -eq 0 && "$SKIP_RESTART" -eq 0 ]]; then
     warn "config was created from example at ${CONFIG_PATH}; edit it first, then rerun scripts/refresh_server.sh"

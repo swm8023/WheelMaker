@@ -46,22 +46,6 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo [INFO] publishing Web UI...
-pushd "%~dp0app"
-if errorlevel 1 goto :web_publish_failed
-call npm run build:web:release
-if errorlevel 1 goto :web_publish_failed
-popd
-
-echo.
 echo [OK] deploy complete
 pause
 exit /b 0
-
-:web_publish_failed
-set "_WEB_EXIT=%errorlevel%"
-popd >nul 2>&1
-echo.
-echo [FAILED] web publish exited with code %_WEB_EXIT%
-pause
-exit /b %_WEB_EXIT%

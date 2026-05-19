@@ -18,6 +18,7 @@ import type {
   RegistrySyncCheckPayload,
   RegistrySyncCheckResponse,
   RegistryTokenScanResult,
+  RegistryWheelMakerUpdateResponse,
   RegistryWorkingTreeFileDiff,
 } from '../types/registry';
 
@@ -437,6 +438,20 @@ export class RegistryWorkspaceService {
       throw new Error('session is not ready');
     }
     return this.repository.queryNpmPackageTask(hubId);
+  }
+
+  async queryWheelMakerUpdate(hubId: string): Promise<RegistryWheelMakerUpdateResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.queryWheelMakerUpdate(hubId);
+  }
+
+  async requestWheelMakerUpdatePublish(hubId: string): Promise<RegistryWheelMakerUpdateResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.requestWheelMakerUpdatePublish(hubId);
   }
 
   onEvent(listener: (event: RegistryEnvelope) => void): () => void {

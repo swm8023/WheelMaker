@@ -78,6 +78,7 @@ type Reporter struct {
 	connectionEpoch int64
 	monitorCore     *MonitorCore
 	npmCommand      *NPMCommand
+	updateCommand   *UpdateCommand
 }
 
 // NewReporter creates a Reporter.
@@ -116,14 +117,15 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		}
 	}
 	r := &Reporter{
-		cfg:          cfg,
-		projects:     cp,
-		projectsByID: byID,
-		chatByID:     make(map[string]ChatHandler),
-		sessionByID:  make(map[string]SessionHandler),
-		pending:      make(map[int64]chan envelope),
-		monitorCore:  NewMonitorCore(monitorBase),
-		npmCommand:   NewNPMCommand(),
+		cfg:           cfg,
+		projects:      cp,
+		projectsByID:  byID,
+		chatByID:      make(map[string]ChatHandler),
+		sessionByID:   make(map[string]SessionHandler),
+		pending:       make(map[int64]chan envelope),
+		monitorCore:   NewMonitorCore(monitorBase),
+		npmCommand:    NewNPMCommand(),
+		updateCommand: NewUpdateCommand(monitorBase),
 	}
 	r.requestSeq.Store(2)
 	return r
@@ -324,6 +326,8 @@ func (r *Reporter) handleRegistryRequest(conn *websocket.Conn, in envelope) {
 		r.replyMonitorAction(conn, in)
 	case "cmd.npm":
 		r.replyCmdNPM(conn, in)
+	case "cmd.update":
+		r.replyCmdUpdate(conn, in)
 	case "fs.list":
 		r.replyFSList(conn, in)
 	case "fs.info":
@@ -649,6 +653,25 @@ func (r *Reporter) replyCmdNPM(conn *websocket.Conn, req envelope) {
 	if handler == nil {
 		handler = NewNPMCommand()
 		r.npmCommand = handler
+	}
+	payload, cmdErr := handler.Handle(context.Background(), req.Payload)
+	if cmdErr != nil {
+		_ = r.writeError(conn, req.RequestID, cmdErr.Code, cmdErr.Message)
+		return
+	}
+	_ = r.writeJSON(conn, "->", envelope{
+		RequestID: req.RequestID,
+		Type:      "response",
+		Method:    req.Method,
+		Payload:   rp.MustRaw(payload),
+	})
+}
+
+func (r *Reporter) replyCmdUpdate(conn *websocket.Conn, req envelope) {
+	handler := r.updateCommand
+	if handler == nil {
+		handler = NewUpdateCommand(r.cfg.MonitorBaseDir)
+		r.updateCommand = handler
 	}
 	payload, cmdErr := handler.Handle(context.Background(), req.Payload)
 	if cmdErr != nil {

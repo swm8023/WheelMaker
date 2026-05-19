@@ -98,6 +98,7 @@ import {
   AGENT_PACKAGE_SCAN_TIMEOUT_MS,
   deriveAgentPackageHubIds,
   packageStatusLabel,
+  wheelMakerUpdateStatusLabel,
   withAgentPackageTimeout,
 } from './agentPackageUpdateView';
 import {
@@ -150,6 +151,7 @@ import type {
   RegistryNpmTask,
   RegistryProject,
   RegistryTokenScanResult,
+  RegistryWheelMakerUpdateResponse,
 } from './types/registry';
 import './styles.css';
 
@@ -190,8 +192,21 @@ type ConfirmTarget =
       displayName: string;
       installedVersion: string;
       latestVersion: string;
+    }
+  | {
+      kind: 'wheelMakerUpdate';
+      hubId: string;
+      currentSha: string;
+      latestSha: string;
+      behindCount: number;
     };
 type SettingsDetailView = 'update' | 'tokenStats' | 'ccSwitch' | 'database' | null;
+type WheelMakerUpdateHubView = {
+  hubId: string;
+  loading: boolean;
+  error: string;
+  data: RegistryWheelMakerUpdateResponse | null;
+};
 type AgentPackageHubView = {
   hubId: string;
   loading: boolean;
@@ -419,6 +434,18 @@ function agentPackageActionLabel(action: 'install' | 'update' | 'uninstall'): st
     default:
       return 'Install';
   }
+}
+
+function shortGitSha(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.length > 7 ? trimmed.slice(0, 7) : trimmed || '-';
+}
+
+function wheelMakerBehindCopy(data: RegistryWheelMakerUpdateResponse | null): string {
+  if (!data?.release) return 'Unknown';
+  const behind = data.git?.behindCount ?? 0;
+  if (behind <= 0) return 'Up to date';
+  return `${behind} ${behind === 1 ? 'commit' : 'commits'} behind`;
 }
 
 function floatingControlSlotRatio(slot: PersistedFloatingControlSlot): number {
@@ -2330,6 +2357,10 @@ function App() {
   const [tokenStatsError, setTokenStatsError] = useState('');
   const [tokenStatsUpdatedAt, setTokenStatsUpdatedAt] = useState('');
   const [tokenStatsProviders, setTokenStatsProviders] = useState<TokenProviderSectionView[]>([]);
+  const [wheelMakerUpdateHubs, setWheelMakerUpdateHubs] = useState<Record<string, WheelMakerUpdateHubView>>({});
+  const [wheelMakerUpdatesLoading, setWheelMakerUpdatesLoading] = useState(false);
+  const [wheelMakerUpdatesError, setWheelMakerUpdatesError] = useState('');
+  const [wheelMakerUpdatePendingHubId, setWheelMakerUpdatePendingHubId] = useState('');
   const [agentPackageHubs, setAgentPackageHubs] = useState<Record<string, AgentPackageHubView>>({});
   const [agentPackagesLoading, setAgentPackagesLoading] = useState(false);
   const [agentPackagesError, setAgentPackagesError] = useState('');
@@ -6577,6 +6608,22 @@ function App() {
     return `${hubId}:${packageName}`;
   }, []);
 
+  const updateHubCards = useMemo(() => {
+    const hubIds = new Set<string>([
+      ...Object.keys(wheelMakerUpdateHubs),
+      ...Object.keys(agentPackageHubs),
+    ]);
+    return Array.from(hubIds).sort((left, right) => {
+      if (left < right) return -1;
+      if (left > right) return 1;
+      return 0;
+    }).map(hubId => ({
+      hubId,
+      wheelMaker: wheelMakerUpdateHubs[hubId] ?? null,
+      agentPackage: agentPackageHubs[hubId] ?? null,
+    }));
+  }, [agentPackageHubs, wheelMakerUpdateHubs]);
+
   const agentPackageHubCards = useMemo(() => {
     return Object.values(agentPackageHubs).sort((left, right) => {
       if (left.hubId < right.hubId) return -1;
@@ -6589,6 +6636,103 @@ function App() {
     () => agentPackageHubCards.some(card => card.task?.running),
     [agentPackageHubCards],
   );
+
+  const refreshWheelMakerUpdateHub = useCallback(async (hubId: string) => {
+    setWheelMakerUpdateHubs(prev => ({
+      ...prev,
+      [hubId]: {
+        ...(prev[hubId] ?? {hubId, loading: false, error: '', data: null}),
+        loading: true,
+        error: '',
+      },
+    }));
+    try {
+      const result = await service.queryWheelMakerUpdate(hubId);
+      setWheelMakerUpdateHubs(prev => ({
+        ...prev,
+        [hubId]: {
+          hubId,
+          loading: false,
+          error: result.ok ? '' : result.error || 'Update check failed.',
+          data: result,
+        },
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setWheelMakerUpdateHubs(prev => ({
+        ...prev,
+        [hubId]: {
+          ...(prev[hubId] ?? {hubId, loading: false, error: '', data: null}),
+          loading: false,
+          error: message,
+        },
+      }));
+    }
+  }, []);
+
+  const refreshWheelMakerUpdates = useCallback(async () => {
+    setWheelMakerUpdatesLoading(true);
+    setWheelMakerUpdatesError('');
+    try {
+      const latestProjects = await service.listProjects();
+      if (latestProjects.length > 0) {
+        setProjects(latestProjects);
+      }
+      const hubIds = deriveAgentPackageHubIds(latestProjects);
+      if (hubIds.length === 0) {
+        setWheelMakerUpdateHubs({});
+        setWheelMakerUpdatesError('No online hubs available.');
+        return;
+      }
+      setWheelMakerUpdateHubs(prev => {
+        const next: Record<string, WheelMakerUpdateHubView> = {};
+        hubIds.forEach(hubId => {
+          next[hubId] = {
+            hubId,
+            loading: true,
+            error: '',
+            data: prev[hubId]?.data ?? null,
+          };
+        });
+        return next;
+      });
+      const responses = await Promise.all(hubIds.map(async hubId => {
+        try {
+          const result = await service.queryWheelMakerUpdate(hubId);
+          return {hubId, result};
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return {hubId, error: message};
+        }
+      }));
+      setWheelMakerUpdateHubs(prev => {
+        const next: Record<string, WheelMakerUpdateHubView> = {};
+        responses.forEach(entry => {
+          if ('error' in entry) {
+            next[entry.hubId] = {
+              hubId: entry.hubId,
+              loading: false,
+              error: entry.error || '',
+              data: prev[entry.hubId]?.data ?? null,
+            };
+            return;
+          }
+          next[entry.hubId] = {
+            hubId: entry.hubId,
+            loading: false,
+            error: entry.result.ok ? '' : entry.result.error || 'Update check failed.',
+            data: entry.result,
+          };
+        });
+        return next;
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setWheelMakerUpdatesError(message);
+    } finally {
+      setWheelMakerUpdatesLoading(false);
+    }
+  }, []);
 
   const refreshAgentPackages = useCallback(async () => {
     setAgentPackagesLoading(true);
@@ -6678,8 +6822,9 @@ function App() {
     if (settingsDetailView !== 'update') {
       return;
     }
+    refreshWheelMakerUpdates().catch(() => undefined);
     refreshAgentPackages().catch(() => undefined);
-  }, [settingsDetailView, refreshAgentPackages]);
+  }, [settingsDetailView, refreshAgentPackages, refreshWheelMakerUpdates]);
 
   const pollAgentPackageTask = useCallback(async (hubId: string) => {
     for (;;) {
@@ -6717,6 +6862,44 @@ function App() {
       latestVersion: pkg.latestVersion,
     });
   }, []);
+
+  const requestWheelMakerUpdatePublish = useCallback((hubId: string, data: RegistryWheelMakerUpdateResponse | null) => {
+    setConfirmError('');
+    setConfirmTarget({
+      kind: 'wheelMakerUpdate',
+      hubId,
+      currentSha: data?.release?.sha || data?.git?.currentSha || '',
+      latestSha: data?.git?.latestSha || '',
+      behindCount: data?.git?.behindCount ?? 0,
+    });
+  }, []);
+
+  const handleWheelMakerUpdateConfirmedAction = useCallback(async (target: Extract<ConfirmTarget, {kind: 'wheelMakerUpdate'}>) => {
+    setConfirmError('');
+    setWheelMakerUpdatePendingHubId(target.hubId);
+    try {
+      const result = await service.requestWheelMakerUpdatePublish(target.hubId);
+      setWheelMakerUpdateHubs(prev => ({
+        ...prev,
+        [target.hubId]: {
+          hubId: target.hubId,
+          loading: false,
+          error: result.ok ? '' : result.error || 'Update request failed.',
+          data: result,
+        },
+      }));
+      setConfirmTarget(null);
+      setConfirmError('');
+      await refreshWheelMakerUpdateHub(target.hubId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setConfirmError(message);
+      setWheelMakerUpdatesError(message);
+      setError(message);
+    } finally {
+      setWheelMakerUpdatePendingHubId('');
+    }
+  }, [refreshWheelMakerUpdateHub]);
 
   const handleAgentPackageConfirmedAction = useCallback(async (target: Extract<ConfirmTarget, {kind: 'npmPackage'}>) => {
     const pendingKey = agentPackageActionKey(target.hubId, target.packageName);
@@ -8133,44 +8316,81 @@ function App() {
     renderSettingsDetailShell(
       'Update',
       <>
-        <div className="settings-detail-group-title">Agent Packages</div>
-        {agentPackagesLoading && agentPackageHubCards.length === 0 ? (
+        {(wheelMakerUpdatesLoading || agentPackagesLoading) && updateHubCards.length === 0 ? (
           <div className="muted block">Scanning online hubs...</div>
         ) : null}
-        {agentPackagesError ? (
-          <div className="muted block settings-metadata-error">{agentPackagesError}</div>
+        {wheelMakerUpdatesError || agentPackagesError ? (
+          <div className="muted block settings-metadata-error">{wheelMakerUpdatesError || agentPackagesError}</div>
         ) : null}
-        {!agentPackagesLoading && agentPackageHubCards.length === 0 && !agentPackagesError ? (
+        {!wheelMakerUpdatesLoading && !agentPackagesLoading && updateHubCards.length === 0 && !wheelMakerUpdatesError && !agentPackagesError ? (
           <div className="muted block">No online hubs available.</div>
         ) : null}
         <div className="settings-metadata-list agent-package-hub-list">
-          {agentPackageHubCards.map(card => {
-            const hub = card.hub;
-            const task = card.task;
+          {updateHubCards.map(card => {
+            const wheelMaker = card.wheelMaker;
+            const wheelMakerData = wheelMaker?.data ?? null;
+            const wheelMakerStatus = wheelMakerData?.status || (wheelMaker?.loading ? 'checking' : 'unknown');
+            const agentCard = card.agentPackage;
+            const hub = agentCard?.hub;
+            const task = agentCard?.task;
+            const wheelMakerPending = wheelMakerUpdatePendingHubId === card.hubId;
             return (
-              <div key={`agent-package-hub:${card.hubId}`} className="settings-metadata-card agent-package-hub-card">
+              <div key={`update-hub:${card.hubId}`} className="settings-metadata-card agent-package-hub-card">
                 <div className="settings-metadata-line settings-metadata-line-tags">
                   <span className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', card.hubId)}`}>
                     <span className="wide-project-hub-dot" aria-hidden="true" />
                     <span className="wide-project-hub-label">Hub: {card.hubId}</span>
                   </span>
-                  {card.loading ? (
+                  {wheelMaker?.loading || agentCard?.loading ? (
                     <span className="wide-session-agent-tag">Scanning</span>
                   ) : null}
                 </div>
+                <div className="settings-detail-group-title">WheelMaker</div>
+                <div className="wheelmaker-update-panel">
+                  <div className="wheelmaker-update-main">
+                    <div className="wheelmaker-update-title-line">
+                      <span className="settings-metadata-title">Release</span>
+                      <span className={`agent-package-status status-${wheelMakerStatus}`}>
+                        {wheelMaker?.loading ? 'Checking' : wheelMakerUpdateStatusLabel(wheelMakerStatus)}
+                      </span>
+                    </div>
+                    <div className="wheelmaker-update-version-line">
+                      <span>Current: {shortGitSha(wheelMakerData?.release?.sha || '')}</span>
+                      <span>Latest: {shortGitSha(wheelMakerData?.git?.latestSha || '')}</span>
+                      <span>{wheelMakerBehindCopy(wheelMakerData)}</span>
+                    </div>
+                    <div className="wheelmaker-update-version-line">
+                      <span>Branch: {wheelMakerData?.release?.branch || wheelMakerData?.git?.branch || '-'}</span>
+                      <span>Remote: {wheelMakerData?.release?.remote || wheelMakerData?.git?.remote || '-'}</span>
+                      <span>Published: {wheelMakerData?.release?.publishedAt || '-'}</span>
+                    </div>
+                    {wheelMaker?.error || wheelMakerData?.error ? (
+                      <div className="settings-metadata-error">{wheelMaker?.error || wheelMakerData?.error}</div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="wheelmaker-update-action-btn"
+                    disabled={wheelMakerPending || wheelMakerData?.pendingSignal === true}
+                    onClick={() => requestWheelMakerUpdatePublish(card.hubId, wheelMakerData)}
+                  >
+                    {wheelMakerPending ? 'Requesting...' : wheelMakerData?.pendingSignal ? 'Requested' : 'Update+Publish'}
+                  </button>
+                </div>
+                <div className="settings-detail-group-title">Agent Packages</div>
                 <div className="agent-package-hub-meta">
                   <span>Node: {hub?.nodeVersion || '-'}</span>
                   <span>npm: {hub?.npmVersion || '-'}</span>
                   <span title={hub?.npmPrefix || ''}>Prefix: {hub?.npmPrefix || '-'}</span>
                 </div>
-                {card.updatedAt ? (
-                  <div className="settings-metadata-line">Updated: {card.updatedAt}</div>
+                {agentCard?.updatedAt ? (
+                  <div className="settings-metadata-line">Updated: {agentCard.updatedAt}</div>
                 ) : null}
                 {hub?.warning ? (
                   <div className="settings-metadata-line settings-metadata-error">{hub.warning}</div>
                 ) : null}
-                {card.error || hub?.error ? (
-                  <div className="settings-metadata-line settings-metadata-error">{card.error || hub?.error}</div>
+                {agentCard?.error || hub?.error ? (
+                  <div className="settings-metadata-line settings-metadata-error">{agentCard?.error || hub?.error}</div>
                 ) : null}
                 {task ? (
                   <div className={`agent-package-task ${task.status === 'failed' ? 'failed' : ''}`}>
@@ -8233,11 +8453,12 @@ function App() {
         type="button"
         className="token-stats-refresh-btn token-stats-refresh-inline"
         onClick={() => {
+          refreshWheelMakerUpdates().catch(() => undefined);
           refreshAgentPackages().catch(() => undefined);
         }}
-        disabled={agentPackagesLoading}
+        disabled={wheelMakerUpdatesLoading || agentPackagesLoading}
       >
-        {agentPackagesLoading ? 'Refreshing...' : 'Refresh'}
+        {wheelMakerUpdatesLoading || agentPackagesLoading ? 'Refreshing...' : 'Refresh'}
       </button>,
     );
 
@@ -10837,6 +11058,7 @@ function App() {
 
   const archiveTarget = confirmTarget?.kind === 'archive' ? confirmTarget : null;
   const npmPackageTarget = confirmTarget?.kind === 'npmPackage' ? confirmTarget : null;
+  const wheelMakerUpdateTarget = confirmTarget?.kind === 'wheelMakerUpdate' ? confirmTarget : null;
   const npmPackageConfirmPendingKey = npmPackageTarget
     ? agentPackageActionKey(npmPackageTarget.hubId, npmPackageTarget.packageName)
     : '';
@@ -10844,31 +11066,43 @@ function App() {
     ? chatArchivingSessionId === archiveTarget.sessionId
     : npmPackageTarget
       ? agentPackageActionPendingKey === npmPackageConfirmPendingKey
+      : wheelMakerUpdateTarget
+        ? wheelMakerUpdatePendingHubId === wheelMakerUpdateTarget.hubId
       : false;
   const confirmTitle = confirmTarget?.kind === 'clearCache'
     ? 'Clear local cache?'
     : npmPackageTarget
       ? `${agentPackageActionLabel(npmPackageTarget.action)} package?`
+    : wheelMakerUpdateTarget
+      ? 'Update and publish WheelMaker?'
     : 'Archive session?';
   const confirmName = confirmTarget?.kind === 'clearCache'
     ? 'Token and server address will be preserved.'
     : npmPackageTarget
       ? npmPackageTarget.displayName || npmPackageTarget.packageName
+    : wheelMakerUpdateTarget
+      ? `Hub: ${wheelMakerUpdateTarget.hubId}`
     : archiveTarget?.title || 'Untitled session';
   const confirmCopy = confirmTarget?.kind === 'clearCache'
     ? 'The app will reload after local cached workspace data is cleared.'
     : npmPackageTarget
       ? `Hub: ${npmPackageTarget.hubId}. Package: ${npmPackageTarget.packageName}. Installed: ${npmPackageTarget.installedVersion || '-'}. Target: ${npmPackageTarget.action === 'uninstall' ? 'remove deprecated package' : npmPackageTarget.latestVersion || 'latest'}. Restart WheelMaker or start a new agent session for changes to take effect.`
+    : wheelMakerUpdateTarget
+      ? `Current: ${shortGitSha(wheelMakerUpdateTarget.currentSha)}. Latest: ${shortGitSha(wheelMakerUpdateTarget.latestSha)}. ${wheelMakerUpdateTarget.behindCount > 0 ? `${wheelMakerUpdateTarget.behindCount} commits behind. ` : ''}This writes a full-update signal; updater will pull, build, publish Web, and restart Hub/Monitor. Updater itself is not restarted.`
     : 'Archived sessions leave the chat list.';
   const confirmIcon = confirmTarget?.kind === 'clearCache'
     ? 'codicon-trash'
     : npmPackageTarget
       ? npmPackageTarget.action === 'uninstall' ? 'codicon-trash' : 'codicon-cloud-download'
+    : wheelMakerUpdateTarget
+      ? 'codicon-cloud-download'
     : 'codicon-archive';
   const confirmPrimaryLabel = confirmTarget?.kind === 'clearCache'
     ? 'Clear Cache'
     : npmPackageTarget
       ? agentPackageActionLabel(npmPackageTarget.action)
+    : wheelMakerUpdateTarget
+      ? 'Update+Publish'
     : 'Archive';
   const confirmPrimaryClassName = confirmTarget?.kind === 'clearCache' || npmPackageTarget?.action === 'uninstall'
     ? 'app-confirm-btn primary danger'
@@ -10886,6 +11120,10 @@ function App() {
     }
     if (confirmTarget.kind === 'npmPackage') {
       handleAgentPackageConfirmedAction(confirmTarget).catch(() => undefined);
+      return;
+    }
+    if (confirmTarget.kind === 'wheelMakerUpdate') {
+      handleWheelMakerUpdateConfirmedAction(confirmTarget).catch(() => undefined);
       return;
     }
     handleArchiveProjectSession(

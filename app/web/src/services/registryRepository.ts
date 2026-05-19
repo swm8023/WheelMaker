@@ -29,6 +29,7 @@ import type {
   RegistryTokenProvider,
   RegistryDeepSeekTokenStats,
   RegistryTokenScanResult,
+  RegistryWheelMakerUpdateResponse,
   RegistryWorkingTreeFileDiff,
 } from '../types/registry';
 
@@ -701,6 +702,23 @@ export class RegistryRepository {
       payload: {action: 'query', hubId},
     });
     return (resp.payload ?? {}) as RegistryNpmCommandResponse;
+  }
+
+  async queryWheelMakerUpdate(hubId: string): Promise<RegistryWheelMakerUpdateResponse> {
+    const resp = await this.client.request({
+      method: 'cmd.update',
+      payload: {action: 'query', hubId},
+      timeoutMs: 60000,
+    });
+    return (resp.payload ?? {}) as RegistryWheelMakerUpdateResponse;
+  }
+
+  async requestWheelMakerUpdatePublish(hubId: string): Promise<RegistryWheelMakerUpdateResponse> {
+    const resp = await this.client.request({
+      method: 'cmd.update',
+      payload: {action: 'update-publish', hubId},
+    });
+    return (resp.payload ?? {}) as RegistryWheelMakerUpdateResponse;
   }
 
   close(): void {

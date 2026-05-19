@@ -1,4 +1,4 @@
-import {deriveAgentPackageHubIds, packageStatusLabel, withAgentPackageTimeout} from '../web/src/agentPackageUpdateView';
+import {deriveAgentPackageHubIds, packageStatusLabel, wheelMakerUpdateStatusLabel, withAgentPackageTimeout} from '../web/src/agentPackageUpdateView';
 import type {RegistryProject} from '../web/src/types/registry';
 
 describe('agent package update view helpers', () => {
@@ -22,6 +22,14 @@ describe('agent package update view helpers', () => {
     expect(packageStatusLabel('checking_failed')).toBe('Checking failed');
     expect(packageStatusLabel('deprecated')).toBe('Deprecated');
     expect(packageStatusLabel('running')).toBe('Running');
+  });
+
+  test('maps WheelMaker update status values to concise labels', () => {
+    expect(wheelMakerUpdateStatusLabel('update_pending')).toBe('Update pending');
+    expect(wheelMakerUpdateStatusLabel('not_published')).toBe('Not published');
+    expect(wheelMakerUpdateStatusLabel('ahead_of_remote')).toBe('Ahead of remote');
+    expect(wheelMakerUpdateStatusLabel('diverged')).toBe('Diverged');
+    expect(wheelMakerUpdateStatusLabel('custom_status')).toBe('custom_status');
   });
 
   test('turns a stuck scan promise into a timeout error', async () => {
