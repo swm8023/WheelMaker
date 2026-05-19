@@ -66,6 +66,7 @@ import {
   nextChatUserScrollLockUntil,
   resolveChatBottomFollowAction,
   resolveChatSessionReadWindowUpdate,
+  resolveChatScrollToBottomVisibility,
   shouldAutoScrollChatToBottom,
 } from './chat/chatScrollIntent';
 import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
@@ -2619,6 +2620,17 @@ function App() {
   const handleChatAtBottomChange = useCallback((atBottom: boolean) => {
     chatAutoScrollFollowRef.current = atBottom;
     setChatShowScrollToBottom(!atBottom);
+  }, []);
+
+  const handleChatScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const visibility = resolveChatScrollToBottomVisibility({
+      scrollTop: event.currentTarget.scrollTop,
+      scrollHeight: event.currentTarget.scrollHeight,
+      clientHeight: event.currentTarget.clientHeight,
+      threshold: CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD,
+    });
+    chatAutoScrollFollowRef.current = visibility.atBottom;
+    setChatShowScrollToBottom(visibility.showScrollToBottom);
   }, []);
 
   const scrollChatToBottom = useCallback((force = false) => {
@@ -9121,6 +9133,7 @@ function App() {
             <div
               ref={chatScrollRef}
               className="scroll-panel chat-block"
+              onScroll={handleChatScroll}
               onWheel={event => { if (event.deltaY < 0) { markChatUserScrollIntent(); } }}
               onPointerDown={() => { chatPointerScrollingRef.current = true; }}
               onPointerUp={() => { chatPointerScrollingRef.current = false; }}

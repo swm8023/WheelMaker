@@ -6,6 +6,7 @@ import {
   nextChatUserScrollLockUntil,
   resolveChatBottomFollowAction,
   resolveChatSessionReadWindowUpdate,
+  resolveChatScrollToBottomVisibility,
   shouldAutoScrollChatToBottom,
 } from '../web/src/chat/chatScrollIntent';
 
@@ -82,6 +83,31 @@ describe('web drag scroll behavior', () => {
     expect(mainTsx).toContain("if (chatBottomFollowAction === 'scrollToBottom') {");
     expect(mainTsx).toContain('scrollChatToBottom();');
     expect(mainTsx).toContain('autoscrollChatToBottom();');
+  });
+
+  test('shows the scroll-to-bottom button from the actual chat scroll container position', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    expect(
+      resolveChatScrollToBottomVisibility({
+        scrollTop: 300,
+        scrollHeight: 1200,
+        clientHeight: 500,
+        threshold: 80,
+      }),
+    ).toEqual({atBottom: false, showScrollToBottom: true});
+    expect(
+      resolveChatScrollToBottomVisibility({
+        scrollTop: 620,
+        scrollHeight: 1200,
+        clientHeight: 500,
+        threshold: 80,
+      }),
+    ).toEqual({atBottom: true, showScrollToBottom: false});
+    expect(mainTsx).toContain('const handleChatScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {');
+    expect(mainTsx).toContain('resolveChatScrollToBottomVisibility({');
+    expect(mainTsx).toContain('onScroll={handleChatScroll}');
   });
 
   test('keeps incremental session reads from resetting a history scroll window', () => {
