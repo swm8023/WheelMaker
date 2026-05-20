@@ -469,7 +469,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('renderBreadcrumbTitle(breadcrumbProjectName, gitBreadcrumbLabel)');
   });
 
-  test('chat title shows hub count summary with dropdown details', () => {
+  test('chat drawer title shows hub count summary with dropdown details', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
@@ -490,22 +490,35 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('registryHubs.map(hub => (');
     expect(mainTsx).toContain('<span className="chat-hub-row-name">{hub.hubId}</span>');
     expect(mainTsx).toContain('<div className="chat-hub-empty">No hubs</div>');
-    expect(mainTsx).toContain('<div className="block-title chat-block-title">');
-    expect(mainTsx).toContain('<div className="chat-title-row">');
+    expect(mainTsx).toContain('<div className="mobile-chat-title-row">');
+    expect(mainTsx).toContain('<span className="mobile-chat-drawer-title">Chats</span>');
     expect(mainTsx).toContain('renderChatHubSummary()');
     expect(mainTsx).toMatch(
-      /<div className="chat-title-row">[\s\S]*?CHAT - \{selectedChatDisplayTitle \|\| 'New Session'\}[\s\S]*?renderChatHubSummary\(\)/,
+      /<div className="mobile-chat-title-row">[\s\S]*?<span className="mobile-chat-drawer-title">Chats<\/span>[\s\S]*?renderChatHubSummary\(\)/,
     );
     expect(mainTsx).toMatch(
-      /<div className="chat-title-row">[\s\S]*?renderBreadcrumbTitle\(chatBreadcrumbProjectName, chatBreadcrumbLabel\)[\s\S]*?renderChatHubSummary\(\)/,
+      /<div className="sidebar-title-row">[\s\S]*?<span className="sidebar-title-text">\{wideSidebarTitle\}<\/span>[\s\S]*?\{tab === 'chat' && !sidebarSettingsOpen \? renderChatHubSummary\(\) : null\}/,
     );
-    expect(stylesCss).toContain('.chat-title-row {');
-    expect(stylesCss).toContain('.chat-block-title {');
-    expect(stylesCss).toContain('.chat-title-row > .title-text {');
+    const renderMainStart = mainTsx.indexOf('const renderMain = () => {');
+    const chatMainStart = mainTsx.indexOf("if (tab === 'chat') {", renderMainStart);
+    const chatMainEnd = mainTsx.indexOf('if (tab === ', chatMainStart + 1);
+    expect(renderMainStart).toBeGreaterThanOrEqual(0);
+    expect(chatMainStart).toBeGreaterThan(renderMainStart);
+    expect(chatMainEnd).toBeGreaterThan(chatMainStart);
+    const chatMainBlock = mainTsx.slice(chatMainStart, chatMainEnd);
+    expect(chatMainBlock).not.toContain('renderChatHubSummary()');
+    expect(stylesCss).toContain('.mobile-chat-title-row {');
+    expect(stylesCss).toContain('.sidebar-title-row .chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary-button {');
     expect(stylesCss).toContain('.chat-hub-summary-count {');
     expect(stylesCss).toContain('.chat-hub-popover {');
+    expect(stylesCss).toMatch(
+      /\.chat-hub-summary-button \{[\s\S]*letter-spacing: 0;[\s\S]*text-transform: none;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-hub-popover \{[\s\S]*letter-spacing: 0;[\s\S]*text-transform: none;[\s\S]*\}/,
+    );
     expect(stylesCss).toContain('.chat-hub-row-name {');
     expect(stylesCss).toContain('.chat-hub-empty {');
   });

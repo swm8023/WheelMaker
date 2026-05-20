@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a compact Hub count and dropdown beside the Chat page title on mobile and wide layouts.
+**Goal:** Add a compact Hub count and dropdown beside the Chat drawer/sidebar title on mobile and wide layouts.
 
-**Architecture:** Keep the Hub summary local to the existing `App` shell because the relevant state (`registryHubs`) and Chat title rendering already live in `app/web/src/main.tsx`. Add a small render helper and close behavior alongside existing chat menu state, then style it in `app/web/src/styles.css` so title text truncates before the Hub control.
+**Architecture:** Keep the Hub summary local to the existing `App` shell because the relevant state (`registryHubs`) and Chat drawer rendering already live in `app/web/src/main.tsx`. Add a small render helper and close behavior alongside existing chat menu state, then style it in `app/web/src/styles.css` so drawer title text truncates before the Hub control.
 
 **Tech Stack:** React 19, TypeScript, Jest source-structure tests, CSS.
 
@@ -12,11 +12,11 @@
 
 ## File Structure
 
-- Modify `app/__tests__/web-chat-ui.test.ts`: add source-structure regression tests for the Hub title summary and dropdown behavior.
-- Modify `app/web/src/main.tsx`: add `chatHubMenuOpen` state, `chatHubMenuRef`, outside/Escape close effects, `renderChatHubSummary`, and use it in the Chat title branch for both mobile and wide layouts.
-- Modify `app/web/src/styles.css`: add compact title row, Hub summary button, count badge, popover, row, and empty-state styles.
+- Modify `app/__tests__/web-chat-ui.test.ts`: add source-structure regression tests for the drawer Hub title summary and dropdown behavior.
+- Modify `app/web/src/main.tsx`: add `chatHubMenuOpen` state, `chatHubMenuRef`, outside/Escape close effects, `renderChatHubSummary`, and use it beside the Chat drawer/sidebar title for both mobile and wide layouts.
+- Modify `app/web/src/styles.css`: add compact drawer title row, Hub summary button, count badge, popover, row, and empty-state styles.
 
-## Task 1: Lock Chat Title Hub Summary Behavior
+## Task 1: Lock Chat Drawer Title Hub Summary Behavior
 
 **Files:**
 - Test: `app/__tests__/web-chat-ui.test.ts`
@@ -28,7 +28,7 @@
 Add this test inside `describe('web chat integration', () => { ... })` in `app/__tests__/web-chat-ui.test.ts`:
 
 ```typescript
-  test('chat title shows hub count summary with dropdown details', () => {
+  test('chat drawer title shows hub count summary with dropdown details', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
@@ -45,16 +45,25 @@ Add this test inside `describe('web chat integration', () => { ... })` in `app/_
     expect(mainTsx).toContain('registryHubs.map(hub => (');
     expect(mainTsx).toContain('<span className="chat-hub-row-name">{hub.hubId}</span>');
     expect(mainTsx).toContain('<div className="chat-hub-empty">No hubs</div>');
-    expect(mainTsx).toContain('<div className="chat-title-row">');
+    expect(mainTsx).toContain('<div className="mobile-chat-title-row">');
+    expect(mainTsx).toContain('<span className="mobile-chat-drawer-title">Chats</span>');
     expect(mainTsx).toContain('renderChatHubSummary()');
     expect(mainTsx).toMatch(
-      /<div className="chat-title-row">[\s\S]*?CHAT - \{selectedChatDisplayTitle \|\| 'New Session'\}[\s\S]*?renderChatHubSummary\(\)/,
+      /<div className="mobile-chat-title-row">[\s\S]*?<span className="mobile-chat-drawer-title">Chats<\/span>[\s\S]*?renderChatHubSummary\(\)/,
     );
     expect(mainTsx).toMatch(
-      /<div className="chat-title-row">[\s\S]*?renderBreadcrumbTitle\(chatBreadcrumbProjectName, chatBreadcrumbLabel\)[\s\S]*?renderChatHubSummary\(\)/,
+      /<div className="sidebar-title-row">[\s\S]*?<span className="sidebar-title-text">\{wideSidebarTitle\}<\/span>[\s\S]*?\{tab === 'chat' && !sidebarSettingsOpen \? renderChatHubSummary\(\) : null\}/,
     );
-    expect(stylesCss).toContain('.chat-title-row {');
-    expect(stylesCss).toContain('.chat-title-row > .title-text {');
+    const renderMainStart = mainTsx.indexOf('const renderMain = () => {');
+    const chatMainStart = mainTsx.indexOf("if (tab === 'chat') {", renderMainStart);
+    const chatMainEnd = mainTsx.indexOf('if (tab === ', chatMainStart + 1);
+    expect(renderMainStart).toBeGreaterThanOrEqual(0);
+    expect(chatMainStart).toBeGreaterThan(renderMainStart);
+    expect(chatMainEnd).toBeGreaterThan(chatMainStart);
+    const chatMainBlock = mainTsx.slice(chatMainStart, chatMainEnd);
+    expect(chatMainBlock).not.toContain('renderChatHubSummary()');
+    expect(stylesCss).toContain('.mobile-chat-title-row {');
+    expect(stylesCss).toContain('.sidebar-title-row .chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary-button {');
     expect(stylesCss).toContain('.chat-hub-summary-count {');
@@ -73,9 +82,9 @@ cd app
 npm test -- --runInBand web-chat-ui.test.ts
 ```
 
-Expected: FAIL because `chatHubMenuOpen`, `renderChatHubSummary`, and the new CSS classes do not exist yet.
+Expected: FAIL because the Hub summary still does not render beside the drawer/sidebar Chat titles.
 
-## Task 2: Implement Chat Title Hub Summary
+## Task 2: Implement Chat Drawer Title Hub Summary
 
 **Files:**
 - Modify: `app/web/src/main.tsx`
@@ -163,48 +172,51 @@ Add near `renderBreadcrumbTitle`:
   }, [chatHubMenuOpen, registryHubs]);
 ```
 
-- [x] **Step 3: Use the helper in both Chat title paths**
+- [x] **Step 3: Use the helper in both Chat drawer title paths**
 
-Replace the Chat `block-title` content with:
+Render the helper beside the mobile drawer title and wide sidebar title:
 
 ```tsx
-          <div className="block-title">
-            {isWide ? (
-              <div className="chat-title-row">
-                <span className="title-text">
-                  CHAT - {selectedChatDisplayTitle || 'New Session'}
-                </span>
-                {renderChatHubSummary()}
-              </div>
-            ) : (
-              <div className="chat-title-row">
-                {renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)}
-                {renderChatHubSummary()}
-              </div>
-            )}
+          <div className="mobile-chat-title-row">
+            <span className="mobile-chat-drawer-title">Chats</span>
+            {renderChatHubSummary()}
+          </div>
+
+          <div className="sidebar-title-row">
+            <span className="sidebar-title-text">{wideSidebarTitle}</span>
+            {tab === 'chat' && !sidebarSettingsOpen ? renderChatHubSummary() : null}
           </div>
 ```
 
 - [x] **Step 4: Add compact CSS**
 
-Add after `.block-title` / `.title-text` styles in `app/web/src/styles.css`:
+Add near the sidebar title and mobile drawer header styles in `app/web/src/styles.css`:
 
 ```css
-.chat-title-row {
+.sidebar-title-row {
   position: relative;
+  gap: 8px;
+}
+
+.sidebar-title-row .chat-hub-summary {
+  margin-left: auto;
+}
+
+.mobile-chat-drawer-header {
+  position: relative;
+  z-index: 20;
+}
+
+.mobile-chat-title-row {
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
+  justify-content: center;
+  gap: 6px;
 }
 
-.chat-title-row > .title-text {
-  flex: 1 1 auto;
-}
-
-.chat-title-row .breadcrumb-title {
-  flex: 1 1 auto;
+.mobile-chat-drawer-title {
+  flex: 0 1 auto;
 }
 
 .chat-hub-summary {

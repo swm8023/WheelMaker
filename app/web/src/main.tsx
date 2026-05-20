@@ -9947,7 +9947,10 @@ function App() {
           >
             <span className="codicon codicon-settings-gear" />
           </button>
-          <span className="mobile-chat-drawer-title">Chats</span>
+          <div className="mobile-chat-title-row">
+            <span className="mobile-chat-drawer-title">Chats</span>
+            {renderChatHubSummary()}
+          </div>
           <button
             className={`header-btn refresh-btn drawer-project-refresh${hasPendingProjectUpdates && !mobileProjectSessionsRefreshing && !reconnecting ? ' has-update-badge' : ''}`}
             onClick={() => refreshMobileChatProjectSessions().catch(() => undefined)}
@@ -10572,6 +10575,7 @@ function App() {
         {isWide ? (
           <div className="sidebar-title-row">
             <span className="sidebar-title-text">{wideSidebarTitle}</span>
+            {tab === 'chat' && !sidebarSettingsOpen ? renderChatHubSummary() : null}
           </div>
         ) : null}
         <div className="sidebar-scroll">
@@ -11135,19 +11139,13 @@ function App() {
     if (tab === 'chat') {
       return (
         <div className="content">
-          <div className="block-title chat-block-title">
+          <div className="block-title">
             {isWide ? (
-              <div className="chat-title-row">
-                <span className="title-text">
-                  CHAT - {selectedChatDisplayTitle || 'New Session'}
-                </span>
-                {renderChatHubSummary()}
-              </div>
+              <span className="title-text">
+                CHAT - {selectedChatDisplayTitle || 'New Session'}
+              </span>
             ) : (
-              <div className="chat-title-row">
-                {renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)}
-                {renderChatHubSummary()}
-              </div>
+              renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)
             )}
           </div>
           <div
