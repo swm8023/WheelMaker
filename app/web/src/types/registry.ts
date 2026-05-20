@@ -278,7 +278,7 @@ export interface RegistrySkillSnapshot {
   path?: string;
   category: string;
   categoryKey: string;
-  agents: string[];
+  agents?: string[];
 }
 
 export interface RegistrySkillScopeSnapshot {

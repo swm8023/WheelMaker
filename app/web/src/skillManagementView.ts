@@ -40,6 +40,13 @@ export function groupSkillsByCategory(skills: RegistrySkillSnapshot[]): SkillCat
     });
 }
 
+export function skillAgentsLabel(skill: RegistrySkillSnapshot): string {
+  const agents = Array.isArray(skill.agents)
+    ? skill.agents.filter(agent => typeof agent === 'string' && agent.length > 0)
+    : [];
+  return agents.length > 0 ? agents.join(', ') : 'No linked agents';
+}
+
 export function sortSkillProjects(projects: RegistrySkillProjectSnapshot[]): RegistrySkillProjectSnapshot[] {
   return [...projects].sort((left, right) => {
     if (left.online !== right.online) return left.online ? -1 : 1;

@@ -115,6 +115,7 @@ import {
 import {
   deriveSkillHubIds,
   groupSkillsByCategory,
+  skillAgentsLabel,
   skillScopeLabel,
   sortSkillProjects,
 } from './skillManagementView';
@@ -499,10 +500,6 @@ function skillActionPendingKey(input: {hubId: string; scope: RegistrySkillScope;
     input.skillName || '',
     input.action,
   ].join(':');
-}
-
-function skillAgentsLabel(skill: RegistrySkillSnapshot): string {
-  return skill.agents.length > 0 ? skill.agents.join(', ') : 'No linked agents';
 }
 
 function skillCommandErrorMessage(result: RegistrySkillCommandResponse): string {

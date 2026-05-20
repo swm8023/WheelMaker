@@ -1,6 +1,7 @@
 import {
   deriveSkillHubIds,
   groupSkillsByCategory,
+  skillAgentsLabel,
   skillScopeLabel,
   sortSkillProjects,
 } from '../web/src/skillManagementView';
@@ -18,6 +19,14 @@ describe('skill management view helpers', () => {
 
     expect(groups.map(group => group.category)).toEqual(['Mattpocock Skills', 'General']);
     expect(groups[0].skills[0].name).toBe('tdd');
+  });
+
+  test('formats omitted skill agents as no linked agents', () => {
+    expect(skillAgentsLabel({
+      name: 'plain',
+      category: 'General',
+      categoryKey: 'general',
+    })).toBe('No linked agents');
   });
 
   test('sorts projects by online state then name', () => {
