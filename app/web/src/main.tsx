@@ -113,6 +113,12 @@ import {
   withAgentPackageTimeout,
 } from './agentPackageUpdateView';
 import {
+  deriveSkillHubIds,
+  groupSkillsByCategory,
+  skillScopeLabel,
+  sortSkillProjects,
+} from './skillManagementView';
+import {
   CODE_FONT_OPTIONS,
   CODE_THEME_OPTIONS,
   CODE_THEME_OPTION_GROUPS,
@@ -162,6 +168,10 @@ import type {
   RegistryNpmPackage,
   RegistryHub,
   RegistryProject,
+  RegistrySkillCommandResponse,
+  RegistrySkillScope,
+  RegistrySkillSnapshot,
+  RegistrySkillSourceCandidate,
   RegistryTokenScanResult,
   RegistryWheelMakerUpdateResponse,
 } from './types/registry';
@@ -211,8 +221,29 @@ type ConfirmTarget =
       currentSha: string;
       latestSha: string;
       behindCount: number;
+    }
+  | {
+      kind: 'skillInstall';
+      hubId: string;
+      scope: RegistrySkillScope;
+      projectName?: string;
+      source: string;
+      skills: string[];
+    }
+  | {
+      kind: 'skillUninstall';
+      hubId: string;
+      scope: RegistrySkillScope;
+      projectName?: string;
+      skillName: string;
+    }
+  | {
+      kind: 'skillUpdate';
+      hubId: string;
+      scope: RegistrySkillScope;
+      projectName?: string;
     };
-type SettingsDetailView = 'update' | 'tokenStats' | 'ccSwitch' | 'database' | null;
+type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | null;
 type WheelMakerUpdateHubView = {
   hubId: string;
   loading: boolean;
@@ -226,6 +257,17 @@ type AgentPackageHubView = {
   updatedAt: string;
   hub: RegistryNpmHubSnapshot | null;
   operation: RegistryNpmOperation | null;
+};
+type SkillHubView = {
+  hubId: string;
+  loading: boolean;
+  error: string;
+  data: RegistrySkillCommandResponse | null;
+};
+type SkillInstallTarget = {
+  hubId: string;
+  scope: RegistrySkillScope;
+  projectName?: string;
 };
 type ChatComposerDraft = {
   text: string;
@@ -447,6 +489,24 @@ function agentPackageActionLabel(action: 'install' | 'update' | 'uninstall'): st
     default:
       return 'Install';
   }
+}
+
+function skillActionPendingKey(input: {hubId: string; scope: RegistrySkillScope; projectName?: string; skillName?: string; action: string}): string {
+  return [
+    input.hubId,
+    input.scope,
+    input.projectName || '',
+    input.skillName || '',
+    input.action,
+  ].join(':');
+}
+
+function skillAgentsLabel(skill: RegistrySkillSnapshot): string {
+  return skill.agents.length > 0 ? skill.agents.join(', ') : 'No linked agents';
+}
+
+function skillCommandErrorMessage(result: RegistrySkillCommandResponse): string {
+  return result.errorSummary || result.message || 'Skill operation failed.';
 }
 
 function shortGitSha(value: string): string {
@@ -2425,6 +2485,16 @@ function App() {
   const [agentPackagesError, setAgentPackagesError] = useState('');
   const [agentPackageActionPendingKey, setAgentPackageActionPendingKey] = useState('');
   const agentPackageScanPollTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const [skillHubs, setSkillHubs] = useState<Record<string, SkillHubView>>({});
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skillsError, setSkillsError] = useState('');
+  const [skillsPendingKey, setSkillsPendingKey] = useState('');
+  const [skillInstallTarget, setSkillInstallTarget] = useState<SkillInstallTarget | null>(null);
+  const [skillSourceInput, setSkillSourceInput] = useState('');
+  const [skillSourceCandidates, setSkillSourceCandidates] = useState<RegistrySkillSourceCandidate[]>([]);
+  const [skillSourceSelectedNames, setSkillSourceSelectedNames] = useState<string[]>([]);
+  const [skillSourceLoading, setSkillSourceLoading] = useState(false);
+  const [skillSourceError, setSkillSourceError] = useState('');
 
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [workspaceProjectMenuOpen, setWorkspaceProjectMenuOpen] = useState(false);
@@ -7006,6 +7076,249 @@ function App() {
     refreshAgentPackages().catch(() => undefined);
   }, [settingsDetailView, refreshAgentPackages, refreshWheelMakerUpdates]);
 
+  const refreshSkillManagementHub = useCallback(async (hubId: string) => {
+    setSkillHubs(prev => ({
+      ...prev,
+      [hubId]: {
+        ...(prev[hubId] ?? {hubId, loading: false, error: '', data: null}),
+        loading: true,
+        error: '',
+      },
+    }));
+    try {
+      const result = await service.scanSkills(hubId);
+      setSkillHubs(prev => ({
+        ...prev,
+        [hubId]: {
+          hubId,
+          loading: false,
+          data: result,
+          error: result.ok ? '' : skillCommandErrorMessage(result),
+        },
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setSkillHubs(prev => ({
+        ...prev,
+        [hubId]: {
+          ...(prev[hubId] ?? {hubId, loading: false, error: '', data: null}),
+          loading: false,
+          error: message,
+        },
+      }));
+    }
+  }, []);
+
+  const refreshSkillManagement = useCallback(async () => {
+    setSkillsLoading(true);
+    setSkillsError('');
+    try {
+      const snapshot = await service.listProjectSnapshot();
+      if (snapshot.projects.length > 0) {
+        setProjects(snapshot.projects);
+      }
+      setRegistryHubs(snapshot.hubs);
+      const hubIds = deriveSkillHubIds(snapshot.hubs);
+      if (hubIds.length === 0) {
+        setSkillHubs({});
+        setSkillsError('No hubs available.');
+        return;
+      }
+      setSkillHubs(prev => {
+        const next: Record<string, SkillHubView> = {};
+        hubIds.forEach(hubId => {
+          next[hubId] = {
+            hubId,
+            loading: true,
+            error: '',
+            data: prev[hubId]?.data ?? null,
+          };
+        });
+        return next;
+      });
+      const responses = await Promise.all(hubIds.map(async hubId => {
+        try {
+          const result = await service.scanSkills(hubId);
+          return {hubId, result};
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return {hubId, error: message};
+        }
+      }));
+      setSkillHubs(prev => {
+        const next: Record<string, SkillHubView> = {};
+        responses.forEach(entry => {
+          if ('error' in entry) {
+            next[entry.hubId] = {
+              hubId: entry.hubId,
+              loading: false,
+              error: entry.error || 'Skills scan failed.',
+              data: prev[entry.hubId]?.data ?? null,
+            };
+            return;
+          }
+          next[entry.hubId] = {
+            hubId: entry.hubId,
+            loading: false,
+            error: entry.result.ok ? '' : skillCommandErrorMessage(entry.result),
+            data: entry.result,
+          };
+        });
+        return next;
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setSkillsError(message);
+    } finally {
+      setSkillsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (settingsDetailView !== 'skills') {
+      return;
+    }
+    refreshSkillManagement().catch(() => undefined);
+  }, [settingsDetailView, refreshSkillManagement]);
+
+  const requestSkillInstall = useCallback((target: SkillInstallTarget) => {
+    setSkillInstallTarget(target);
+    setSkillSourceError('');
+    setSkillSourceCandidates([]);
+    setSkillSourceSelectedNames([]);
+  }, []);
+
+  const toggleSkillSourceCandidate = useCallback((name: string) => {
+    setSkillSourceSelectedNames(prev => (
+      prev.includes(name)
+        ? prev.filter(item => item !== name)
+        : [...prev, name]
+    ));
+  }, []);
+
+  const listSkillSource = useCallback(async () => {
+    const target = skillInstallTarget;
+    const source = skillSourceInput.trim();
+    if (!target || !source) {
+      setSkillSourceError('Source is required.');
+      return;
+    }
+    setSkillSourceLoading(true);
+    setSkillSourceError('');
+    try {
+      const result = await service.listSkillsSource(target.hubId, source);
+      if (!result.ok) {
+        throw new Error(skillCommandErrorMessage(result));
+      }
+      setSkillSourceCandidates(result.candidates ?? []);
+      setSkillSourceSelectedNames([]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setSkillSourceError(message);
+    } finally {
+      setSkillSourceLoading(false);
+    }
+  }, [skillInstallTarget, skillSourceInput]);
+
+  const requestSkillInstallConfirm = useCallback(() => {
+    const target = skillInstallTarget;
+    const source = skillSourceInput.trim();
+    const skills = skillSourceSelectedNames;
+    if (!target || !source || skills.length === 0) {
+      setSkillSourceError('Select at least one skill.');
+      return;
+    }
+    setConfirmError('');
+    setConfirmTarget({
+      kind: 'skillInstall',
+      hubId: target.hubId,
+      scope: target.scope,
+      projectName: target.projectName,
+      source,
+      skills,
+    });
+  }, [skillInstallTarget, skillSourceInput, skillSourceSelectedNames]);
+
+  const requestSkillUninstall = useCallback((target: {hubId: string; scope: RegistrySkillScope; projectName?: string; skillName: string}) => {
+    setConfirmError('');
+    setConfirmTarget({kind: 'skillUninstall', ...target});
+  }, []);
+
+  const requestSkillUpdate = useCallback((target: {hubId: string; scope: RegistrySkillScope; projectName?: string}) => {
+    setConfirmError('');
+    setConfirmTarget({kind: 'skillUpdate', ...target});
+  }, []);
+
+  const handleSkillConfirmedAction = useCallback(async (
+    target: Extract<ConfirmTarget, {kind: 'skillInstall' | 'skillUninstall' | 'skillUpdate'}>,
+  ) => {
+    const pendingKey = skillActionPendingKey({
+      hubId: target.hubId,
+      scope: target.scope,
+      projectName: target.projectName,
+      skillName: target.kind === 'skillUninstall' ? target.skillName : undefined,
+      action: target.kind,
+    });
+    setConfirmError('');
+    setSkillsPendingKey(pendingKey);
+    try {
+      let results: RegistrySkillCommandResponse[] = [];
+      if (target.kind === 'skillInstall') {
+        results = [await service.installSkills({
+          hubId: target.hubId,
+          scope: target.scope,
+          projectName: target.projectName,
+          source: target.source,
+          skills: target.skills,
+        })];
+      } else if (target.kind === 'skillUninstall') {
+        results = [await service.uninstallSkills({
+          hubId: target.hubId,
+          scope: target.scope,
+          projectName: target.projectName,
+          skills: [target.skillName],
+        })];
+      } else {
+        const hubData = skillHubs[target.hubId]?.data;
+        const onlineProjects = sortSkillProjects(hubData?.projects ?? []).filter(project => project.online);
+        const updates = target.scope === 'hub' && !target.projectName
+          ? [
+              service.updateSkills({hubId: target.hubId, scope: 'hub'}),
+              ...onlineProjects.map(project => service.updateSkills({
+                hubId: target.hubId,
+                scope: 'project' as const,
+                projectName: project.projectName,
+              })),
+            ]
+          : [service.updateSkills({
+              hubId: target.hubId,
+              scope: target.scope,
+              projectName: target.projectName,
+            })];
+        results = await Promise.all(updates);
+      }
+      const failed = results.find(result => !result.ok);
+      if (failed) {
+        throw new Error(skillCommandErrorMessage(failed));
+      }
+      setConfirmTarget(null);
+      setConfirmError('');
+      if (target.kind === 'skillInstall') {
+        setSkillInstallTarget(null);
+        setSkillSourceCandidates([]);
+        setSkillSourceSelectedNames([]);
+      }
+      await refreshSkillManagementHub(target.hubId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setConfirmError(message);
+      setSkillsError(message);
+      setError(message);
+    } finally {
+      setSkillsPendingKey('');
+    }
+  }, [refreshSkillManagementHub, skillHubs]);
+
   const requestAgentPackageAction = useCallback((
     action: 'install' | 'update' | 'uninstall',
     hubId: string,
@@ -8460,6 +8773,250 @@ function App() {
     </div>
   );
 
+  const renderSkillInstallPanel = () => {
+    if (!skillInstallTarget) {
+      return null;
+    }
+    const selected = new Set(skillSourceSelectedNames);
+    const candidateGroups = groupSkillsByCategory(skillSourceCandidates.map(candidate => ({
+      name: candidate.name,
+      category: candidate.category,
+      categoryKey: candidate.categoryKey,
+      agents: [],
+    })));
+    return (
+      <section className="settings-skills-install-panel">
+        <div className="settings-skills-scope-header">
+          <div className="settings-skills-scope-title">{skillScopeLabel(skillInstallTarget)}</div>
+          <button
+            type="button"
+            className="settings-detail-action-btn"
+            onClick={() => {
+              setSkillInstallTarget(null);
+              setSkillSourceError('');
+              setSkillSourceCandidates([]);
+              setSkillSourceSelectedNames([]);
+            }}
+          >
+            Close
+          </button>
+        </div>
+        <div className="settings-skills-source-row">
+          <input
+            className="settings-skills-source-input"
+            value={skillSourceInput}
+            onChange={event => setSkillSourceInput(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                listSkillSource().catch(() => undefined);
+              }
+            }}
+            placeholder="owner/repo"
+          />
+          <button
+            type="button"
+            className="settings-detail-action-btn"
+            disabled={skillSourceLoading}
+            onClick={() => listSkillSource().catch(() => undefined)}
+          >
+            {skillSourceLoading ? 'Listing...' : 'List'}
+          </button>
+        </div>
+        {skillSourceError ? (
+          <div className="settings-metadata-error">{skillSourceError}</div>
+        ) : null}
+        {candidateGroups.length > 0 ? (
+          <div className="settings-skills-candidates">
+            {candidateGroups.map(group => (
+              <div key={`candidate-group:${group.categoryKey}`} className="settings-skill-category-block">
+                <div className="settings-skill-category">{group.category}</div>
+                {group.skills.map(skill => {
+                  const candidate = skillSourceCandidates.find(item => item.name === skill.name);
+                  return (
+                    <label key={`candidate:${group.categoryKey}:${skill.name}`} className="settings-skill-row settings-skill-candidate-row">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(skill.name)}
+                        onChange={() => toggleSkillSourceCandidate(skill.name)}
+                      />
+                      <span className="settings-skill-row-main">
+                        <span className="settings-skill-name">{skill.name}</span>
+                        {candidate?.description ? (
+                          <span className="settings-skill-meta">{candidate.description}</span>
+                        ) : null}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className="settings-skills-install-actions">
+          <span className="settings-skill-meta">Codex, Claude Code, OpenCode, GitHub Copilot</span>
+          <button
+            type="button"
+            className="settings-detail-action-btn"
+            disabled={skillSourceSelectedNames.length === 0}
+            onClick={requestSkillInstallConfirm}
+          >
+            Install
+          </button>
+        </div>
+      </section>
+    );
+  };
+
+  const renderSkillScopeRows = (
+    hubId: string,
+    title: string,
+    skills: RegistrySkillSnapshot[],
+    options: {scope: RegistrySkillScope; projectName?: string; disabled?: boolean; error?: string; allowUpdate?: boolean},
+  ) => {
+    const groups = groupSkillsByCategory(skills);
+    const disabled = options.disabled === true;
+    return (
+      <section className="settings-skills-scope">
+        <div className="settings-skills-scope-header">
+          <div className="settings-skills-scope-title-wrap">
+            <span className="settings-skills-scope-title">{title}</span>
+            {disabled ? <span className="agent-package-status status-not_published">Offline</span> : null}
+          </div>
+          <div className="settings-skills-scope-actions">
+            {options.allowUpdate ? (
+              <button
+                type="button"
+                className="settings-detail-action-btn"
+                disabled={disabled || !!skillsPendingKey}
+                onClick={() => requestSkillUpdate({hubId, scope: options.scope, projectName: options.projectName})}
+              >
+                Update
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="settings-detail-action-btn"
+              disabled={disabled || !!skillsPendingKey}
+              onClick={() => requestSkillInstall({hubId, scope: options.scope, projectName: options.projectName})}
+            >
+              Add
+            </button>
+          </div>
+        </div>
+        {options.error ? (
+          <div className="settings-metadata-error">{options.error}</div>
+        ) : null}
+        {groups.length === 0 && !options.error ? (
+          <div className="settings-skills-empty">No skills installed.</div>
+        ) : null}
+        {groups.map(group => (
+          <div key={`${hubId}:${title}:${group.categoryKey}`} className="settings-skill-category-block">
+            <div className="settings-skill-category">{group.category}</div>
+            {group.skills.map(skill => {
+              const pendingKey = skillActionPendingKey({
+                hubId,
+                scope: options.scope,
+                projectName: options.projectName,
+                skillName: skill.name,
+                action: 'skillUninstall',
+              });
+              const pending = skillsPendingKey === pendingKey;
+              return (
+                <div key={`${hubId}:${title}:${skill.name}`} className="settings-skill-row">
+                  <div className="settings-skill-row-main">
+                    <span className="settings-skill-name" title={skill.name}>{skill.name}</span>
+                    <span className="settings-skill-meta" title={skill.path || skillAgentsLabel(skill)}>
+                      {skillAgentsLabel(skill)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="settings-detail-action-btn danger"
+                    disabled={disabled || !!skillsPendingKey}
+                    onClick={() => requestSkillUninstall({
+                      hubId,
+                      scope: options.scope,
+                      projectName: options.projectName,
+                      skillName: skill.name,
+                    })}
+                  >
+                    {pending ? 'Removing...' : 'Uninstall'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </section>
+    );
+  };
+
+  const renderSkillsSettingsDetail = () =>
+    renderSettingsDetailShell(
+      'Skills',
+      <>
+        {skillsLoading && Object.keys(skillHubs).length === 0 ? (
+          <div className="muted block">Loading skills...</div>
+        ) : null}
+        {skillsError ? (
+          <div className="muted block settings-metadata-error">{skillsError}</div>
+        ) : null}
+        {!skillsLoading && Object.keys(skillHubs).length === 0 && !skillsError ? (
+          <div className="muted block">No hubs available.</div>
+        ) : null}
+        {renderSkillInstallPanel()}
+        <div className="settings-skills-list">
+          {Object.values(skillHubs).sort((left, right) => left.hubId.localeCompare(right.hubId)).map(hub => {
+            const data = hub.data;
+            return (
+              <section className="settings-skills-hub" key={`skills-hub:${hub.hubId}`}>
+                <div className="settings-skills-hub-header">
+                  <span className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', hub.hubId)}`}>
+                    <span className="wide-project-hub-dot" aria-hidden="true" />
+                    <span className="wide-project-hub-label">Hub: {hub.hubId}</span>
+                  </span>
+                  <div className="settings-skills-scope-actions">
+                    {hub.loading ? <span className="wide-session-agent-tag">Scanning</span> : null}
+                    <button
+                      type="button"
+                      className="settings-detail-action-btn"
+                      disabled={hub.loading || !!skillsPendingKey}
+                      onClick={() => requestSkillUpdate({hubId: hub.hubId, scope: 'hub'})}
+                    >
+                      Update
+                    </button>
+                  </div>
+                </div>
+                {hub.error ? (
+                  <div className="settings-metadata-error">{hub.error}</div>
+                ) : null}
+                {renderSkillScopeRows(hub.hubId, 'Hub Skills', data?.hubSkills?.skills ?? [], {scope: 'hub'})}
+                {sortSkillProjects(data?.projects ?? []).map(project => (
+                  <div className="settings-skills-project" key={`${hub.hubId}:${project.projectName}`}>
+                    {renderSkillScopeRows(hub.hubId, project.projectName, project.skills, {
+                      scope: 'project',
+                      projectName: project.projectName,
+                      disabled: !project.online,
+                      error: project.error,
+                      allowUpdate: true,
+                    })}
+                  </div>
+                ))}
+              </section>
+            );
+          })}
+        </div>
+      </>,
+      <button
+        type="button"
+        className="token-stats-refresh-btn token-stats-refresh-inline"
+        onClick={() => refreshSkillManagement().catch(() => undefined)}
+        disabled={skillsLoading}
+      >
+        {skillsLoading ? 'Refreshing...' : 'Refresh'}
+      </button>,
+    );
+
   const renderUpdateSettingsDetail = () =>
     renderSettingsDetailShell(
       'Update',
@@ -8784,6 +9341,9 @@ function App() {
     if (settingsDetailView === 'update') {
       return renderUpdateSettingsDetail();
     }
+    if (settingsDetailView === 'skills') {
+      return renderSkillsSettingsDetail();
+    }
     if (settingsDetailView === 'ccSwitch') {
       return renderCCSwitchSettingsDetail();
     }
@@ -8968,6 +9528,17 @@ function App() {
           }}
         >
           <span>Update</span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
+        <button
+          type="button"
+          className="settings-row settings-detail-row"
+          onClick={() => {
+            setSkillsError('');
+            setSettingsDetailView('skills');
+          }}
+        >
+          <span>Skills</span>
           <span className="codicon codicon-chevron-right" />
         </button>
         <button
@@ -10968,6 +11539,7 @@ function App() {
   );
   const isShortcutSettingsDetailActive = sidebarSettingsOpen && (
     settingsDetailView === 'update' ||
+    settingsDetailView === 'skills' ||
     settingsDetailView === 'tokenStats'
   );
 
@@ -11025,6 +11597,15 @@ function App() {
           aria-label="Update"
         >
           <span className="codicon codicon-cloud-download" />
+        </button>
+        <button
+          type="button"
+          className={`desktop-activity-button${sidebarSettingsOpen && settingsDetailView === 'skills' ? ' active' : ''}`}
+          onClick={() => openSettingsDetail('skills')}
+          title="Skills"
+          aria-label="Skills"
+        >
+          <span className="codicon codicon-symbol-method" />
         </button>
         <button
           type="button"
@@ -11252,15 +11833,30 @@ function App() {
   const archiveTarget = confirmTarget?.kind === 'archive' ? confirmTarget : null;
   const npmPackageTarget = confirmTarget?.kind === 'npmPackage' ? confirmTarget : null;
   const wheelMakerUpdateTarget = confirmTarget?.kind === 'wheelMakerUpdate' ? confirmTarget : null;
+  const skillInstallConfirmTarget = confirmTarget?.kind === 'skillInstall' ? confirmTarget : null;
+  const skillUninstallConfirmTarget = confirmTarget?.kind === 'skillUninstall' ? confirmTarget : null;
+  const skillUpdateConfirmTarget = confirmTarget?.kind === 'skillUpdate' ? confirmTarget : null;
+  const skillConfirmTarget = skillInstallConfirmTarget ?? skillUninstallConfirmTarget ?? skillUpdateConfirmTarget;
   const npmPackageConfirmPendingKey = npmPackageTarget
     ? agentPackageActionKey(npmPackageTarget.hubId, npmPackageTarget.packageName)
+    : '';
+  const skillConfirmPendingKey = skillConfirmTarget
+    ? skillActionPendingKey({
+        hubId: skillConfirmTarget.hubId,
+        scope: skillConfirmTarget.scope,
+        projectName: skillConfirmTarget.projectName,
+        skillName: skillUninstallConfirmTarget?.skillName,
+        action: skillConfirmTarget.kind,
+      })
     : '';
   const confirmBusy = archiveTarget
     ? chatArchivingSessionId === archiveTarget.sessionId
     : npmPackageTarget
       ? agentPackageActionPendingKey === npmPackageConfirmPendingKey
-      : wheelMakerUpdateTarget
-        ? wheelMakerUpdatePendingHubId === wheelMakerUpdateTarget.hubId
+    : wheelMakerUpdateTarget
+      ? wheelMakerUpdatePendingHubId === wheelMakerUpdateTarget.hubId
+    : skillConfirmTarget
+      ? skillsPendingKey === skillConfirmPendingKey
       : false;
   const confirmTitle = confirmTarget?.kind === 'clearCache'
     ? 'Clear local cache?'
@@ -11268,6 +11864,12 @@ function App() {
       ? `${agentPackageActionLabel(npmPackageTarget.action)} package?`
     : wheelMakerUpdateTarget
       ? 'Update and publish WheelMaker?'
+    : skillInstallConfirmTarget
+      ? 'Install skills?'
+    : skillUninstallConfirmTarget
+      ? 'Uninstall skill?'
+    : skillUpdateConfirmTarget
+      ? 'Update skills?'
     : 'Archive session?';
   const confirmName = confirmTarget?.kind === 'clearCache'
     ? 'Token and server address will be preserved.'
@@ -11275,6 +11877,12 @@ function App() {
       ? npmPackageTarget.displayName || npmPackageTarget.packageName
     : wheelMakerUpdateTarget
       ? `Hub: ${wheelMakerUpdateTarget.hubId}`
+    : skillInstallConfirmTarget
+      ? skillScopeLabel(skillInstallConfirmTarget)
+    : skillUninstallConfirmTarget
+      ? skillUninstallConfirmTarget.skillName
+    : skillUpdateConfirmTarget
+      ? skillScopeLabel(skillUpdateConfirmTarget)
     : archiveTarget?.title || 'Untitled session';
   const confirmCopy = confirmTarget?.kind === 'clearCache'
     ? 'The app will reload after local cached workspace data is cleared.'
@@ -11282,6 +11890,14 @@ function App() {
       ? `Hub: ${npmPackageTarget.hubId}. Package: ${npmPackageTarget.packageName}. Installed: ${npmPackageTarget.installedVersion || '-'}. Target: ${npmPackageTarget.action === 'uninstall' ? 'remove deprecated package' : npmPackageTarget.latestVersion || 'latest'}. Restart WheelMaker or start a new agent session for changes to take effect.`
     : wheelMakerUpdateTarget
       ? `Current: ${shortGitSha(wheelMakerUpdateTarget.currentSha)}. Latest: ${shortGitSha(wheelMakerUpdateTarget.latestSha)}. ${wheelMakerUpdateTarget.behindCount > 0 ? `${wheelMakerUpdateTarget.behindCount} commits behind. ` : ''}This writes a full-update signal; updater will pull, build, publish Web, and restart Hub/Monitor. Updater itself is not restarted.`
+    : skillInstallConfirmTarget
+      ? `Source: ${skillInstallConfirmTarget.source}. Skills: ${skillInstallConfirmTarget.skills.join(', ')}. Symlink install targets Codex, Claude Code, OpenCode, and GitHub Copilot.`
+    : skillUninstallConfirmTarget
+      ? `Remove from all linked target agents in ${skillScopeLabel(skillUninstallConfirmTarget)}.`
+    : skillUpdateConfirmTarget
+      ? skillUpdateConfirmTarget.scope === 'hub' && !skillUpdateConfirmTarget.projectName
+        ? 'Updates Hub Skills and online Project Skills on this Hub.'
+        : `Updates installed skills in ${skillScopeLabel(skillUpdateConfirmTarget)}.`
     : 'Archived sessions leave the chat list.';
   const confirmIcon = confirmTarget?.kind === 'clearCache'
     ? 'codicon-trash'
@@ -11289,6 +11905,12 @@ function App() {
       ? npmPackageTarget.action === 'uninstall' ? 'codicon-trash' : 'codicon-cloud-download'
     : wheelMakerUpdateTarget
       ? 'codicon-cloud-download'
+    : skillInstallConfirmTarget
+      ? 'codicon-cloud-download'
+    : skillUninstallConfirmTarget
+      ? 'codicon-trash'
+    : skillUpdateConfirmTarget
+      ? 'codicon-sync'
     : 'codicon-archive';
   const confirmPrimaryLabel = confirmTarget?.kind === 'clearCache'
     ? 'Clear Cache'
@@ -11296,11 +11918,17 @@ function App() {
       ? agentPackageActionLabel(npmPackageTarget.action)
     : wheelMakerUpdateTarget
       ? 'Update'
+    : skillInstallConfirmTarget
+      ? 'Install'
+    : skillUninstallConfirmTarget
+      ? 'Uninstall'
+    : skillUpdateConfirmTarget
+      ? 'Update'
     : 'Archive';
-  const confirmPrimaryClassName = confirmTarget?.kind === 'clearCache' || npmPackageTarget?.action === 'uninstall'
+  const confirmPrimaryClassName = confirmTarget?.kind === 'clearCache' || npmPackageTarget?.action === 'uninstall' || !!skillUninstallConfirmTarget
     ? 'app-confirm-btn primary danger'
     : 'app-confirm-btn primary';
-  const confirmIconClassName = confirmTarget?.kind === 'clearCache' || npmPackageTarget?.action === 'uninstall'
+  const confirmIconClassName = confirmTarget?.kind === 'clearCache' || npmPackageTarget?.action === 'uninstall' || !!skillUninstallConfirmTarget
     ? 'app-confirm-icon danger'
     : 'app-confirm-icon';
   const handleConfirmPrimary = () => {
@@ -11317,6 +11945,10 @@ function App() {
     }
     if (confirmTarget.kind === 'wheelMakerUpdate') {
       handleWheelMakerUpdateConfirmedAction(confirmTarget).catch(() => undefined);
+      return;
+    }
+    if (confirmTarget.kind === 'skillInstall' || confirmTarget.kind === 'skillUninstall' || confirmTarget.kind === 'skillUpdate') {
+      handleSkillConfirmedAction(confirmTarget).catch(() => undefined);
       return;
     }
     handleArchiveProjectSession(

@@ -6,7 +6,7 @@ describe('agent package update settings UI source structure', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
 
-    expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'tokenStats' | 'ccSwitch' | 'database' | null;");
+    expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | null;");
     expect(mainTsx).toContain("settingsDetailView === 'update'");
     expect(mainTsx).toContain('renderUpdateSettingsDetail()');
     expect(mainTsx).toContain("renderSettingsSection('More'");
@@ -26,12 +26,14 @@ describe('agent package update settings UI source structure', () => {
     expect(moreStart).toBeGreaterThan(codeDisplayStart);
     const moreSection = mainTsx.slice(moreStart);
     const updateIndex = moreSection.indexOf("setSettingsDetailView('update')");
+    const skillsIndex = moreSection.indexOf("setSettingsDetailView('skills')");
     const tokenStatsIndex = moreSection.indexOf("setSettingsDetailView('tokenStats')");
     const ccSwitchIndex = moreSection.indexOf("setSettingsDetailView('ccSwitch')");
     const databaseIndex = moreSection.indexOf("setSettingsDetailView('database')");
     const clearCacheIndex = moreSection.indexOf('requestClearLocalCache');
     expect(updateIndex).toBeGreaterThanOrEqual(0);
-    expect(updateIndex).toBeLessThan(tokenStatsIndex);
+    expect(updateIndex).toBeLessThan(skillsIndex);
+    expect(skillsIndex).toBeLessThan(tokenStatsIndex);
     expect(tokenStatsIndex).toBeLessThan(ccSwitchIndex);
     expect(ccSwitchIndex).toBeLessThan(databaseIndex);
     expect(databaseIndex).toBeLessThan(clearCacheIndex);
