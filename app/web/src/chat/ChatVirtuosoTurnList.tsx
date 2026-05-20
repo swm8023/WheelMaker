@@ -31,6 +31,7 @@ export type ChatVirtuosoTurnListProps = {
   scrollRef: React.RefObject<HTMLElement | null>;
   displayIndex: ChatDisplayIndex;
   runtimeKey: string;
+  heightEstimateRevision?: number | string;
   overscan?: number;
   rowGap?: number;
   bottomBuffer?: number;
@@ -102,6 +103,22 @@ function resolveDefaultItemHeight(heightEstimates: number[], rowGap: number): nu
   return Math.max(1, Math.round(totalHeight / heightEstimates.length));
 }
 
+type HeightEstimateCacheEntry = {
+  height: number;
+  key: string;
+};
+
+type HeightEstimateCache = {
+  entries: HeightEstimateCacheEntry[];
+  estimates: number[];
+  revision: string;
+  signature: string;
+};
+
+function buildHeightEstimateSignature(items: ChatDisplayIndexItem[]): string {
+  return items.map(item => item.key).join('\u001f');
+}
+
 function scrollElementToBottom(element: HTMLElement, behavior: ChatVirtuosoScrollBehavior): void {
   element.scrollTo({
     top: resolveChatScrollBottomTop({
@@ -119,6 +136,7 @@ export const ChatVirtuosoTurnList = React.forwardRef<
   scrollRef,
   displayIndex,
   runtimeKey,
+  heightEstimateRevision = '',
   overscan = 8,
   rowGap = 7,
   bottomBuffer = DEFAULT_BOTTOM_BUFFER,
@@ -128,6 +146,9 @@ export const ChatVirtuosoTurnList = React.forwardRef<
   renderItem,
 }: ChatVirtuosoTurnListProps, ref) {
   const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
+  const heightEstimateCacheRef = React.useRef<HeightEstimateCache | null>(null);
+  const tailLockSettleFrameRef = React.useRef<number | null>(null);
+  const tailLockSettleFollowupFrameRef = React.useRef<number | null>(null);
   const [scrollParent, setScrollParent] = React.useState<HTMLElement | null>(null);
 
   React.useLayoutEffect(() => {
@@ -156,10 +177,29 @@ export const ChatVirtuosoTurnList = React.forwardRef<
     };
   }, [runtimeKey, scrollRef]);
 
-  const heightEstimates = React.useMemo(
-    () => displayIndex.items.map(item => resolveEstimatedItemHeight(item, rowGap)),
-    [displayIndex.items, rowGap],
-  );
+  const heightEstimates = React.useMemo(() => {
+    const revision = `${String(heightEstimateRevision)}:${Math.max(0, Math.round(rowGap))}`;
+    const signature = buildHeightEstimateSignature(displayIndex.items);
+    const cached = heightEstimateCacheRef.current;
+    if (cached && cached.revision === revision && cached.signature === signature) {
+      return cached.estimates;
+    }
+    const previousByKey = cached?.revision === revision
+      ? new Map(cached.entries.map(entry => [entry.key, entry.height]))
+      : new Map<string, number>();
+    const entries = displayIndex.items.map(item => ({
+      key: item.key,
+      height: previousByKey.get(item.key) ?? resolveEstimatedItemHeight(item, rowGap),
+    }));
+    const estimates = entries.map(entry => entry.height);
+    heightEstimateCacheRef.current = {
+      entries,
+      estimates,
+      revision,
+      signature,
+    };
+    return estimates;
+  }, [displayIndex.items, heightEstimateRevision, rowGap]);
   const defaultItemHeight = React.useMemo(
     () => resolveDefaultItemHeight(heightEstimates, rowGap),
     [heightEstimates, rowGap],
@@ -217,38 +257,60 @@ export const ChatVirtuosoTurnList = React.forwardRef<
     [onAtBottomChange, scrollParent],
   );
 
+  const cancelTailLockSettle = React.useCallback(() => {
+    if (tailLockSettleFrameRef.current !== null) {
+      window.cancelAnimationFrame(tailLockSettleFrameRef.current);
+      tailLockSettleFrameRef.current = null;
+    }
+    if (tailLockSettleFollowupFrameRef.current !== null) {
+      window.cancelAnimationFrame(tailLockSettleFollowupFrameRef.current);
+      tailLockSettleFollowupFrameRef.current = null;
+    }
+  }, []);
+
   const requestScrollToLastDisplayItem = React.useCallback(
-    (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
-      window.requestAnimationFrame(() => {
+    (
+      behavior: ChatVirtuosoScrollBehavior = 'auto',
+      options: {includeVirtuosoAutoscroll?: boolean} = {},
+    ) => {
+      cancelTailLockSettle();
+      tailLockSettleFrameRef.current = window.requestAnimationFrame(() => {
+        tailLockSettleFrameRef.current = null;
+        if (!shouldAutoscrollNow()) {
+          return;
+        }
+        if (options.includeVirtuosoAutoscroll) {
+          virtuosoRef.current?.autoscrollToBottom();
+        }
         scrollToLastDisplayItem(behavior);
         settleScrollParentToBottom(behavior);
-        window.requestAnimationFrame(() => {
+        tailLockSettleFollowupFrameRef.current = window.requestAnimationFrame(() => {
+          tailLockSettleFollowupFrameRef.current = null;
+          if (!shouldAutoscrollNow()) {
+            return;
+          }
           scrollToLastDisplayItem('auto');
           settleScrollParentToBottom('auto');
         });
       });
     },
-    [scrollToLastDisplayItem, settleScrollParentToBottom],
+    [cancelTailLockSettle, scrollToLastDisplayItem, settleScrollParentToBottom, shouldAutoscrollNow],
   );
 
   const handleTotalListHeightChanged = React.useCallback(() => {
     if (shouldAutoscrollNow()) {
-      virtuosoRef.current?.autoscrollToBottom();
-      scrollToLastDisplayItem('auto');
-      settleScrollParentToBottom('auto');
-      requestScrollToLastDisplayItem('auto');
+      requestScrollToLastDisplayItem('auto', {includeVirtuosoAutoscroll: true});
     }
   }, [
     requestScrollToLastDisplayItem,
-    scrollToLastDisplayItem,
-    settleScrollParentToBottom,
     shouldAutoscrollNow,
   ]);
 
+  React.useEffect(() => cancelTailLockSettle, [cancelTailLockSettle]);
+
   React.useImperativeHandle(ref, () => ({
     autoscrollToBottom: () => {
-      virtuosoRef.current?.autoscrollToBottom();
-      requestScrollToLastDisplayItem('auto');
+      requestScrollToLastDisplayItem('auto', {includeVirtuosoAutoscroll: true});
     },
     scrollToBottom: (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
       scrollToLastDisplayItem(behavior);

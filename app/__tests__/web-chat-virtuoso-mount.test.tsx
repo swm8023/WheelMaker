@@ -46,17 +46,28 @@ function turnItem(turnIndex: number): ChatDisplayIndexItem {
 }
 
 function installAnimationFrameQueue(): {
-  frameCallbacks: FrameRequestCallback[];
+  frameCallbacks: Array<{callback: FrameRequestCallback; cancelled: boolean; id: number}>;
   restore: () => void;
 } {
   const originalRequestAnimationFrame = window.requestAnimationFrame;
   const originalCancelAnimationFrame = window.cancelAnimationFrame;
-  const frameCallbacks: FrameRequestCallback[] = [];
+  const frameCallbacks: Array<{callback: FrameRequestCallback; cancelled: boolean; id: number}> = [];
+  const frameById = new Map<number, {callback: FrameRequestCallback; cancelled: boolean; id: number}>();
+  let nextFrameId = 1;
   window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
-    frameCallbacks.push(callback);
-    return frameCallbacks.length;
+    const id = nextFrameId;
+    nextFrameId += 1;
+    const frame = {id, callback, cancelled: false};
+    frameCallbacks.push(frame);
+    frameById.set(id, frame);
+    return id;
   }) as typeof window.requestAnimationFrame;
-  window.cancelAnimationFrame = (() => undefined) as typeof window.cancelAnimationFrame;
+  window.cancelAnimationFrame = ((id: number) => {
+    const frame = frameById.get(id);
+    if (frame) {
+      frame.cancelled = true;
+    }
+  }) as typeof window.cancelAnimationFrame;
   return {
     frameCallbacks,
     restore: () => {
@@ -66,12 +77,16 @@ function installAnimationFrameQueue(): {
   };
 }
 
-async function flushAnimationFrames(frameCallbacks: FrameRequestCallback[]): Promise<void> {
+async function flushAnimationFrames(
+  frameCallbacks: Array<{callback: FrameRequestCallback; cancelled: boolean; id: number}>,
+): Promise<void> {
   await ReactTestRenderer.act(() => {
     let flushCount = 0;
     while (frameCallbacks.length > 0 && flushCount < 10) {
       const callbacks = frameCallbacks.splice(0);
-      callbacks.forEach(callback => callback(16 + flushCount));
+      callbacks
+        .filter(frame => !frame.cancelled)
+        .forEach(frame => frame.callback(16 + flushCount));
       flushCount += 1;
     }
   });
@@ -200,6 +215,53 @@ describe('chat virtuoso mount fallback', () => {
     }
   });
 
+  test('keeps height estimates stable while the same turn streams', async () => {
+    const scrollRef = {current: {} as HTMLElement};
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    try {
+      await ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(
+          <ChatVirtuosoTurnList
+            scrollRef={scrollRef}
+            displayIndex={{items: [{...turnItem(1), estimatedHeight: 80}]}}
+            runtimeKey="project-a/session-a"
+            renderItem={item => (
+              <span>{item.key}</span>
+            )}
+          />,
+        );
+      });
+
+      const firstProps = mockVirtuosoProps[mockVirtuosoProps.length - 1];
+      const firstHeightEstimates = firstProps.heightEstimates;
+      expect(firstHeightEstimates).toEqual([87]);
+
+      await ReactTestRenderer.act(() => {
+        renderer!.update(
+          <ChatVirtuosoTurnList
+            scrollRef={scrollRef}
+            displayIndex={{items: [{...turnItem(1), estimatedHeight: 240}]}}
+            runtimeKey="project-a/session-a"
+            renderItem={item => (
+              <span>{item.key}</span>
+            )}
+          />,
+        );
+      });
+
+      const latestProps = mockVirtuosoProps[mockVirtuosoProps.length - 1];
+      expect(latestProps.heightEstimates).toBe(firstHeightEstimates);
+      expect(latestProps.heightEstimates).toEqual([87]);
+    } finally {
+      if (renderer) {
+        await ReactTestRenderer.act(() => {
+          renderer!.unmount();
+        });
+      }
+    }
+  });
+
   test('imperative bottom scroll settles the scroll parent to its physical bottom', async () => {
     const animationFrames = installAnimationFrameQueue();
     const scrollTo = jest.fn();
@@ -280,15 +342,68 @@ describe('chat virtuoso mount fallback', () => {
         props.totalListHeightChanged();
       });
 
+      expect(mockAutoscrollToBottomCalls).toHaveLength(0);
+      expect(mockScrollToIndexCalls).toHaveLength(0);
+      expect(scrollTo).not.toHaveBeenCalled();
+
+      await flushAnimationFrames(animationFrames.frameCallbacks);
+
       expect(mockAutoscrollToBottomCalls).toHaveLength(1);
       expect(scrollTo).toHaveBeenLastCalledWith({
         top: 480,
         behavior: 'auto',
       });
+    } finally {
+      if (renderer) {
+        await ReactTestRenderer.act(() => {
+          renderer!.unmount();
+        });
+      }
+      animationFrames.restore();
+    }
+  });
+
+  test('coalesces repeated tail-locked streaming height changes into one settling frame', async () => {
+    const animationFrames = installAnimationFrameQueue();
+    const scrollTo = jest.fn();
+    const scrollParent = createScrollParent({
+      clientHeight: 420,
+      scrollHeight: 900,
+      scrollTo,
+    });
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    try {
+      await ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(
+          <ChatVirtuosoTurnList
+            scrollRef={{current: scrollParent}}
+            displayIndex={{items: [turnItem(1), turnItem(2)]}}
+            runtimeKey="project-a/session-a"
+            shouldAutoscroll={() => true}
+            renderItem={item => (
+              <span>{item.key}</span>
+            )}
+          />,
+        );
+      });
+
+      const props = mockVirtuosoProps[mockVirtuosoProps.length - 1];
+      await ReactTestRenderer.act(() => {
+        props.totalListHeightChanged(900);
+        props.totalListHeightChanged(920);
+        props.totalListHeightChanged(940);
+      });
+
+      expect(mockAutoscrollToBottomCalls).toHaveLength(0);
+      expect(mockScrollToIndexCalls).toHaveLength(0);
+      expect(scrollTo).not.toHaveBeenCalled();
 
       await flushAnimationFrames(animationFrames.frameCallbacks);
 
       expect(mockAutoscrollToBottomCalls).toHaveLength(1);
+      expect(mockScrollToIndexCalls).toHaveLength(2);
+      expect(scrollTo).toHaveBeenCalledTimes(2);
       expect(scrollTo).toHaveBeenLastCalledWith({
         top: 480,
         behavior: 'auto',
