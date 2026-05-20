@@ -6,7 +6,6 @@ server/bin/**/*
 .wheelmaker/
 server/.tmp/
 .tmp_codex_acc/
-.claude/
 app/node_modules/
 
 # Go build artifacts
