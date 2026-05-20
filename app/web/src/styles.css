@@ -1037,6 +1037,57 @@ body,
   gap: 8px;
 }
 
+.settings-skills-marketplace-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 86%, var(--accent));
+  color: inherit;
+  padding: 7px 8px;
+  text-decoration: none;
+}
+
+.settings-skills-marketplace-link:hover {
+  background: color-mix(in srgb, var(--panel-2) 84%, var(--accent));
+}
+
+.settings-skills-marketplace-main {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.settings-skills-marketplace-label {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.settings-skills-marketplace-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  user-select: text;
+}
+
+.settings-skills-marketplace-link .codicon {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .settings-skills-hub {
   display: grid;
   gap: 6px;

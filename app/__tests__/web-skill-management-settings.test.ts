@@ -41,6 +41,8 @@ describe('skill management settings UI source structure', () => {
     expect(mainTsx).toContain("kind: 'skillInstall'");
     expect(mainTsx).toContain("kind: 'skillUninstall'");
     expect(mainTsx).toContain("kind: 'skillUpdate'");
+    expect(mainTsx).toContain("const SKILLS_MARKETPLACE_URL = 'https://www.skills.sh/';");
+    expect(mainTsx).toContain('settings-skills-marketplace-link');
   });
 
   test('renders skill rows without linked agent labels', () => {
@@ -69,6 +71,7 @@ describe('skill management settings UI source structure', () => {
 
   test('uses compact settings skill styles', () => {
     expect(stylesCss).toContain('.settings-skills-hub');
+    expect(stylesCss).toContain('.settings-skills-marketplace-link');
     expect(stylesCss).toContain('.settings-skill-row');
     expect(stylesCss).toContain('.settings-skill-category');
     expect(stylesCss).toContain('.settings-skill-icon-btn');

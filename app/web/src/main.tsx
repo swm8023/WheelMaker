@@ -246,6 +246,7 @@ type ConfirmTarget =
       includeProjects?: boolean;
     };
 type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | null;
+const SKILLS_MARKETPLACE_URL = 'https://www.skills.sh/';
 type WheelMakerUpdateHubView = {
   hubId: string;
   loading: boolean;
@@ -9045,6 +9046,18 @@ function App() {
     renderSettingsDetailShell(
       'Skills',
       <>
+        <a
+          className="settings-skills-marketplace-link"
+          href={SKILLS_MARKETPLACE_URL}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <span className="settings-skills-marketplace-main">
+            <span className="settings-skills-marketplace-label">Marketplace</span>
+            <span className="settings-skills-marketplace-url">{SKILLS_MARKETPLACE_URL}</span>
+          </span>
+          <span className="codicon codicon-link-external" aria-hidden="true" />
+        </a>
         {skillsLoading && Object.keys(skillHubs).length === 0 ? (
           <div className="muted block">Loading skills...</div>
         ) : null}
