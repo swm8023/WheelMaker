@@ -116,6 +116,7 @@ import {
 import {
   deriveSkillHubIds,
   groupSkillsByCategory,
+  parseSkillSourceInput,
   skillOperationStatusLabel,
   skillScopeLabel,
   sortSkillProjects,
@@ -7251,7 +7252,8 @@ function App() {
 
   const listSkillSource = useCallback(async () => {
     const target = skillInstallTarget;
-    const source = skillSourceInput.trim();
+    const sourceInput = parseSkillSourceInput(skillSourceInput);
+    const source = sourceInput.source;
     if (!target || !source) {
       setSkillSourceError('Source is required.');
       return;
@@ -7263,8 +7265,23 @@ function App() {
       if (!result.ok) {
         throw new Error(skillCommandErrorMessage(result));
       }
-      setSkillSourceCandidates(result.candidates ?? []);
-      setSkillSourceSelectedNames([]);
+      const candidates = result.candidates ?? [];
+      if (sourceInput.skillNames.length === 0) {
+        setSkillSourceCandidates(candidates);
+        setSkillSourceSelectedNames([]);
+        return;
+      }
+      const candidateByName = new Map(candidates.map(candidate => [candidate.name, candidate]));
+      const filteredCandidates = sourceInput.skillNames
+        .map(name => candidateByName.get(name))
+        .filter((candidate): candidate is RegistrySkillSourceCandidate => !!candidate);
+      const foundNames = new Set(filteredCandidates.map(candidate => candidate.name));
+      const missingNames = sourceInput.skillNames.filter(name => !foundNames.has(name));
+      setSkillSourceCandidates(filteredCandidates);
+      setSkillSourceSelectedNames(filteredCandidates.map(candidate => candidate.name));
+      if (missingNames.length > 0) {
+        setSkillSourceError(`Skill not found in source: ${missingNames.join(', ')}`);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setSkillSourceError(message);
@@ -7275,9 +7292,13 @@ function App() {
 
   const requestSkillInstallConfirm = useCallback(() => {
     const target = skillInstallTarget;
-    const source = skillSourceInput.trim();
+    const source = parseSkillSourceInput(skillSourceInput).source;
     const skills = skillSourceSelectedNames;
-    if (!target || !source || skills.length === 0) {
+    if (!target || !source) {
+      setSkillSourceError('Source is required.');
+      return;
+    }
+    if (skills.length === 0) {
       setSkillSourceError('Select at least one skill.');
       return;
     }
@@ -8872,7 +8893,7 @@ function App() {
                 listSkillSource().catch(() => undefined);
               }
             }}
-            placeholder="owner/repo"
+            placeholder="owner/repo or npx skills add ... --skill name"
           />
           <button
             type="button"

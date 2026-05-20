@@ -78,6 +78,13 @@ describe('skill management settings UI source structure', () => {
     expect(mainTsx).not.toContain('candidate-group:');
   });
 
+  test('normalizes pasted skills add commands in the install panel', () => {
+    expect(mainTsx).toContain('parseSkillSourceInput(skillSourceInput)');
+    expect(mainTsx).toContain('sourceInput.skillNames');
+    expect(mainTsx).toContain('Skill not found in source:');
+    expect(mainTsx).toContain('owner/repo or npx skills add ... --skill name');
+  });
+
   test('uses compact settings skill styles', () => {
     expect(stylesCss).toContain('.settings-skills-hub');
     expect(stylesCss).toContain('.settings-skills-marketplace-link');
