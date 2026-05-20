@@ -2674,6 +2674,8 @@ function App() {
   const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);
   const [chatFileMentionMenuOpen, setChatFileMentionMenuOpen] = useState(false);
   const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');
+  const [chatHubMenuOpen, setChatHubMenuOpen] = useState(false);
+  const chatHubMenuRef = useRef<HTMLDivElement | null>(null);
   const [chatSlashActiveIndex, setChatSlashActiveIndex] = useState(0);
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
   const [resumeLoading, setResumeLoading] = useState(false);
@@ -3870,6 +3872,32 @@ function App() {
   }, [chatConfigOverflowOpen, setChatConfigOverflowOpen]);
 
   useEffect(() => {
+    if (!chatHubMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && chatHubMenuRef.current?.contains(target)) return;
+      setChatHubMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setChatHubMenuOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [chatHubMenuOpen]);
+
+  useEffect(() => {
+    if (tab !== 'chat' || sidebarSettingsOpen) {
+      setChatHubMenuOpen(false);
+    }
+  }, [sidebarSettingsOpen, tab]);
+
+  useEffect(() => {
     if (chatConfigDisplay.overflow.length === 0) {
       setChatConfigOverflowOpen(false);
     }
@@ -4052,6 +4080,44 @@ function App() {
     ),
     [],
   );
+  const renderChatHubSummary = useCallback(() => {
+    const hubCount = registryHubs.length;
+    return (
+      <div ref={chatHubMenuRef} className="chat-hub-summary">
+        <button
+          type="button"
+          className="chat-hub-summary-button"
+          aria-label="Show connected hubs"
+          aria-haspopup="menu"
+          aria-expanded={chatHubMenuOpen}
+          onClick={() => {
+            setChatPromptMenuOpen(false);
+            setChatFileMentionMenuOpen(false);
+            setChatConfigMenuOptionId('');
+            setChatConfigOverflowOpen(false);
+            setChatHubMenuOpen(open => !open);
+          }}
+        >
+          <span className="chat-hub-summary-label">Hubs</span>
+          <span className="chat-hub-summary-count">{hubCount}</span>
+          <span className="codicon codicon-chevron-down" aria-hidden="true" />
+        </button>
+        {chatHubMenuOpen ? (
+          <div className="chat-hub-popover" role="menu">
+            {registryHubs.length > 0 ? (
+              registryHubs.map(hub => (
+                <div key={hub.hubId} className="chat-hub-row" role="menuitem">
+                  <span className="chat-hub-row-name">{hub.hubId}</span>
+                </div>
+              ))
+            ) : (
+              <div className="chat-hub-empty">No hubs</div>
+            )}
+          </div>
+        ) : null}
+      </div>
+    );
+  }, [chatHubMenuOpen, registryHubs, setChatConfigOverflowOpen]);
   const floatingBounds = useMemo(() => {
     if (isWide) {
       return { minTop: 0, maxTop: 0 };
@@ -11069,13 +11135,19 @@ function App() {
     if (tab === 'chat') {
       return (
         <div className="content">
-          <div className="block-title">
+          <div className="block-title chat-block-title">
             {isWide ? (
-              <span className="title-text">
-                CHAT - {selectedChatDisplayTitle || 'New Session'}
-              </span>
+              <div className="chat-title-row">
+                <span className="title-text">
+                  CHAT - {selectedChatDisplayTitle || 'New Session'}
+                </span>
+                {renderChatHubSummary()}
+              </div>
             ) : (
-              renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)
+              <div className="chat-title-row">
+                {renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)}
+                {renderChatHubSummary()}
+              </div>
             )}
           </div>
           <div

@@ -469,6 +469,47 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('renderBreadcrumbTitle(breadcrumbProjectName, gitBreadcrumbLabel)');
   });
 
+  test('chat title shows hub count summary with dropdown details', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    expect(mainTsx).toContain('const [chatHubMenuOpen, setChatHubMenuOpen] = useState(false);');
+    expect(mainTsx).toContain('const chatHubMenuRef = useRef<HTMLDivElement | null>(null);');
+    expect(mainTsx).toContain('const renderChatHubSummary = useCallback(() => {');
+    expect(mainTsx).toContain('const hubCount = registryHubs.length;');
+    expect(mainTsx).toContain('if (!chatHubMenuOpen) return;');
+    expect(mainTsx).toContain("if (event.key === 'Escape') {");
+    expect(mainTsx).toContain("if (tab !== 'chat' || sidebarSettingsOpen) {");
+    expect(mainTsx).toContain('chatHubMenuRef.current?.contains(target)');
+    expect(mainTsx).toContain('aria-label="Show connected hubs"');
+    expect(mainTsx).toContain('aria-expanded={chatHubMenuOpen}');
+    expect(mainTsx).toContain('<span className="chat-hub-summary-label">Hubs</span>');
+    expect(mainTsx).toContain('<span className="chat-hub-summary-count">{hubCount}</span>');
+    expect(mainTsx).toContain('{registryHubs.length > 0 ? (');
+    expect(mainTsx).toContain('registryHubs.map(hub => (');
+    expect(mainTsx).toContain('<span className="chat-hub-row-name">{hub.hubId}</span>');
+    expect(mainTsx).toContain('<div className="chat-hub-empty">No hubs</div>');
+    expect(mainTsx).toContain('<div className="block-title chat-block-title">');
+    expect(mainTsx).toContain('<div className="chat-title-row">');
+    expect(mainTsx).toContain('renderChatHubSummary()');
+    expect(mainTsx).toMatch(
+      /<div className="chat-title-row">[\s\S]*?CHAT - \{selectedChatDisplayTitle \|\| 'New Session'\}[\s\S]*?renderChatHubSummary\(\)/,
+    );
+    expect(mainTsx).toMatch(
+      /<div className="chat-title-row">[\s\S]*?renderBreadcrumbTitle\(chatBreadcrumbProjectName, chatBreadcrumbLabel\)[\s\S]*?renderChatHubSummary\(\)/,
+    );
+    expect(stylesCss).toContain('.chat-title-row {');
+    expect(stylesCss).toContain('.chat-block-title {');
+    expect(stylesCss).toContain('.chat-title-row > .title-text {');
+    expect(stylesCss).toContain('.chat-hub-summary {');
+    expect(stylesCss).toContain('.chat-hub-summary-button {');
+    expect(stylesCss).toContain('.chat-hub-summary-count {');
+    expect(stylesCss).toContain('.chat-hub-popover {');
+    expect(stylesCss).toContain('.chat-hub-row-name {');
+    expect(stylesCss).toContain('.chat-hub-empty {');
+  });
+
   test('chat composer is a unified command frame with compact custom config pills', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
