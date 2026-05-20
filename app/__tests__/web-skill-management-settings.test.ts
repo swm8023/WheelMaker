@@ -58,10 +58,20 @@ describe('skill management settings UI source structure', () => {
     expect(mainTsx).toContain('codicon-trash');
   });
 
+  test('expands skill install controls inline with select all', () => {
+    expect(mainTsx).toContain('sameSkillInstallTarget');
+    expect(mainTsx).toContain('toggleAllSkillSourceCandidates');
+    expect(mainTsx).toContain('Select all');
+    expect(mainTsx).toContain('renderSkillInstallPanel({hubId, scope: options.scope, projectName: options.projectName})');
+    expect(mainTsx).not.toContain('renderSkillInstallPanel()}');
+    expect(mainTsx).not.toContain('candidate?.description');
+  });
+
   test('uses compact settings skill styles', () => {
     expect(stylesCss).toContain('.settings-skills-hub');
     expect(stylesCss).toContain('.settings-skill-row');
     expect(stylesCss).toContain('.settings-skill-category');
     expect(stylesCss).toContain('.settings-skill-icon-btn');
+    expect(stylesCss).toContain('.settings-skill-select-all-row');
   });
 });

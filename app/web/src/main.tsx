@@ -503,6 +503,13 @@ function skillActionPendingKey(input: {hubId: string; scope: RegistrySkillScope;
   ].join(':');
 }
 
+function sameSkillInstallTarget(left: SkillInstallTarget | null, right: SkillInstallTarget): boolean {
+  return !!left &&
+    left.hubId === right.hubId &&
+    left.scope === right.scope &&
+    (left.projectName || '') === (right.projectName || '');
+}
+
 function skillCommandErrorMessage(result: RegistrySkillCommandResponse): string {
   return result.errorSummary || result.message || 'Skill operation failed.';
 }
@@ -7212,11 +7219,14 @@ function App() {
   }, [settingsDetailView, refreshSkillManagement]);
 
   const requestSkillInstall = useCallback((target: SkillInstallTarget) => {
+    const sameTarget = sameSkillInstallTarget(skillInstallTarget, target);
     setSkillInstallTarget(target);
-    setSkillSourceError('');
-    setSkillSourceCandidates([]);
-    setSkillSourceSelectedNames([]);
-  }, []);
+    if (!sameTarget) {
+      setSkillSourceError('');
+      setSkillSourceCandidates([]);
+      setSkillSourceSelectedNames([]);
+    }
+  }, [skillInstallTarget]);
 
   const toggleSkillSourceCandidate = useCallback((name: string) => {
     setSkillSourceSelectedNames(prev => (
@@ -7225,6 +7235,17 @@ function App() {
         : [...prev, name]
     ));
   }, []);
+
+  const toggleAllSkillSourceCandidates = useCallback(() => {
+    const candidateNames = skillSourceCandidates
+      .map(candidate => candidate.name)
+      .filter(Boolean);
+    setSkillSourceSelectedNames(prev => {
+      const selected = new Set(prev);
+      const allSelected = candidateNames.length > 0 && candidateNames.every(name => selected.has(name));
+      return allSelected ? [] : candidateNames;
+    });
+  }, [skillSourceCandidates]);
 
   const listSkillSource = useCallback(async () => {
     const target = skillInstallTarget;
@@ -8812,11 +8833,16 @@ function App() {
     </button>
   );
 
-  const renderSkillInstallPanel = () => {
-    if (!skillInstallTarget) {
+  const renderSkillInstallPanel = (target: SkillInstallTarget) => {
+    const activeInstallTarget = skillInstallTarget;
+    if (!activeInstallTarget || !sameSkillInstallTarget(activeInstallTarget, target)) {
       return null;
     }
     const selected = new Set(skillSourceSelectedNames);
+    const candidateNames = skillSourceCandidates
+      .map(candidate => candidate.name)
+      .filter(Boolean);
+    const allCandidatesSelected = candidateNames.length > 0 && candidateNames.every(name => selected.has(name));
     const candidateGroups = groupSkillsByCategory(skillSourceCandidates.map(candidate => ({
       name: candidate.name,
       category: candidate.category,
@@ -8826,7 +8852,7 @@ function App() {
     return (
       <section className="settings-skills-install-panel">
         <div className="settings-skills-scope-header">
-          <div className="settings-skills-scope-title">{skillScopeLabel(skillInstallTarget)}</div>
+          <div className="settings-skills-scope-title">{skillScopeLabel(activeInstallTarget)}</div>
           <button
             type="button"
             className="settings-detail-action-btn"
@@ -8866,27 +8892,31 @@ function App() {
         ) : null}
         {candidateGroups.length > 0 ? (
           <div className="settings-skills-candidates">
+            <label className="settings-skill-row settings-skill-candidate-row settings-skill-select-all-row">
+              <input
+                type="checkbox"
+                checked={allCandidatesSelected}
+                onChange={toggleAllSkillSourceCandidates}
+              />
+              <span className="settings-skill-row-main">
+                <span className="settings-skill-name">Select all</span>
+              </span>
+            </label>
             {candidateGroups.map(group => (
               <div key={`candidate-group:${group.categoryKey}`} className="settings-skill-category-block">
                 <div className="settings-skill-category">{group.category}</div>
-                {group.skills.map(skill => {
-                  const candidate = skillSourceCandidates.find(item => item.name === skill.name);
-                  return (
-                    <label key={`candidate:${group.categoryKey}:${skill.name}`} className="settings-skill-row settings-skill-candidate-row">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(skill.name)}
-                        onChange={() => toggleSkillSourceCandidate(skill.name)}
-                      />
-                      <span className="settings-skill-row-main">
-                        <span className="settings-skill-name">{skill.name}</span>
-                        {candidate?.description ? (
-                          <span className="settings-skill-meta">{candidate.description}</span>
-                        ) : null}
-                      </span>
-                    </label>
-                  );
-                })}
+                {group.skills.map(skill => (
+                  <label key={`candidate:${group.categoryKey}:${skill.name}`} className="settings-skill-row settings-skill-candidate-row">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(skill.name)}
+                      onChange={() => toggleSkillSourceCandidate(skill.name)}
+                    />
+                    <span className="settings-skill-row-main">
+                      <span className="settings-skill-name">{skill.name}</span>
+                    </span>
+                  </label>
+                ))}
               </div>
             ))}
           </div>
@@ -8940,6 +8970,7 @@ function App() {
         {options.error ? (
           <div className="settings-metadata-error">{options.error}</div>
         ) : null}
+        {renderSkillInstallPanel({hubId, scope: options.scope, projectName: options.projectName})}
         {groups.length === 0 && !options.error ? (
           <div className="settings-skills-empty">No skills installed.</div>
         ) : null}
@@ -8995,7 +9026,6 @@ function App() {
         {!skillsLoading && Object.keys(skillHubs).length === 0 && !skillsError ? (
           <div className="muted block">No hubs available.</div>
         ) : null}
-        {renderSkillInstallPanel()}
         <div className="settings-skills-list">
           {Object.values(skillHubs).sort((left, right) => left.hubId.localeCompare(right.hubId)).map(hub => {
             const data = hub.data;

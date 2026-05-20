@@ -1141,6 +1141,12 @@ body,
   justify-content: flex-start;
 }
 
+.settings-skill-select-all-row {
+  min-height: 32px;
+  border-top: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 64%, transparent);
+}
+
 .settings-skill-candidate-row input {
   flex: 0 0 auto;
 }
