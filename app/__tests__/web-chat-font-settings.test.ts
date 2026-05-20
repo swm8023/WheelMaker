@@ -8,16 +8,16 @@ import {
 } from '../web/src/chat/chatTypography';
 
 describe('web chat font settings', () => {
-  test('defines a clear system chat font option while preserving the current font as a choice', () => {
-    expect(DEFAULT_CHAT_FONT).toBe('system');
+  test('keeps the current IBM Plex chat font as the default while offering a clearer system option', () => {
+    expect(DEFAULT_CHAT_FONT).toBe('ibm-plex');
     expect(CHAT_FONT_OPTIONS.map(option => option.id)).toEqual([
-      'system',
       'ibm-plex',
+      'system',
       'serif',
     ]);
+    expect(resolveChatFontFamily(DEFAULT_CHAT_FONT)).toContain('IBM Plex Sans');
     expect(resolveChatFontFamily('system')).toContain('Segoe UI');
     expect(resolveChatFontFamily('system')).toContain('Microsoft YaHei UI');
-    expect(resolveChatFontFamily('ibm-plex')).toContain('IBM Plex Sans');
     expect(isChatFontId('system')).toBe(true);
     expect(isChatFontId('bad-font')).toBe(false);
   });

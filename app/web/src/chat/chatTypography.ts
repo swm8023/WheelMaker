@@ -6,18 +6,18 @@ export type ChatFontOption = {
   fontFamily: string;
 };
 
-export const DEFAULT_CHAT_FONT: ChatFontId = 'system';
+export const DEFAULT_CHAT_FONT: ChatFontId = 'ibm-plex';
 
 export const CHAT_FONT_OPTIONS: ChatFontOption[] = [
-  {
-    id: 'system',
-    label: 'System Sans',
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans', sans-serif",
-  },
   {
     id: 'ibm-plex',
     label: 'IBM Plex Sans',
     fontFamily: "'IBM Plex Sans', 'Noto Sans', sans-serif",
+  },
+  {
+    id: 'system',
+    label: 'System Sans',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans', sans-serif",
   },
   {
     id: 'serif',
