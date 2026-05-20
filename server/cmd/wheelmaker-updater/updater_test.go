@@ -304,6 +304,36 @@ func TestRunUpdateRound_ManualSignalSkipsUpdate(t *testing.T) {
 	}
 }
 
+func TestRunUpdateRound_ManualSignalCanSkipWebPublish(t *testing.T) {
+	repoDir := t.TempDir()
+	scriptsDir := filepath.Join(repoDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts: %v", err)
+	}
+	refreshPath := filepath.Join(scriptsDir, "refresh_server.ps1")
+	if err := os.WriteFile(refreshPath, []byte(""), 0o644); err != nil {
+		t.Fatalf("write refresh script: %v", err)
+	}
+
+	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: `C:/Users/test/.wheelmaker/bin`}
+	f := &fakeRunner{results: map[string]fakeResult{}}
+
+	err := runUpdateRoundWithOptions(context.Background(), cfg, f, updateRoundOptions{
+		skipUpdate:     true,
+		skipWebPublish: true,
+	})
+	if err != nil {
+		t.Fatalf("runUpdateRoundWithOptions: %v", err)
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("expected one command call, got %d", len(f.calls))
+	}
+	argsLine := strings.Join(f.calls[0].args, " ")
+	if !strings.Contains(argsLine, "-SkipUpdate") || !strings.Contains(argsLine, "-SkipWebPublish") {
+		t.Fatalf("expected -SkipUpdate and -SkipWebPublish in args, got: %s", argsLine)
+	}
+}
+
 func TestConsumeManualSignal(t *testing.T) {
 	dir := t.TempDir()
 	signalPath := filepath.Join(dir, "update-now.signal")
@@ -367,5 +397,11 @@ func TestParseManualSignalReason_DefaultManualSignal(t *testing.T) {
 func TestParseManualSignalReason_FullUpdateSignal(t *testing.T) {
 	if got := parseManualSignalReason("full-update"); got != triggerReasonManualFullUpdate {
 		t.Fatalf("reason=%q, want=%q", got, triggerReasonManualFullUpdate)
+	}
+}
+
+func TestParseManualSignalReason_SkipWebPublishSignal(t *testing.T) {
+	if got := parseManualSignalReason("skip-web-publish\n2026-05-21T00:00:00Z"); got != triggerReasonManualSignalSkipWebPublish {
+		t.Fatalf("reason=%q, want=%q", got, triggerReasonManualSignalSkipWebPublish)
 	}
 }

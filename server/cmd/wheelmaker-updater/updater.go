@@ -20,10 +20,12 @@ const updaterWaitHeartbeatInterval = 60 * time.Second
 const updaterRoundTimeout = 20 * time.Minute
 
 const (
-	triggerReasonScheduled        = "scheduled"
-	triggerReasonManualSignal     = "manual-signal"
-	triggerReasonManualFullUpdate = "manual-full-update"
-	fullUpdateSignalToken         = "full-update"
+	triggerReasonScheduled                  = "scheduled"
+	triggerReasonManualSignal               = "manual-signal"
+	triggerReasonManualSignalSkipWebPublish = "manual-signal-skip-web-publish"
+	triggerReasonManualFullUpdate           = "manual-full-update"
+	fullUpdateSignalToken                   = "full-update"
+	skipWebPublishSignalToken               = "skip-web-publish"
 )
 
 var runtimeGOOS = runtime.GOOS
@@ -38,6 +40,11 @@ type UpdaterConfig struct {
 
 type commandRunner interface {
 	CombinedOutput(ctx context.Context, dir string, name string, args ...string) (string, error)
+}
+
+type updateRoundOptions struct {
+	skipUpdate     bool
+	skipWebPublish bool
 }
 
 type osCommandRunner struct{}
@@ -85,9 +92,12 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 		}
 		logger.Info("[updater] trigger=%s", triggerReason)
 
-		skipUpdate := triggerReason == triggerReasonManualSignal
+		opts := updateRoundOptions{
+			skipUpdate:     triggerReason == triggerReasonManualSignal || triggerReason == triggerReasonManualSignalSkipWebPublish,
+			skipWebPublish: triggerReason == triggerReasonManualSignalSkipWebPublish,
+		}
 		roundCtx, cancelRound := context.WithTimeout(ctx, updaterRoundTimeout)
-		err = runUpdateRound(roundCtx, cfg, runner, skipUpdate)
+		err = runUpdateRoundWithOptions(roundCtx, cfg, runner, opts)
 		cancelRound()
 		if err != nil {
 			logger.Error("[updater] update round failed: %v", err)
@@ -98,7 +108,7 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 				return nil
 			case <-retry.C:
 				retryCtx, cancelRetry := context.WithTimeout(ctx, updaterRoundTimeout)
-				retryErr := runUpdateRound(retryCtx, cfg, runner, skipUpdate)
+				retryErr := runUpdateRoundWithOptions(retryCtx, cfg, runner, opts)
 				cancelRetry()
 				if retryErr != nil {
 					logger.Error("[updater] retry update round failed: %v", retryErr)
@@ -171,13 +181,20 @@ func parseManualSignalReason(raw string) string {
 	if strings.Contains(strings.ToLower(raw), fullUpdateSignalToken) {
 		return triggerReasonManualFullUpdate
 	}
+	if strings.Contains(strings.ToLower(raw), skipWebPublishSignalToken) {
+		return triggerReasonManualSignalSkipWebPublish
+	}
 	return triggerReasonManualSignal
 }
 
 func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner, skipUpdate bool) error {
+	return runUpdateRoundWithOptions(ctx, cfg, runner, updateRoundOptions{skipUpdate: skipUpdate})
+}
+
+func runUpdateRoundWithOptions(ctx context.Context, cfg UpdaterConfig, runner commandRunner, opts updateRoundOptions) error {
 	logger.Info("[updater] run refresh script begin")
 
-	invocation, err := refreshInvocationForOS(cfg, skipUpdate, runtimeGOOS)
+	invocation, err := refreshInvocationForOS(cfg, opts, runtimeGOOS)
 	if err != nil {
 		return err
 	}
@@ -202,7 +219,7 @@ type refreshInvocation struct {
 	args       []string
 }
 
-func refreshInvocationForOS(cfg UpdaterConfig, skipUpdate bool, goos string) (refreshInvocation, error) {
+func refreshInvocationForOS(cfg UpdaterConfig, opts updateRoundOptions, goos string) (refreshInvocation, error) {
 	switch goos {
 	case "windows":
 		refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server.ps1")
@@ -214,8 +231,11 @@ func refreshInvocationForOS(cfg UpdaterConfig, skipUpdate bool, goos string) (re
 			"-SkipUpdaterInstall",
 			"-SkipServiceConfig",
 		}
-		if skipUpdate {
+		if opts.skipUpdate {
 			args = append(args, "-SkipUpdate")
+		}
+		if opts.skipWebPublish {
+			args = append(args, "-SkipWebPublish")
 		}
 		return refreshInvocation{
 			scriptPath: refreshScript,
@@ -231,8 +251,11 @@ func refreshInvocationForOS(cfg UpdaterConfig, skipUpdate bool, goos string) (re
 			"--skip-updater-install",
 			"--skip-service-config",
 		}
-		if skipUpdate {
+		if opts.skipUpdate {
 			args = append(args, "--skip-update")
+		}
+		if opts.skipWebPublish {
+			args = append(args, "--skip-web-publish")
 		}
 		return refreshInvocation{
 			scriptPath: refreshScript,
@@ -248,8 +271,10 @@ func refreshInvocationForOS(cfg UpdaterConfig, skipUpdate bool, goos string) (re
 			"--skip-updater-install",
 			"--skip-service-config",
 		}
-		if skipUpdate {
+		if opts.skipUpdate {
 			args = append(args, "--skip-update", "--skip-web-publish")
+		} else if opts.skipWebPublish {
+			args = append(args, "--skip-web-publish")
 		}
 		return refreshInvocation{
 			scriptPath: refreshScript,

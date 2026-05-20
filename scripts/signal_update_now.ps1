@@ -40,4 +40,9 @@ if ($DelaySeconds -gt 0) {
 }
 
 Ensure-ParentDirectory -Path $SignalPath
-Set-Content -Path $SignalPath -Value (Get-Date -Format o) -Encoding UTF8
+$payload = @()
+if ($SkipWebPublish) {
+  $payload += "skip-web-publish"
+}
+$payload += (Get-Date -Format o)
+Set-Content -Path $SignalPath -Value $payload -Encoding UTF8
