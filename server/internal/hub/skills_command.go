@@ -75,6 +75,7 @@ type skillsCommandConfig struct {
 	HubID          string
 	Projects       []ProjectInfo
 	GlobalLockPath string
+	HomeDir        string
 }
 
 type SkillsCommand struct {
@@ -82,6 +83,7 @@ type SkillsCommand struct {
 	now            func() time.Time
 	hubID          string
 	globalLockPath string
+	homeDir        string
 
 	mu        sync.RWMutex
 	projects  []ProjectInfo
@@ -100,6 +102,7 @@ func newSkillsCommandWithRunner(runner skillsCommandRunner, config skillsCommand
 		runner:         runner,
 		hubID:          strings.TrimSpace(config.HubID),
 		globalLockPath: strings.TrimSpace(config.GlobalLockPath),
+		homeDir:        strings.TrimSpace(config.HomeDir),
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -330,9 +333,10 @@ func (c *SkillsCommand) startInstall(payload skillsCommandPayload) (any, *skills
 	args = append(args, payload.Skills...)
 	args = append(args, "-y")
 	return c.startOperation(payload, []skillsOperationRun{{
-		target:  target,
-		args:    args,
-		message: "Installed skills.",
+		target:             target,
+		args:               args,
+		message:            "Installed skills.",
+		prepareInstallDirs: true,
 	}})
 }
 
@@ -385,9 +389,10 @@ func (c *SkillsCommand) startUpdate(payload skillsCommandPayload) (any, *skillsC
 }
 
 type skillsOperationRun struct {
-	target  skillsCommandTarget
-	args    []string
-	message string
+	target             skillsCommandTarget
+	args               []string
+	message            string
+	prepareInstallDirs bool
 }
 
 func (c *SkillsCommand) startOperation(payload skillsCommandPayload, runs []skillsOperationRun) (any, *skillsCommandError) {
@@ -433,6 +438,13 @@ func (c *SkillsCommand) acceptOperation(payload skillsCommandPayload) (*skillsOp
 func (c *SkillsCommand) runSkillsOperation(operation *skillsOperationSnapshot, runs []skillsOperationRun) {
 	messages := make([]string, 0, len(runs))
 	for _, run := range runs {
+		if run.prepareInstallDirs {
+			if err := c.prepareSkillsInstallDirs(run.target); err != nil {
+				exitCode := -1
+				c.finishOperation(operation, "failed", &exitCode, err.Error(), "")
+				return
+			}
+		}
 		result := c.runSkills(context.Background(), run.target.dir, run.args...)
 		exitCode := result.ExitCode
 		if skillsCommandFailed(result) {
@@ -524,6 +536,61 @@ func (c *SkillsCommand) projectUpdateRuns() ([]skillsOperationRun, *skillsComman
 		})
 	}
 	return runs, nil
+}
+
+func (c *SkillsCommand) prepareSkillsInstallDirs(target skillsCommandTarget) error {
+	dirs, err := c.skillsInstallDirs(target)
+	if err != nil {
+		return err
+	}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("prepare skills directory %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
+func (c *SkillsCommand) skillsInstallDirs(target skillsCommandTarget) ([]string, error) {
+	switch target.scope {
+	case "hub":
+		home, err := c.skillsHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		claudeHome := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR"))
+		if claudeHome == "" {
+			claudeHome = filepath.Join(home, ".claude")
+		}
+		return []string{
+			filepath.Join(home, ".agents", "skills"),
+			filepath.Join(claudeHome, "skills"),
+		}, nil
+	case "project":
+		if strings.TrimSpace(target.dir) == "" {
+			return nil, fmt.Errorf("project path is empty")
+		}
+		info, err := os.Stat(target.dir)
+		if err != nil {
+			return nil, fmt.Errorf("stat project path %s: %w", target.dir, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("project path is not a directory: %s", target.dir)
+		}
+		return []string{
+			filepath.Join(target.dir, ".agents", "skills"),
+			filepath.Join(target.dir, ".claude", "skills"),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported skills scope: %s", target.scope)
+	}
+}
+
+func (c *SkillsCommand) skillsHomeDir() (string, error) {
+	if c.homeDir != "" {
+		return filepath.Abs(c.homeDir)
+	}
+	return os.UserHomeDir()
 }
 
 type skillsCommandTarget struct {

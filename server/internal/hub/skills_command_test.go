@@ -98,6 +98,17 @@ func waitForSkillsOperationDone(t *testing.T, cmd *SkillsCommand) *skillsOperati
 	return operation
 }
 
+func assertDirExists(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("%s is not a directory", path)
+	}
+}
+
 func TestSkillsCommandScanReturnsHubAndProjectSkillsWithCategories(t *testing.T) {
 	baseDir := t.TempDir()
 	projectRoot := filepath.Join(baseDir, "project")
@@ -186,13 +197,24 @@ Mattpocock Skills
 }
 
 func TestSkillsCommandInstallUsesFixedAgentsAndSymlinkInstall(t *testing.T) {
-	projectRoot := t.TempDir()
+	baseDir := t.TempDir()
+	homeRoot := filepath.Join(baseDir, "home")
+	projectRoot := filepath.Join(baseDir, "project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(homeRoot, ".claude"))
 	runner := newFakeSkillsRunner()
 	runner.set("", "skills", []string{"list", "-g", "--json"}, skillsCommandResult{Stdout: "[]", ExitCode: 0})
 	runner.set(projectRoot, "skills", []string{"list", "--json"}, skillsCommandResult{Stdout: "[]", ExitCode: 0})
 	cmd := newSkillsCommandWithRunner(runner, skillsCommandConfig{
-		HubID:    "hub-a",
-		Projects: []ProjectInfo{{Name: "WheelMaker", Path: projectRoot, Online: true}},
+		HubID:   "hub-a",
+		HomeDir: homeRoot,
+		Projects: []ProjectInfo{{
+			Name:   "WheelMaker",
+			Path:   projectRoot,
+			Online: true,
+		}},
 	})
 
 	_, cmdErr := cmd.Handle(context.Background(), rawSkillsCommandPayload(t, map[string]any{
@@ -206,6 +228,8 @@ func TestSkillsCommandInstallUsesFixedAgentsAndSymlinkInstall(t *testing.T) {
 		t.Fatalf("hub install error: %#v", cmdErr)
 	}
 	waitForSkillsCall(t, runner, "", "skills", "add", "mattpocock/skills", "-g", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "tdd", "-y")
+	assertDirExists(t, filepath.Join(homeRoot, ".agents", "skills"))
+	assertDirExists(t, filepath.Join(homeRoot, ".claude", "skills"))
 	if operation := waitForSkillsOperationDone(t, cmd); operation.Status != "succeeded" {
 		t.Fatalf("operation=%#v, want succeeded", operation)
 	}
@@ -225,6 +249,8 @@ func TestSkillsCommandInstallUsesFixedAgentsAndSymlinkInstall(t *testing.T) {
 		t.Fatalf("project install error: %#v", cmdErr)
 	}
 	waitForSkillsCall(t, runner, projectRoot, "skills", "add", "mattpocock/skills", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "diagnose", "-y")
+	assertDirExists(t, filepath.Join(projectRoot, ".agents", "skills"))
+	assertDirExists(t, filepath.Join(projectRoot, ".claude", "skills"))
 }
 
 func TestSkillsCommandUninstallRemovesAllLinkedAgents(t *testing.T) {
