@@ -3413,9 +3413,6 @@ function App() {
     if (tab !== 'chat') {
       return;
     }
-    if (chatKeyboardInset <= 0) {
-      return;
-    }
     scrollChatToBottom();
   }, [tab, chatKeyboardInset, scrollChatToBottom]);
 

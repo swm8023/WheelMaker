@@ -149,11 +149,11 @@ describe('web chat turn rendering', () => {
     expect(main).not.toContain('updateSelectedChatWindowFromScroll(event.currentTarget, direction);');
   });
 
-  test('settles chat bottom after the mobile keyboard inset pushes the composer upward', () => {
+  test('settles chat bottom after the mobile keyboard inset changes', () => {
     const main = readMain();
 
     expect(main).toContain(
-      "useEffect(() => {\n    if (tab !== 'chat') {\n      return;\n    }\n    if (chatKeyboardInset <= 0) {\n      return;\n    }\n    scrollChatToBottom();\n  }, [tab, chatKeyboardInset, scrollChatToBottom]);",
+      "useEffect(() => {\n    if (tab !== 'chat') {\n      return;\n    }\n    scrollChatToBottom();\n  }, [tab, chatKeyboardInset, scrollChatToBottom]);",
     );
   });
 

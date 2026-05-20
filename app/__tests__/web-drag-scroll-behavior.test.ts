@@ -138,10 +138,12 @@ describe('web drag scroll behavior', () => {
     expect(virtualList).toContain('const scrollToLastDisplayItem = React.useCallback(');
     expect(virtualList).not.toContain('offset: virtuosoContext.bottomBuffer,');
     expect(virtualList).toContain('const requestScrollToLastDisplayItem = React.useCallback(');
-    expect(virtualList).toContain("window.requestAnimationFrame(() => scrollToLastDisplayItem('auto'));");
+    expect(virtualList).toContain('function scrollElementToBottom(');
+    expect(virtualList).toContain('resolveChatScrollBottomTop({');
+    expect(virtualList).toContain('const settleScrollParentToBottom = React.useCallback(');
+    expect(virtualList).toContain('settleScrollParentToBottom(behavior);');
+    expect(virtualList).toContain("settleScrollParentToBottom('auto');");
     expect(virtualList).toContain('onAtBottomChange?.(true);');
-    expect(virtualList).not.toContain('function scrollElementToBottom(');
-    expect(virtualList).not.toContain('.scrollTo({');
   });
 
   test('documents Virtuoso as the chat dynamic turn virtualizer', () => {

@@ -1,6 +1,7 @@
 import React from 'react';
 import {Virtuoso, type Components, type VirtuosoHandle} from 'react-virtuoso';
 import type {ChatDisplayIndex, ChatDisplayIndexItem} from './chatDisplayIndex';
+import {resolveChatScrollBottomTop} from './chatScrollIntent';
 
 const DEFAULT_AT_BOTTOM_THRESHOLD = 80;
 const DEFAULT_BOTTOM_BUFFER = 0;
@@ -101,6 +102,16 @@ function resolveDefaultItemHeight(heightEstimates: number[], rowGap: number): nu
   return Math.max(1, Math.round(totalHeight / heightEstimates.length));
 }
 
+function scrollElementToBottom(element: HTMLElement, behavior: ChatVirtuosoScrollBehavior): void {
+  element.scrollTo({
+    top: resolveChatScrollBottomTop({
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }),
+    behavior,
+  });
+}
+
 export const ChatVirtuosoTurnList = React.forwardRef<
   ChatVirtuosoTurnListHandle,
   ChatVirtuosoTurnListProps
@@ -191,19 +202,33 @@ export const ChatVirtuosoTurnList = React.forwardRef<
         align: 'end',
         behavior,
       });
+    },
+    [displayIndex.items.length],
+  );
+
+  const settleScrollParentToBottom = React.useCallback(
+    (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
+      if (!scrollParent) {
+        return;
+      }
+      scrollElementToBottom(scrollParent, behavior);
       onAtBottomChange?.(true);
     },
-    [displayIndex.items.length, onAtBottomChange, virtuosoContext.bottomBuffer],
+    [onAtBottomChange, scrollParent],
   );
 
   const requestScrollToLastDisplayItem = React.useCallback(
     (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
       window.requestAnimationFrame(() => {
         scrollToLastDisplayItem(behavior);
-        window.requestAnimationFrame(() => scrollToLastDisplayItem('auto'));
+        settleScrollParentToBottom(behavior);
+        window.requestAnimationFrame(() => {
+          scrollToLastDisplayItem('auto');
+          settleScrollParentToBottom('auto');
+        });
       });
     },
-    [scrollToLastDisplayItem],
+    [scrollToLastDisplayItem, settleScrollParentToBottom],
   );
 
   const handleTotalListHeightChanged = React.useCallback(() => {
@@ -220,9 +245,10 @@ export const ChatVirtuosoTurnList = React.forwardRef<
     },
     scrollToBottom: (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
       scrollToLastDisplayItem(behavior);
+      settleScrollParentToBottom(behavior);
       requestScrollToLastDisplayItem(behavior);
     },
-  }), [requestScrollToLastDisplayItem, scrollToLastDisplayItem]);
+  }), [requestScrollToLastDisplayItem, scrollToLastDisplayItem, settleScrollParentToBottom]);
 
   if (!scrollParent) {
     return (
