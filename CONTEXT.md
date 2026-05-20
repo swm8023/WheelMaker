@@ -192,6 +192,10 @@ _Avoid_: Background operation, polling job
 The structured result of a Skill Operation, including snapshots or candidates plus a short message or error summary.
 _Avoid_: Raw CLI log, stdout page
 
+**Skill Management Inventory**:
+The installed skill state used by the Skills Page, derived from the upstream skills list model rather than provider visibility scans.
+_Avoid_: Agent profile skills, provider scan
+
 **Skill Scope Uninstall**:
 The Skills Page action that completely removes one installed skill from one Hub Skill scope or one Project Skill scope.
 _Avoid_: Agent unlink, partial uninstall
@@ -292,6 +296,7 @@ _Avoid_: Symbol install, copy install
 - A **Skill Source List** returns installable candidates from one Skill Source, not installed scope state
 - A **Skill Operation** completes in the request that starts it and does not require client polling
 - A **Skill Operation Summary** is the only command output shown by the App; full stdout and stderr are not part of the product surface
+- A **Skill Management Inventory** is the Skills Page source of truth for installed skills
 - A **Skill Scope Update** targets an entire Hub Skill scope or Project Skill scope, not a Skill Category
 - A **Skill Scope Uninstall** removes a skill from all linked Skill Target Agents in the selected scope
 - A **Symlink Install** is preferred for both **Hub Skills** and **Project Skills**
@@ -448,6 +453,9 @@ _Avoid_: Symbol install, copy install
 > **Dev:** "Should the Skills Page show the full CLI stdout and stderr after a failure?"
 > **Domain expert:** "No — show a **Skill Operation Summary** with a short error summary."
 
+> **Dev:** "Can the existing project agent profile skill scan drive the Skills Page?"
+> **Domain expert:** "No — use **Skill Management Inventory** because it follows the upstream install, list, remove, and update model."
+
 > **Dev:** "Does clicking Update beside a category update only that category?"
 > **Domain expert:** "No — **Skill Scope Update** updates every installed skill in that Hub Skill or Project Skill scope."
 
@@ -493,5 +501,6 @@ _Avoid_: Symbol install, copy install
 - "list skills" could mean installed inventory or source discovery — resolved: use **Skill Inventory Scan** for installed state and **Skill Source List** for source candidates
 - "skill operation" could imply the background polling model used by npm — resolved: **Skill Operation** is synchronous
 - "skill command output" could imply full raw CLI logs — resolved: App shows a **Skill Operation Summary**
+- "installed skills" could mean agent-visible skills from provider scans — resolved: Skills Page uses **Skill Management Inventory**
 - "Update skill" could mean updating one skill, one category, or one scope — resolved: use **Skill Scope Update** for the page-level update action
 - "Uninstall skill" could mean unlinking one agent target — resolved: use **Skill Scope Uninstall** for complete removal from the selected scope
