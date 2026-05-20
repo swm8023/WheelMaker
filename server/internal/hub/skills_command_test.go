@@ -121,11 +121,11 @@ func TestSkillsCommandScanReturnsHubAndProjectSkillsWithCategories(t *testing.T)
 
 	runner := newFakeSkillsRunner()
 	runner.set("", "skills", []string{"list", "-g", "--json"}, skillsCommandResult{
-		Stdout:   `[{"name":"tdd","path":"C:/skills/tdd","scope":"global","agents":["Codex"]}]`,
+		Stdout:   `[{"name":"tdd","path":"C:/skills/tdd","scope":"global","agents":["Codex"]},{"name":"manual-global","path":"C:/skills/manual-global","scope":"global","agents":["Codex"]}]`,
 		ExitCode: 0,
 	})
 	runner.set(projectRoot, "skills", []string{"list", "--json"}, skillsCommandResult{
-		Stdout:   `[{"name":"diagnose","path":"C:/skills/diagnose","scope":"project","agents":["Codex","Claude Code"]}]`,
+		Stdout:   `[{"name":"diagnose","path":"C:/skills/diagnose","scope":"project","agents":["Codex","Claude Code"]},{"name":"manual-project","path":"C:/skills/manual-project","scope":"project","agents":["Codex"]}]`,
 		ExitCode: 0,
 	})
 	cmd := newSkillsCommandWithRunner(runner, skillsCommandConfig{
@@ -145,17 +145,28 @@ func TestSkillsCommandScanReturnsHubAndProjectSkillsWithCategories(t *testing.T)
 	if !body.OK || body.HubID != "hub-a" || body.HubSkills.Scope != "hub" {
 		t.Fatalf("response=%#v", body)
 	}
-	if len(body.HubSkills.Skills) != 1 || body.HubSkills.Skills[0].Name != "tdd" {
+	if len(body.HubSkills.Skills) != 2 || body.HubSkills.Skills[0].Name != "tdd" || body.HubSkills.Skills[1].Name != "manual-global" {
 		t.Fatalf("hub skills=%#v", body.HubSkills.Skills)
 	}
 	if body.HubSkills.Skills[0].Category != "Mattpocock Skills" || body.HubSkills.Skills[0].CategoryKey != "mattpocock-skills" {
 		t.Fatalf("hub skill category=%#v", body.HubSkills.Skills[0])
 	}
-	if len(body.Projects) != 1 || body.Projects[0].ProjectName != "WheelMaker" || len(body.Projects[0].Skills) != 1 {
+	if body.HubSkills.Skills[1].Category != "General" || body.HubSkills.Skills[1].CategoryKey != "general" {
+		t.Fatalf("unlocked hub skill category=%#v", body.HubSkills.Skills[1])
+	}
+	hubManaged := skillManagedFlagsForTest(t, body.HubSkills.Skills)
+	if !hubManaged["tdd"] || hubManaged["manual-global"] {
+		t.Fatalf("hub managed flags=%#v", hubManaged)
+	}
+	if len(body.Projects) != 1 || body.Projects[0].ProjectName != "WheelMaker" || len(body.Projects[0].Skills) != 2 {
 		t.Fatalf("projects=%#v", body.Projects)
 	}
 	if body.Projects[0].Skills[0].Name != "diagnose" || body.Projects[0].Skills[0].Category != "Mattpocock Skills" {
 		t.Fatalf("project skill=%#v", body.Projects[0].Skills[0])
+	}
+	projectManaged := skillManagedFlagsForTest(t, body.Projects[0].Skills)
+	if !projectManaged["diagnose"] || projectManaged["manual-project"] {
+		t.Fatalf("project managed flags=%#v", projectManaged)
 	}
 }
 
@@ -498,6 +509,29 @@ func writeSkillsLockForTest(t *testing.T, path string, plugins map[string]string
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatalf("write lock: %v", err)
 	}
+}
+
+func skillManagedFlagsForTest(t *testing.T, skills []skillsSkillSnapshot) map[string]bool {
+	t.Helper()
+	raw, err := json.Marshal(skills)
+	if err != nil {
+		t.Fatalf("marshal skills: %v", err)
+	}
+	var items []struct {
+		Name    string `json:"name"`
+		Managed *bool  `json:"managed"`
+	}
+	if err := json.Unmarshal(raw, &items); err != nil {
+		t.Fatalf("unmarshal skills: %v", err)
+	}
+	out := make(map[string]bool, len(items))
+	for _, item := range items {
+		if item.Managed == nil {
+			t.Fatalf("skill %q is missing managed flag in %s", item.Name, string(raw))
+		}
+		out[item.Name] = *item.Managed
+	}
+	return out
 }
 
 func writeSkillsLockSourcesForTest(t *testing.T, path string, sources map[string]string) {

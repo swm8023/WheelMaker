@@ -50,6 +50,13 @@ describe('skill management settings UI source structure', () => {
     expect(mainTsx).not.toContain('No linked agents');
   });
 
+  test('renders unmanaged skills as read-only rows', () => {
+    expect(mainTsx).toContain('skill.managed !== false');
+    expect(mainTsx).toContain('settings-skill-readonly-tag');
+    expect(mainTsx).toContain('External');
+    expect(mainTsx).toContain('managed ? renderSkillIconButton');
+  });
+
   test('uses icon actions and operation polling for Skills tasks', () => {
     expect(mainTsx).toContain('skillOperationPollTimerRef');
     expect(mainTsx).toContain('operation?.running');
@@ -77,6 +84,7 @@ describe('skill management settings UI source structure', () => {
     expect(stylesCss).toContain('.settings-skill-row');
     expect(stylesCss).toContain('.settings-skill-category');
     expect(stylesCss).toContain('.settings-skill-icon-btn');
+    expect(stylesCss).toContain('.settings-skill-readonly-tag');
     expect(stylesCss).toContain('.settings-skill-select-all-row');
     expect(stylesCss).toContain('.settings-skills-candidates .settings-skill-row');
     expect(stylesCss).toContain('min-height: 26px;');

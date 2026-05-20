@@ -182,6 +182,7 @@ type skillsSkillSnapshot struct {
 	Path        string   `json:"path,omitempty"`
 	Category    string   `json:"category"`
 	CategoryKey string   `json:"categoryKey"`
+	Managed     bool     `json:"managed"`
 	Agents      []string `json:"agents,omitempty"`
 }
 
@@ -677,12 +678,12 @@ func (c *SkillsCommand) resolveTarget(payload skillsCommandPayload) (skillsComma
 }
 
 func (c *SkillsCommand) scanHubSkills(ctx context.Context) ([]skillsSkillSnapshot, string) {
-	pluginNames := readSkillsLockPluginNames(c.globalLockFile())
+	lockMetadata := readSkillsLockScanMetadata(c.globalLockFile())
 	result := c.runSkills(ctx, "", "list", "-g", "--json")
 	if skillsCommandFailed(result) {
 		return []skillsSkillSnapshot{}, skillsResultSummary(result)
 	}
-	skills, err := parseSkillsListJSON(result.Stdout, pluginNames)
+	skills, err := parseSkillsListJSON(result.Stdout, lockMetadata.PluginNames, lockMetadata.Managed)
 	if err != nil {
 		return []skillsSkillSnapshot{}, err.Error()
 	}
@@ -698,12 +699,12 @@ func (c *SkillsCommand) scanProjectSkills(ctx context.Context, project ProjectIn
 	if err != nil {
 		return []skillsSkillSnapshot{}, err.Error()
 	}
-	pluginNames := readSkillsLockPluginNames(filepath.Join(abs, "skills-lock.json"))
+	lockMetadata := readSkillsLockScanMetadata(filepath.Join(abs, "skills-lock.json"))
 	result := c.runSkills(ctx, abs, "list", "--json")
 	if skillsCommandFailed(result) {
 		return []skillsSkillSnapshot{}, skillsResultSummary(result)
 	}
-	skills, err := parseSkillsListJSON(result.Stdout, pluginNames)
+	skills, err := parseSkillsListJSON(result.Stdout, lockMetadata.PluginNames, lockMetadata.Managed)
 	if err != nil {
 		return []skillsSkillSnapshot{}, err.Error()
 	}
@@ -749,7 +750,7 @@ func (c *SkillsCommand) globalLockFile() string {
 	return ""
 }
 
-func parseSkillsListJSON(raw string, pluginNames map[string]string) ([]skillsSkillSnapshot, error) {
+func parseSkillsListJSON(raw string, pluginNames map[string]string, managed map[string]bool) ([]skillsSkillSnapshot, error) {
 	var items []struct {
 		Name       string   `json:"name"`
 		Path       string   `json:"path"`
@@ -796,14 +797,23 @@ func parseSkillsListJSON(raw string, pluginNames map[string]string) ([]skillsSki
 			Path:        strings.TrimSpace(item.Path),
 			Category:    category,
 			CategoryKey: categoryKey,
+			Managed:     managed[name],
 			Agents:      append([]string(nil), item.Agents...),
 		})
 	}
 	return out, nil
 }
 
-func readSkillsLockPluginNames(path string) map[string]string {
-	out := map[string]string{}
+type skillsLockScanMetadata struct {
+	PluginNames map[string]string
+	Managed     map[string]bool
+}
+
+func readSkillsLockScanMetadata(path string) skillsLockScanMetadata {
+	out := skillsLockScanMetadata{
+		PluginNames: map[string]string{},
+		Managed:     map[string]bool{},
+	}
 	if strings.TrimSpace(path) == "" {
 		return out
 	}
@@ -820,9 +830,14 @@ func readSkillsLockPluginNames(path string) map[string]string {
 		return out
 	}
 	for name, skill := range body.Skills {
+		skillName := strings.TrimSpace(name)
+		if skillName == "" {
+			continue
+		}
+		out.Managed[skillName] = true
 		pluginName := strings.TrimSpace(skill.PluginName)
-		if strings.TrimSpace(name) != "" && pluginName != "" {
-			out[strings.TrimSpace(name)] = pluginName
+		if pluginName != "" {
+			out.PluginNames[skillName] = pluginName
 		}
 	}
 	return out

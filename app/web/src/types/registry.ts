@@ -278,6 +278,7 @@ export interface RegistrySkillSnapshot {
   path?: string;
   category: string;
   categoryKey: string;
+  managed?: boolean;
   agents?: string[];
 }
 

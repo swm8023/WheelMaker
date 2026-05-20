@@ -8996,6 +8996,7 @@ function App() {
                 <span>{group.skills.length}</span>
               </div>
               {group.skills.map(skill => {
+                const managed = skill.managed !== false;
                 const pendingKey = skillActionPendingKey({
                   hubId,
                   scope: options.scope,
@@ -9008,8 +9009,9 @@ function App() {
                   <div key={`${hubId}:${title}:${skill.name}`} className="settings-skill-row">
                     <div className="settings-skill-row-main">
                       <span className="settings-skill-name" title={skill.path || skill.name}>{skill.name}</span>
+                      {managed ? null : <span className="settings-skill-readonly-tag">External</span>}
                     </div>
-                    {renderSkillIconButton({
+                    {managed ? renderSkillIconButton({
                       label: pending ? 'Removing skill' : 'Uninstall skill',
                       icon: 'codicon-trash',
                       danger: true,
@@ -9021,7 +9023,7 @@ function App() {
                         projectName: options.projectName,
                         skillName: skill.name,
                       }),
-                    })}
+                    }) : null}
                   </div>
                 );
               })}
