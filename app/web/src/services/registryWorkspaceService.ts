@@ -18,6 +18,9 @@ import type {
   RegistrySessionReadResponse,
   RegistryResumableSession,
   RegistrySessionSummary,
+  RegistrySkillCommandResponse,
+  RegistrySkillInstallPayload,
+  RegistrySkillScopePayload,
   RegistrySyncCheckPayload,
   RegistrySyncCheckResponse,
   RegistryTokenScanResult,
@@ -455,6 +458,41 @@ export class RegistryWorkspaceService {
       throw new Error('session is not ready');
     }
     return this.repository.requestWheelMakerUpdatePublish(hubId);
+  }
+
+  async scanSkills(hubId: string): Promise<RegistrySkillCommandResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.scanSkills(hubId);
+  }
+
+  async listSkillsSource(hubId: string, source: string): Promise<RegistrySkillCommandResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.listSkillsSource(hubId, source);
+  }
+
+  async installSkills(payload: RegistrySkillInstallPayload): Promise<RegistrySkillCommandResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.installSkills(payload);
+  }
+
+  async uninstallSkills(payload: RegistrySkillScopePayload): Promise<RegistrySkillCommandResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.uninstallSkills(payload);
+  }
+
+  async updateSkills(payload: RegistrySkillScopePayload): Promise<RegistrySkillCommandResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.updateSkills(payload);
   }
 
   onEvent(listener: (event: RegistryEnvelope) => void): () => void {

@@ -271,6 +271,67 @@ export interface RegistryWheelMakerUpdateResponse {
   error?: string;
 }
 
+export type RegistrySkillScope = 'hub' | 'project';
+
+export interface RegistrySkillSnapshot {
+  name: string;
+  path?: string;
+  category: string;
+  categoryKey: string;
+  agents: string[];
+}
+
+export interface RegistrySkillScopeSnapshot {
+  scope: RegistrySkillScope;
+  skills: RegistrySkillSnapshot[];
+}
+
+export interface RegistrySkillProjectSnapshot {
+  projectName: string;
+  projectId?: string;
+  online: boolean;
+  path?: string;
+  skills: RegistrySkillSnapshot[];
+  error?: string;
+}
+
+export interface RegistrySkillSourceCandidate {
+  name: string;
+  description?: string;
+  category: string;
+  categoryKey: string;
+}
+
+export interface RegistrySkillCommandResponse {
+  ok: boolean;
+  hubId: string;
+  updatedAt?: string;
+  source?: string;
+  scope?: RegistrySkillScope;
+  projectName?: string;
+  hubSkills?: RegistrySkillScopeSnapshot;
+  projects?: RegistrySkillProjectSnapshot[];
+  skills?: RegistrySkillSnapshot[];
+  candidates?: RegistrySkillSourceCandidate[];
+  message?: string;
+  errorSummary?: string;
+}
+
+export interface RegistrySkillInstallPayload {
+  hubId: string;
+  scope: RegistrySkillScope;
+  projectName?: string;
+  source: string;
+  skills: string[];
+}
+
+export interface RegistrySkillScopePayload {
+  hubId: string;
+  scope: RegistrySkillScope;
+  projectName?: string;
+  skills?: string[];
+}
+
 export interface RegistrySessionMessageEventPayload {
   sessionId: string;
   turn: RegistrySessionTurn;

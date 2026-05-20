@@ -26,6 +26,9 @@ import type {
   RegistrySessionReadResponse,
   RegistrySessionSummary,
   RegistrySessionTurn,
+  RegistrySkillCommandResponse,
+  RegistrySkillInstallPayload,
+  RegistrySkillScopePayload,
   RegistrySyncCheckPayload,
   RegistrySyncCheckResponse,
   RegistryTokenProvider,
@@ -728,6 +731,51 @@ export class RegistryRepository {
       payload: {action: 'update-publish', hubId},
     });
     return (resp.payload ?? {}) as RegistryWheelMakerUpdateResponse;
+  }
+
+  async scanSkills(hubId: string): Promise<RegistrySkillCommandResponse> {
+    const resp = await this.client.request({
+      method: 'cmd.skills',
+      payload: {action: 'scan', hubId},
+      timeoutMs: 60000,
+    });
+    return (resp.payload ?? {}) as RegistrySkillCommandResponse;
+  }
+
+  async listSkillsSource(hubId: string, source: string): Promise<RegistrySkillCommandResponse> {
+    const resp = await this.client.request({
+      method: 'cmd.skills',
+      payload: {action: 'list', hubId, source},
+      timeoutMs: 60000,
+    });
+    return (resp.payload ?? {}) as RegistrySkillCommandResponse;
+  }
+
+  async installSkills(payload: RegistrySkillInstallPayload): Promise<RegistrySkillCommandResponse> {
+    const resp = await this.client.request({
+      method: 'cmd.skills',
+      payload: {action: 'install', ...payload},
+      timeoutMs: 60000,
+    });
+    return (resp.payload ?? {}) as RegistrySkillCommandResponse;
+  }
+
+  async uninstallSkills(payload: RegistrySkillScopePayload): Promise<RegistrySkillCommandResponse> {
+    const resp = await this.client.request({
+      method: 'cmd.skills',
+      payload: {action: 'uninstall', ...payload},
+      timeoutMs: 60000,
+    });
+    return (resp.payload ?? {}) as RegistrySkillCommandResponse;
+  }
+
+  async updateSkills(payload: RegistrySkillScopePayload): Promise<RegistrySkillCommandResponse> {
+    const resp = await this.client.request({
+      method: 'cmd.skills',
+      payload: {action: 'update', ...payload},
+      timeoutMs: 60000,
+    });
+    return (resp.payload ?? {}) as RegistrySkillCommandResponse;
   }
 
   close(): void {
