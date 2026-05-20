@@ -136,6 +136,70 @@ _Avoid_: Missing slot, skipped index, empty message
 A **Gap Turn** emitted by the live `session.read` path with method `session/gap`.
 _Avoid_: Archive gap, system fallback
 
+**Hub Skill**:
+A skill installed in the global skill scope of one WheelMaker Hub machine.
+_Avoid_: Repository skill, source skill, global project skill
+
+**Project Skill**:
+A skill installed in one Project workspace and shared by that Project's supported agents.
+_Avoid_: Local skill when the scope matters, workspace addon
+
+**Skill Managed Project**:
+A Project returned by project.list under a WheelMaker Hub and eligible for Project Skill display.
+_Avoid_: Arbitrary cwd, manually entered project path
+
+**Skill Source**:
+The installable origin that provides one or more skills, such as a GitHub repository, well-known endpoint, or local path.
+_Avoid_: Hub, marketplace when referring to a concrete install source
+
+**Remote Skill Source**:
+An installable Skill Source accepted by the Skills Page, limited to GitHub owner/repo, GitHub HTTPS repository URL, or a well-known HTTPS skill endpoint.
+_Avoid_: Local path, arbitrary git URL, SSH git URL
+
+**Skill Target Agent**:
+One of the fixed agent targets WheelMaker supports for skill installation: Codex, Claude Code, OpenCode, or GitHub Copilot.
+_Avoid_: Provider when referring to install target, arbitrary agent
+
+**Skill Category**:
+The display grouping for an installed skill as reported by the upstream skills list model, derived from the skill source's plugin manifest name when available.
+_Avoid_: Path-derived category, agent type
+
+**Skills Page**:
+The Settings detail surface that manages Hub Skills and Project Skills across connected WheelMaker Hubs.
+_Avoid_: Update page, marketplace page
+
+**Skill Install Entry**:
+The Skills Page action that installs selected skills from a Skill Source into either a Hub Skill scope or a Project Skill scope.
+_Avoid_: Search marketplace when no source is selected, package update
+
+**Skill Scope Update**:
+The Skills Page update action that updates all installed skills in one Hub Skill scope or one Project Skill scope.
+_Avoid_: Category update, single skill update
+
+**Skill Inventory Scan**:
+The Skills Page action that lists already installed Hub Skills and Project Skills for one Hub.
+_Avoid_: Source list, marketplace list
+
+**Skill Source List**:
+The Skills Page action that lists installable skills from one Skill Source.
+_Avoid_: Installed scan, scope inventory
+
+**Skill Operation**:
+A synchronous Skills Page command that completes before the Hub returns its response.
+_Avoid_: Background operation, polling job
+
+**Skill Operation Summary**:
+The structured result of a Skill Operation, including snapshots or candidates plus a short message or error summary.
+_Avoid_: Raw CLI log, stdout page
+
+**Skill Scope Uninstall**:
+The Skills Page action that completely removes one installed skill from one Hub Skill scope or one Project Skill scope.
+_Avoid_: Agent unlink, partial uninstall
+
+**Symlink Install**:
+The default skill installation method that keeps one canonical skill copy and links supported agent skill directories to it.
+_Avoid_: Symbol install, copy install
+
 ## Relationships
 
 - A **Header Bubble** is independent from the **Primary Navigation Bubble Group**
@@ -212,6 +276,25 @@ _Avoid_: Archive gap, system fallback
 - A schema or shape mismatch crosses the **Cache Reset Boundary**; the client clears all non-token local persistent cache and rebuilds tables instead of migrating old rows
 - A client may show turns beyond a local cache hole in the **Live Turn Buffer**, but the **Finished Cursor** remains before the hole until `session.read` repairs it
 - If a realtime turn arrives after a gap, the client keeps it in the **Live Turn Buffer** and triggers serialized **Read Repair**
+- A **Hub Skill** belongs to exactly one WheelMaker Hub machine, not to every Hub connected through the Registry
+- A **Project Skill** belongs to exactly one **Skill Managed Project** and is shown under that Project inside its owning Hub
+- A **Skill Managed Project** is selected from Hub-reported project state, never from an App-supplied filesystem path
+- A **Skill Source** may provide multiple **Hub Skills** or **Project Skills**
+- A **Remote Skill Source** is the only Skill Source accepted by the Skills Page install flow
+- WheelMaker installs skills only for the fixed **Skill Target Agents**
+- A **Skill Install Entry** targets every fixed **Skill Target Agent** and does not offer per-agent selection
+- A **Skill Category** groups installed skills for display but does not identify or scope a skill
+- A **Skills Page** shows each connected WheelMaker Hub with its **Hub Skills** first and that Hub's Project Skill sections below
+- A **Skills Page** is separate from the Update detail page
+- A **Skill Install Entry** must choose exactly one target scope: a Hub for **Hub Skills** or a Project for **Project Skills**
+- A **Skill Install Entry** discovers installable skills from one **Skill Source**
+- A **Skill Inventory Scan** returns installed Hub Skills and Project Skills, not installable source candidates
+- A **Skill Source List** returns installable candidates from one Skill Source, not installed scope state
+- A **Skill Operation** completes in the request that starts it and does not require client polling
+- A **Skill Operation Summary** is the only command output shown by the App; full stdout and stderr are not part of the product surface
+- A **Skill Scope Update** targets an entire Hub Skill scope or Project Skill scope, not a Skill Category
+- A **Skill Scope Uninstall** removes a skill from all linked Skill Target Agents in the selected scope
+- A **Symlink Install** is preferred for both **Hub Skills** and **Project Skills**
 
 ## Example dialogue
 
@@ -332,6 +415,45 @@ _Avoid_: Archive gap, system fallback
 > **Dev:** "Do we need both a sync index and sub-index cursor in the client?"
 > **Domain expert:** "No — the current model has one **Finished Cursor** per chat session."
 
+> **Dev:** "When the Settings page shows skills grouped by Hub, are those skills from a remote skill repository?"
+> **Domain expert:** "No — those are **Hub Skills** installed in that WheelMaker Hub's global skill scope; the repository is the **Skill Source**."
+
+> **Dev:** "Can the App ask a remote Hub to install skills from a local path?"
+> **Domain expert:** "No — the Skills Page accepts only a **Remote Skill Source**."
+
+> **Dev:** "Can the App pass a custom cwd for project skill installation?"
+> **Domain expert:** "No — it selects a **Skill Managed Project**, and the Hub resolves that Project's configured path."
+
+> **Dev:** "Should users choose any agent supported by the upstream skills CLI?"
+> **Domain expert:** "No — WheelMaker exposes only the fixed **Skill Target Agents** and defaults to **Symlink Install**."
+
+> **Dev:** "Can users install a skill only for OpenCode from the Skills Page?"
+> **Domain expert:** "No — a **Skill Install Entry** installs to every fixed **Skill Target Agent**."
+
+> **Dev:** "Can WheelMaker invent **Skill Categories** from repository folders?"
+> **Domain expert:** "No — use the grouping from the upstream skills list model."
+
+> **Dev:** "Is the **Skills Page** only for updating and uninstalling existing skills?"
+> **Domain expert:** "No — it also provides a **Skill Install Entry** for adding skills from a selected **Skill Source**."
+
+> **Dev:** "Should skill management be added inside the Update page?"
+> **Domain expert:** "No — use a separate **Skills Page** because skills have Hub and Project scopes."
+
+> **Dev:** "Can one list action serve both installed state and source discovery?"
+> **Domain expert:** "No — use **Skill Inventory Scan** for installed state and **Skill Source List** for source candidates."
+
+> **Dev:** "Should skill commands return accepted and be polled like npm updates?"
+> **Domain expert:** "No — a **Skill Operation** waits for completion and returns the final result directly."
+
+> **Dev:** "Should the Skills Page show the full CLI stdout and stderr after a failure?"
+> **Domain expert:** "No — show a **Skill Operation Summary** with a short error summary."
+
+> **Dev:** "Does clicking Update beside a category update only that category?"
+> **Domain expert:** "No — **Skill Scope Update** updates every installed skill in that Hub Skill or Project Skill scope."
+
+> **Dev:** "Can users uninstall a skill only for Codex but keep it linked for Claude Code?"
+> **Domain expert:** "No — **Skill Scope Uninstall** removes the skill from all linked **Skill Target Agents** in that selected scope."
+
 ## Flagged ambiguities
 
 - "expand" was used to mean both opening the drawer and exposing more controls — resolved: use **Drawer Toggle Bubble** for the drawer control
@@ -360,3 +482,16 @@ _Avoid_: Archive gap, system fallback
 - "window" could imply mounted DOM count defines scrollbar height — resolved: the **Dynamic Turn Virtualizer** owns logical scrollbar height from the **Display Index**
 - "accurate height" could imply pre-rendering all turns — resolved: use **Lazy Height Estimates** plus **Virtuoso Measurement Cache**
 - "special render" could imply React components guess from raw JSON on mount — resolved: classify special UI as **Display Items** during shallow parsing
+- "Hub 上的 Skill" could mean skills available from a skill repository — resolved: use **Hub Skill** for globally installed skills on a WheelMaker Hub machine and **Skill Source** for the repository or endpoint they came from
+- "Skill Source" could imply local paths or arbitrary git remotes — resolved: the Skills Page install flow accepts only **Remote Skill Sources**
+- "Skills in Settings" could mean extending the Update detail — resolved: the **Skills Page** is a separate Settings detail
+- "Project" could imply any path typed into the App — resolved: project skill operations target a **Skill Managed Project**
+- "固定 agent" could mean a fixed supported set but still selectable per install — resolved: **Skill Install Entry** targets the full fixed set
+- "symbol" was used for the default install method — resolved: use **Symlink Install**
+- "Skill 分类" could mean a repository folder or metadata tag — resolved: use **Skill Category** from the upstream skills list model
+- "Skills 入口" could mean only a read-only inventory page — resolved: the **Skills Page** includes a **Skill Install Entry**
+- "list skills" could mean installed inventory or source discovery — resolved: use **Skill Inventory Scan** for installed state and **Skill Source List** for source candidates
+- "skill operation" could imply the background polling model used by npm — resolved: **Skill Operation** is synchronous
+- "skill command output" could imply full raw CLI logs — resolved: App shows a **Skill Operation Summary**
+- "Update skill" could mean updating one skill, one category, or one scope — resolved: use **Skill Scope Update** for the page-level update action
+- "Uninstall skill" could mean unlinking one agent target — resolved: use **Skill Scope Uninstall** for complete removal from the selected scope
