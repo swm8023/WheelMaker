@@ -8940,28 +8940,47 @@ function App() {
     hubId: string,
     title: string,
     skills: RegistrySkillSnapshot[],
-    options: {scope: RegistrySkillScope; projectName?: string; disabled?: boolean; error?: string; allowUpdate?: boolean; operationRunning?: boolean},
+    options: {
+      scope: RegistrySkillScope;
+      projectName?: string;
+      disabled?: boolean;
+      error?: string;
+      allowUpdate?: boolean;
+      operationRunning?: boolean;
+      actionsDisabled?: boolean;
+      loading?: boolean;
+      summary?: string;
+      updateIncludeProjects?: boolean;
+      updateLabel?: string;
+    },
   ) => {
     const groups = groupSkillsByCategory(skills);
     const disabled = options.disabled === true;
-    const actionDisabled = disabled || options.operationRunning === true || !!skillsPendingKey;
+    const actionDisabled = disabled || options.actionsDisabled === true || options.operationRunning === true || !!skillsPendingKey;
     const skillCount = skills.length;
     const scopeKind = options.scope === 'hub' ? 'Hub' : 'Project';
     return (
       <section className={`settings-skills-scope settings-skills-scope-${options.scope}`}>
         <div className="settings-skills-scope-header">
-          <div className="settings-skills-scope-title-wrap">
-            <span className="settings-skills-scope-kind">{scopeKind}</span>
-            <span className="settings-skills-scope-title" title={title}>{title}</span>
-            <span className="settings-skills-count">{skillCount}</span>
-            {disabled ? <span className="agent-package-status status-not_published">Offline</span> : null}
+          <div className="settings-skills-scope-heading">
+            <div className="settings-skills-scope-title-wrap">
+              <span className="settings-skills-scope-kind">{scopeKind}</span>
+              <span className="settings-skills-scope-title" title={title}>{title}</span>
+              {options.summary ? null : <span className="settings-skills-count">{skillCount}</span>}
+              {disabled ? <span className="agent-package-status status-not_published">Offline</span> : null}
+              {options.loading ? <span className="wide-session-agent-tag">Scanning</span> : null}
+            </div>
+            {options.summary ? <span className="settings-skills-scope-summary">{options.summary}</span> : null}
           </div>
           <div className="settings-skills-scope-actions">
             {options.allowUpdate ? renderSkillIconButton({
-              label: 'Update skills',
+              label: options.updateLabel || 'Update skills',
               icon: 'codicon-sync',
+              pending: options.updateIncludeProjects ? options.operationRunning : false,
               disabled: actionDisabled,
-              onClick: () => requestSkillUpdate({hubId, scope: options.scope, projectName: options.projectName}),
+              onClick: () => requestSkillUpdate(options.updateIncludeProjects
+                ? {hubId, scope: options.scope, projectName: options.projectName, includeProjects: true}
+                : {hubId, scope: options.scope, projectName: options.projectName}),
             }) : null}
             {renderSkillIconButton({
               label: 'Add skills',
@@ -9045,27 +9064,6 @@ function App() {
             const projectSkillCount = projects.reduce((total, project) => total + project.skills.length, 0);
             return (
               <section className="settings-skills-hub" key={`skills-hub:${hub.hubId}`}>
-                <div className="settings-skills-hub-header">
-                  <div className="settings-skills-hub-title">
-                    <span className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', hub.hubId)}`}>
-                      <span className="wide-project-hub-dot" aria-hidden="true" />
-                      <span className="wide-project-hub-label">Hub: {hub.hubId}</span>
-                    </span>
-                    <span className="settings-skills-hub-meta">
-                      {hubSkillCount} hub skills / {projects.length} projects / {projectSkillCount} project skills
-                    </span>
-                  </div>
-                  <div className="settings-skills-scope-actions">
-                    {hub.loading ? <span className="wide-session-agent-tag">Scanning</span> : null}
-                    {renderSkillIconButton({
-                      label: 'Update hub and project skills',
-                      icon: 'codicon-sync',
-                      pending: operationRunning,
-                      disabled: hub.loading || operationRunning || !!skillsPendingKey,
-                      onClick: () => requestSkillUpdate({hubId: hub.hubId, scope: 'hub', includeProjects: true}),
-                    })}
-                  </div>
-                </div>
                 {hub.error ? (
                   <div className="settings-metadata-error">{hub.error}</div>
                 ) : null}
@@ -9079,7 +9077,16 @@ function App() {
                   </div>
                 ) : null}
                 <div className="settings-skills-scope-grid">
-                  {renderSkillScopeRows(hub.hubId, 'Hub Skills', data?.hubSkills?.skills ?? [], {scope: 'hub', operationRunning})}
+                  {renderSkillScopeRows(hub.hubId, hub.hubId, data?.hubSkills?.skills ?? [], {
+                    scope: 'hub',
+                    operationRunning,
+                    actionsDisabled: hub.loading,
+                    loading: hub.loading,
+                    allowUpdate: true,
+                    updateIncludeProjects: true,
+                    updateLabel: 'Update hub and project skills',
+                    summary: `${hubSkillCount} hub skills / ${projects.length} projects / ${projectSkillCount} project skills`,
+                  })}
                   {projects.map(project => (
                     <div className="settings-skills-project" key={`${hub.hubId}:${project.projectName}`}>
                       {renderSkillScopeRows(hub.hubId, project.projectName, project.skills, {
