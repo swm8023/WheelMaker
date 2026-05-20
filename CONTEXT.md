@@ -40,6 +40,18 @@ _Avoid_: Desktop state tree, mobile state tree, duplicated UI state
 The layout container that renders either the desktop shell or mobile shell from the same **Workspace UI State** and shared workspace content.
 _Avoid_: Responsive component, mobile app, alternate app
 
+**Workspace Web UI**:
+The browser-rendered WheelMaker Workspace experience for Chat, File, Git, and Settings surfaces.
+_Avoid_: Monitor, dashboard, web directory when referring to the product surface
+
+**WheelMaker Desktop**:
+The user-facing Windows desktop executable surface that opens the **Workspace Web UI** in an embedded browser window. Its binary name is `WheelMakerDesktop` and it is expected to be larger than service binaries because it carries desktop UI runtime/resources.
+_Avoid_: Monitor, service binary, installer, dashboard, wheelmaker.exe
+
+**Monitor Dashboard**:
+The service-management dashboard for runtime status, logs, and service actions.
+_Avoid_: Workspace Web UI, desktop app, main app
+
 **Turn**:
 The smallest ordered chat session item that can be synced, cached, and rendered.
 _Avoid_: Message when discussing sync identity, prompt row, update
@@ -264,6 +276,9 @@ _Avoid_: Symbol install, copy install
 - **Tail Lock** keeps the selected chat attached to the latest **Display Item** only while the user is at the bottom
 - Outside **Tail Lock**, new turns and streaming growth update source/display data without forcing the viewport to jump
 - UI state that must survive virtualizer unmounts is stored by session and **Display Item** key, or derived from raw turns and **Session Summary**
+- **WheelMaker Desktop** presents the **Workspace Web UI** and is separate from the **Monitor Dashboard**
+- **WheelMaker Desktop** is a desktop entry surface, not a replacement for the WheelMaker runtime services that back Workspace operations
+- **WheelMaker Desktop** is an additional manual desktop distribution path; the browser-served **Workspace Web UI** remains the primary Web surface
 - Scrolling the **Virtualized Chat View** never triggers server read; active sessions already hold their full raw source turns in memory
 - Prompt copy ranges are found by raw **Turn Index** boundaries and then filtered by copyable turn type
 - A **Gap Turn** preserves **Turn Index** continuity and must be non-empty
@@ -308,6 +323,9 @@ _Avoid_: Symbol install, copy install
 
 > **Dev:** "If a PC browser is narrowed below 900px, should it use the mobile shell?"
 > **Domain expert:** "Yes — **Layout Mode** follows viewport width. Input capability is handled separately."
+
+> **Dev:** "Is the exe version the **Monitor Dashboard** or `wheelmaker.exe` service binary?"
+> **Domain expert:** "No — the user-facing exe is **WheelMaker Desktop**. It opens the **Workspace Web UI**, and the **Monitor Dashboard** plus service binaries stay separate."
 
 > **Dev:** "Does the first synced chat **Turn** use index 0 or 1?"
 > **Domain expert:** "Use **Turn Index** 1 for the first real turn; 0 is only the **Empty Sync Cursor**."
@@ -472,6 +490,8 @@ _Avoid_: Symbol install, copy install
 - "bottom status bar" was first used to mean a File-only surface — resolved: use **Inspector Status Bar** for the shared File/Git bottom bar
 - "mobile" could imply physical phone hardware — resolved: use **Layout Mode** when discussing responsive shell structure
 - "state" could mean business data or layout state — resolved: use **Workspace UI State** for UI-only state and keep workspace data separate
+- "exe version" could mean a service binary, installer, monitor dashboard, or desktop app — resolved: use **WheelMaker Desktop** for the user-facing `WheelMakerDesktop` executable that opens the **Workspace Web UI**, and keep the **Monitor Dashboard** plus service binaries separate
+- "desktop publish" could imply replacing the primary Web publish flow — resolved: **WheelMaker Desktop** is published manually as a separate desktop distribution path while the **Workspace Web UI** remains the primary Web surface
 - "from zero" could imply a real zero-based **Turn Index** — resolved: use `0` only as the **Empty Sync Cursor**, while real turns start at `1`
 - "local K" could mean either the latest visible turn or the durable cache cursor — resolved: use **Finished Cursor** for sync repair and keep unfinished turns in the **Live Turn Buffer**
 - "window" could mean raw turns, rendered turns, or array offsets — resolved: use **Dynamic Turn Virtualizer** for mounted range and **Raw Turn Coordinate** for turn metadata
