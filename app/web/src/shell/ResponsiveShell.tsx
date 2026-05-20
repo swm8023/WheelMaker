@@ -1,5 +1,6 @@
 import React, { type ReactNode } from 'react';
 import type { LayoutMode } from '../services/responsiveLayout';
+import { DesktopTitleBar } from './DesktopTitleBar';
 
 type ShellThemeMode = 'dark' | 'light';
 
@@ -40,6 +41,7 @@ export function DesktopShell({
   return (
     <div className={`workspace theme-${themeMode}`}>
       <style>{setiFontCss}</style>
+      <DesktopTitleBar title="WheelMaker" />
       <div
         className="desktop-shell"
         style={{ '--desktop-sidebar-width': `${desktopSidebarWidth}px` } as React.CSSProperties}

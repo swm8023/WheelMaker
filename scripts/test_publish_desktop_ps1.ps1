@@ -25,6 +25,11 @@ function Assert-NotContains {
 }
 
 Assert-Contains "publish_desktop.ps1" $script "WHEELMAKER_WEB_TARGET"
+Assert-Contains "publish_desktop.ps1" $script "app\web\public\icons\icon.svg"
+Assert-Contains "publish_desktop.ps1" $script "Restore-DesktopWebRootPlaceholder"
+Assert-Contains "publish_desktop.ps1" $script "go-winres@v0.3.3"
+Assert-Contains "publish_desktop.ps1" $script "--icon"
+Assert-Contains "publish_desktop.ps1" $script "desktop_windows.syso"
 Assert-Contains "publish_desktop.ps1" $script "npm run build:web"
 Assert-Contains "publish_desktop.ps1" $script "node scripts/export_web_release.js"
 Assert-Contains "publish_desktop.ps1" $script "go build"

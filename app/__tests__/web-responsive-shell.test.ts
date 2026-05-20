@@ -15,11 +15,13 @@ describe('web responsive shell split', () => {
     expect(shellTsx).toContain('export function DesktopShell(');
     expect(shellTsx).toContain('export function MobileShell(');
     expect(shellTsx).toContain('export function ResponsiveShell(');
+    expect(shellTsx).toContain("import { DesktopTitleBar } from './DesktopTitleBar';");
     expect(shellTsx).toContain("mode === 'desktop'");
     expect(shellTsx).toContain('desktopActivityBar: ReactNode;');
+    expect(shellTsx).toContain('<DesktopTitleBar title="WheelMaker" />');
 
     expect(shellTsx).toMatch(
-      /export function DesktopShell[\s\S]*?desktopActivityBar[\s\S]*?className=\{`workspace theme-\$\{themeMode\}`\}[\s\S]*?\{desktopActivityBar\}[\s\S]*?<aside className="workspace-left">\{sidebar\}<\/aside>/,
+      /export function DesktopShell[\s\S]*?desktopActivityBar[\s\S]*?className=\{`workspace theme-\$\{themeMode\}`\}[\s\S]*?<DesktopTitleBar title="WheelMaker" \/>[\s\S]*?\{desktopActivityBar\}[\s\S]*?<aside className="workspace-left">\{sidebar\}<\/aside>/,
     );
     expect(shellTsx).toMatch(
       /export function MobileShell[\s\S]*?className=\{`workspace theme-\$\{themeMode\} narrow-shell`\}[\s\S]*?className=\{`drawer-overlay \$\{drawerOpen \? 'show' : ''\}`\}/,

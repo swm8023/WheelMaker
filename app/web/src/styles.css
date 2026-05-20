@@ -167,6 +167,86 @@ body,
   animation: wmFadeIn 160ms ease-out;
 }
 
+.desktop-titlebar {
+  flex: 0 0 32px;
+  height: 32px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  background: color-mix(in srgb, var(--bg) 76%, var(--panel));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  color: var(--text);
+  user-select: none;
+}
+
+.theme-light .desktop-titlebar {
+  background: color-mix(in srgb, var(--panel) 86%, var(--panel-3));
+}
+
+.desktop-titlebar-drag-region {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+.desktop-titlebar-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+
+.desktop-titlebar-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--text) 80%, var(--muted));
+}
+
+.desktop-titlebar-controls {
+  flex: 0 0 auto;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+}
+
+.desktop-titlebar-button {
+  width: 46px;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 78%, var(--muted));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  padding: 0;
+  transition: background-color 80ms ease, color 80ms ease;
+}
+
+.desktop-titlebar-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.desktop-titlebar-close:hover {
+  background: #c42b1c;
+  color: #ffffff;
+}
+
+.desktop-titlebar-button .codicon {
+  font-size: 13px;
+  line-height: 1;
+}
+
 .desktop-shell {
   --desktop-side-surface: color-mix(in srgb, var(--panel) 62%, var(--panel-3));
   flex: 1;

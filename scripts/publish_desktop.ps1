@@ -56,6 +56,17 @@ function Reset-DesktopWebRoot {
   Get-ChildItem -LiteralPath $resolved -Force | Where-Object { $_.Name -ne ".gitkeep" } | Remove-Item -Recurse -Force
 }
 
+function Restore-DesktopWebRootPlaceholder {
+  if ($WhatIf) {
+    Write-Host ("[whatif] restore {0}" -f (Join-Path $script:DesktopWebRoot ".gitkeep"))
+    return
+  }
+  New-Item -ItemType Directory -Path $script:DesktopWebRoot -Force | Out-Null
+  $placeholderPath = Join-Path $script:DesktopWebRoot ".gitkeep"
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($placeholderPath, "`n", $utf8NoBom)
+}
+
 function Build-DesktopWeb {
   Assert-Command -Name "npm" -Hint "Install Node.js 22+."
   Assert-Command -Name "node" -Hint "Install Node.js 22+."
@@ -72,12 +83,116 @@ function Build-DesktopWeb {
     }
     Invoke-Checked -FilePath "npm" -Arguments @("run", "build:web") -FailureMessage "desktop web build failed"
     Invoke-Checked -FilePath "node" -Arguments @("scripts/export_web_release.js") -FailureMessage "desktop web public asset export failed"
+    Restore-DesktopWebRootPlaceholder
   } finally {
     if ($null -ne $previousTarget) {
       $env:WHEELMAKER_WEB_TARGET = $previousTarget
     } else {
       Remove-Item Env:WHEELMAKER_WEB_TARGET -ErrorAction SilentlyContinue
     }
+    Pop-Location
+  }
+}
+
+function Get-EdgeExecutable {
+  $candidates = @(
+    (Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe"),
+    (Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe")
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path -LiteralPath $candidate) { return $candidate }
+  }
+  $command = Get-Command "msedge" -ErrorAction SilentlyContinue
+  if ($command) { return $command.Source }
+  throw "Microsoft Edge is required to render the PWA SVG icon for the desktop exe resource."
+}
+
+function Convert-DesktopIconSvgToPng {
+  $iconSource = Join-Path $script:RepoRoot "app\web\public\icons\icon.svg"
+  if (-not (Test-Path -LiteralPath $iconSource)) {
+    throw ("PWA icon source is missing: {0}" -f $iconSource)
+  }
+  if ($WhatIf) {
+    Write-Host ("[whatif] render {0} -> {1}" -f $iconSource, $script:DesktopIconPng)
+    return
+  }
+
+  $edge = Get-EdgeExecutable
+  New-Item -ItemType Directory -Path $script:DesktopWinresDir -Force | Out-Null
+  Remove-Item -LiteralPath $script:DesktopIconPng -Force -ErrorAction SilentlyContinue
+  $tempDir = Join-Path $env:TEMP ("wm-desktop-icon-{0}" -f ([Guid]::NewGuid().ToString("N")))
+  New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+  try {
+    $htmlPath = Join-Path $tempDir "icon.html"
+    $iconUri = (New-Object System.Uri($iconSource)).AbsoluteUri
+    $html = @"
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html, body { margin: 0; width: 512px; height: 512px; overflow: hidden; background: transparent; }
+img { display: block; width: 512px; height: 512px; }
+</style>
+</head>
+<body><img src="$iconUri" alt=""></body>
+</html>
+"@
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($htmlPath, $html, $utf8NoBom)
+    $htmlUri = (New-Object System.Uri($htmlPath)).AbsoluteUri
+    Invoke-Checked -FilePath $edge -Arguments @(
+      "--headless",
+      "--disable-gpu",
+      "--hide-scrollbars",
+      "--window-size=512,512",
+      "--screenshot=$script:DesktopIconPng",
+      $htmlUri
+    ) -FailureMessage "desktop icon render failed"
+    $deadline = (Get-Date).AddSeconds(5)
+    while (-not (Test-Path -LiteralPath $script:DesktopIconPng)) {
+      if ((Get-Date) -ge $deadline) { break }
+      Start-Sleep -Milliseconds 100
+    }
+    if (-not (Test-Path -LiteralPath $script:DesktopIconPng)) {
+      throw ("desktop icon render did not create {0}" -f $script:DesktopIconPng)
+    }
+  } finally {
+    Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Build-DesktopResource {
+  Assert-Command -Name "go" -Hint "Install Go 1.26+."
+  Write-Step "generate desktop exe icon resource"
+  Convert-DesktopIconSvgToPng
+  if ($WhatIf) {
+    Write-Host ("[whatif] go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64 --out {0} --no-suffix --manifest gui --icon {1}" -f $script:DesktopSyso, $script:DesktopIconPng)
+    return
+  }
+  Push-Location (Join-Path $script:RepoRoot "server\cmd\wheelmaker-desktop")
+  try {
+    Invoke-Checked -FilePath "go" -Arguments @(
+      "run",
+      "github.com/tc-hib/go-winres@v0.3.3",
+      "simply",
+      "--arch",
+      "amd64",
+      "--out",
+      $script:DesktopSyso,
+      "--no-suffix",
+      "--manifest",
+      "gui",
+      "--icon",
+      $script:DesktopIconPng,
+      "--file-description",
+      "WheelMaker Desktop",
+      "--product-name",
+      "WheelMaker Desktop",
+      "--original-filename",
+      "WheelMakerDesktop.exe"
+    ) -FailureMessage "desktop Windows resource generation failed"
+  } finally {
     Pop-Location
   }
 }
@@ -130,11 +245,15 @@ $script:RepoRoot = if ([string]::IsNullOrWhiteSpace($RepoRoot)) { (Resolve-Path 
 $script:AppRoot = Join-Path $script:RepoRoot "app"
 $script:ServerRoot = Join-Path $script:RepoRoot "server"
 $script:DesktopWebRoot = Join-Path $script:RepoRoot "server\cmd\wheelmaker-desktop\webroot"
+$script:DesktopWinresDir = Join-Path $script:RepoRoot "server\cmd\wheelmaker-desktop\winres"
+$script:DesktopIconPng = Join-Path $script:DesktopWinresDir "icon.png"
+$script:DesktopSyso = Join-Path $script:RepoRoot "server\cmd\wheelmaker-desktop\desktop_windows.syso"
 $script:OutputDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
 $script:DesktopExe = Join-Path $script:OutputDir "WheelMakerDesktop.exe"
 $script:ManifestPath = Join-Path $script:OutputDir "desktop-release.json"
 
 Build-DesktopWeb
+Build-DesktopResource
 Build-DesktopBinary
 Write-DesktopReleaseManifest
 New-DesktopShortcut

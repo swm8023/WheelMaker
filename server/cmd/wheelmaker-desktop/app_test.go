@@ -9,12 +9,14 @@ import (
 )
 
 type recordingLauncher struct {
-	url string
-	err error
+	url  string
+	opts desktopWindowOptions
+	err  error
 }
 
 func (r *recordingLauncher) Launch(url string, opts desktopWindowOptions) error {
 	r.url = url
+	r.opts = opts
 	return r.err
 }
 
@@ -29,6 +31,29 @@ func TestRunDesktopAppStartsServerAndLaunchesLoopbackURL(t *testing.T) {
 	}
 	if !strings.HasPrefix(launcher.url, "http://127.0.0.1:") {
 		t.Fatalf("url=%q should use loopback", launcher.url)
+	}
+}
+
+func TestRunDesktopAppLaunchesWithCustomTitleBarAndIcon(t *testing.T) {
+	launcher := &recordingLauncher{}
+	err := runDesktopApp(fstest.MapFS{
+		"index.html": {Data: []byte("<html>desktop</html>")},
+	}, launcher)
+
+	if err != nil {
+		t.Fatalf("runDesktopApp: %v", err)
+	}
+	if launcher.opts.Title != "WheelMaker" {
+		t.Fatalf("title=%q, want WheelMaker", launcher.opts.Title)
+	}
+	if !launcher.opts.CustomTitleBar {
+		t.Fatal("expected custom title bar to be enabled")
+	}
+	if launcher.opts.IconID != desktopResourceIconID {
+		t.Fatalf("IconID=%d, want %d", launcher.opts.IconID, desktopResourceIconID)
+	}
+	if launcher.opts.ThemeColor != desktopTitleBarThemeColor {
+		t.Fatalf("ThemeColor=%q, want %q", launcher.opts.ThemeColor, desktopTitleBarThemeColor)
 	}
 }
 

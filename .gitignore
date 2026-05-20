@@ -19,6 +19,8 @@ app/dist/
 app/android/app/src/main/assets/wheelmaker-web/
 server/cmd/wheelmaker-desktop/webroot/*
 !server/cmd/wheelmaker-desktop/webroot/.gitkeep
+server/cmd/wheelmaker-desktop/desktop_windows.syso
+server/cmd/wheelmaker-desktop/winres/icon.png
 
 # Runtime log files
 wheelmaker_*.log

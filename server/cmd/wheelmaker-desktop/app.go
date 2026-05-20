@@ -9,10 +9,13 @@ import (
 var errWebView2Unavailable = errors.New("Microsoft Edge WebView2 Runtime is required to run WheelMaker Desktop")
 
 type desktopWindowOptions struct {
-	Title  string
-	Width  uint
-	Height uint
-	Debug  bool
+	Title          string
+	Width          uint
+	Height         uint
+	Debug          bool
+	IconID         uint
+	CustomTitleBar bool
+	ThemeColor     string
 }
 
 type desktopLauncher interface {
@@ -30,9 +33,12 @@ func runDesktopApp(assets fs.FS, launcher desktopLauncher) error {
 	defer srv.Close()
 
 	opts := desktopWindowOptions{
-		Title:  "WheelMaker Desktop",
-		Width:  1280,
-		Height: 840,
+		Title:          "WheelMaker",
+		Width:          1280,
+		Height:         840,
+		IconID:         desktopResourceIconID,
+		CustomTitleBar: true,
+		ThemeColor:     desktopTitleBarThemeColor,
 	}
 	if err := launcher.Launch(srv.URL(), opts); err != nil {
 		if errors.Is(err, errWebView2Unavailable) {
