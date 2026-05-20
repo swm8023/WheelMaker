@@ -8946,10 +8946,12 @@ function App() {
     const disabled = options.disabled === true;
     const actionDisabled = disabled || options.operationRunning === true || !!skillsPendingKey;
     const skillCount = skills.length;
+    const scopeKind = options.scope === 'hub' ? 'Hub' : 'Project';
     return (
-      <section className="settings-skills-scope">
+      <section className={`settings-skills-scope settings-skills-scope-${options.scope}`}>
         <div className="settings-skills-scope-header">
           <div className="settings-skills-scope-title-wrap">
+            <span className="settings-skills-scope-kind">{scopeKind}</span>
             <span className="settings-skills-scope-title" title={title}>{title}</span>
             <span className="settings-skills-count">{skillCount}</span>
             {disabled ? <span className="agent-package-status status-not_published">Offline</span> : null}

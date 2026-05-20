@@ -1112,11 +1112,24 @@ body,
 
 .settings-skills-scope {
   border-left: 2px solid color-mix(in srgb, var(--accent) 34%, var(--border));
-  padding: 5px 0 4px 8px;
+  padding: 0 0 4px 8px;
 }
 
 .settings-skills-project .settings-skills-scope {
   border-left-color: color-mix(in srgb, var(--border) 78%, transparent);
+}
+
+.settings-skills-scope-header {
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel-2) 86%, var(--panel));
+  padding: 4px 5px 4px 7px;
+}
+
+.settings-skills-scope-hub > .settings-skills-scope-header {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
 }
 
 .settings-skills-scope-body {
@@ -1143,14 +1156,28 @@ body,
   gap: 6px;
 }
 
+.settings-skills-scope-kind {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.settings-skills-scope-hub .settings-skills-scope-kind {
+  color: var(--accent);
+}
+
 .settings-skills-scope-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 850;
 }
 
 .settings-skills-count {
@@ -1224,7 +1251,7 @@ body,
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: 30px;
   border-top: 1px solid color-mix(in srgb, var(--border) 64%, transparent);
-  padding: 3px 0;
+  padding: 3px 0 3px 8px;
 }
 
 .settings-skills-candidates .settings-skill-row {
@@ -1267,9 +1294,9 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 700;
+  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+  font-size: 11.5px;
+  font-weight: 600;
 }
 
 .settings-skill-candidate-row .settings-skill-name {
