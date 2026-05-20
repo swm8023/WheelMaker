@@ -7238,9 +7238,9 @@ function App() {
   }, []);
 
   const toggleAllSkillSourceCandidates = useCallback(() => {
-    const candidateNames = skillSourceCandidates
+    const candidateNames = Array.from(new Set(skillSourceCandidates
       .map(candidate => candidate.name)
-      .filter(Boolean);
+      .filter(Boolean)));
     setSkillSourceSelectedNames(prev => {
       const selected = new Set(prev);
       const allSelected = candidateNames.length > 0 && candidateNames.every(name => selected.has(name));
@@ -8840,16 +8840,10 @@ function App() {
       return null;
     }
     const selected = new Set(skillSourceSelectedNames);
-    const candidateNames = skillSourceCandidates
+    const candidateNames = Array.from(new Set(skillSourceCandidates
       .map(candidate => candidate.name)
-      .filter(Boolean);
+      .filter(Boolean)));
     const allCandidatesSelected = candidateNames.length > 0 && candidateNames.every(name => selected.has(name));
-    const candidateGroups = groupSkillsByCategory(skillSourceCandidates.map(candidate => ({
-      name: candidate.name,
-      category: candidate.category,
-      categoryKey: candidate.categoryKey,
-      agents: [],
-    })));
     return (
       <section className="settings-skills-install-panel">
         <div className="settings-skills-scope-header">
@@ -8891,7 +8885,7 @@ function App() {
         {skillSourceError ? (
           <div className="settings-metadata-error">{skillSourceError}</div>
         ) : null}
-        {candidateGroups.length > 0 ? (
+        {candidateNames.length > 0 ? (
           <div className="settings-skills-candidates">
             <label className="settings-skill-row settings-skill-candidate-row settings-skill-select-all-row">
               <input
@@ -8903,22 +8897,17 @@ function App() {
                 <span className="settings-skill-name">Select all</span>
               </span>
             </label>
-            {candidateGroups.map(group => (
-              <div key={`candidate-group:${group.categoryKey}`} className="settings-skill-category-block">
-                <div className="settings-skill-category">{group.category}</div>
-                {group.skills.map(skill => (
-                  <label key={`candidate:${group.categoryKey}:${skill.name}`} className="settings-skill-row settings-skill-candidate-row">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(skill.name)}
-                      onChange={() => toggleSkillSourceCandidate(skill.name)}
-                    />
-                    <span className="settings-skill-row-main">
-                      <span className="settings-skill-name">{skill.name}</span>
-                    </span>
-                  </label>
-                ))}
-              </div>
+            {candidateNames.map(skillName => (
+              <label key={`candidate:${skillName}`} className="settings-skill-row settings-skill-candidate-row">
+                <input
+                  type="checkbox"
+                  checked={selected.has(skillName)}
+                  onChange={() => toggleSkillSourceCandidate(skillName)}
+                />
+                <span className="settings-skill-row-main">
+                  <span className="settings-skill-name">{skillName}</span>
+                </span>
+              </label>
             ))}
           </div>
         ) : null}

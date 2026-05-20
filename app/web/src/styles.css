@@ -1129,8 +1129,6 @@ body,
 
 .settings-skills-candidates {
   gap: 2px;
-  max-height: min(34vh, 260px);
-  overflow: auto;
   border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   border-radius: 6px;
   padding: 3px 6px;
@@ -1296,13 +1294,6 @@ body,
   font-weight: 700;
 }
 
-.settings-skills-candidates .settings-skill-category {
-  position: static;
-  font-size: 10px;
-  padding: 5px 0 2px;
-  background: transparent;
-}
-
 .settings-skill-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1326,9 +1317,6 @@ body,
   min-height: 28px;
   border-top: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 64%, transparent);
-  position: sticky;
-  top: 0;
-  z-index: 2;
   background: color-mix(in srgb, var(--panel) 72%, var(--panel-3));
 }
 

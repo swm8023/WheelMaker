@@ -67,6 +67,8 @@ describe('skill management settings UI source structure', () => {
     expect(mainTsx).toContain('renderSkillInstallPanel({hubId, scope: options.scope, projectName: options.projectName})');
     expect(mainTsx).not.toContain('renderSkillInstallPanel()}');
     expect(mainTsx).not.toContain('candidate?.description');
+    expect(mainTsx).not.toContain('candidateGroups');
+    expect(mainTsx).not.toContain('candidate-group:');
   });
 
   test('uses compact settings skill styles', () => {
@@ -78,5 +80,7 @@ describe('skill management settings UI source structure', () => {
     expect(stylesCss).toContain('.settings-skill-select-all-row');
     expect(stylesCss).toContain('.settings-skills-candidates .settings-skill-row');
     expect(stylesCss).toContain('min-height: 26px;');
+    expect(stylesCss).not.toContain('.settings-skills-candidates .settings-skill-category');
+    expect(stylesCss).not.toContain('max-height: min(34vh, 260px);');
   });
 });
