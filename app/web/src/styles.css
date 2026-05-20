@@ -452,18 +452,22 @@ body,
 
 .mobile-settings-nav {
   flex: 0 0 auto;
+  position: relative;
+  height: calc(var(--wm-safe-area-top) + 52px);
   min-height: calc(var(--wm-safe-area-top) + 52px);
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) minmax(44px, auto);
-  align-items: end;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 6px;
-  padding: var(--wm-safe-area-top) 12px 8px;
+  padding: var(--wm-safe-area-top) 12px 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   background: color-mix(in srgb, var(--panel) 94%, transparent);
   backdrop-filter: blur(14px);
 }
 
 .mobile-settings-back {
+  position: relative;
+  z-index: 1;
   width: 38px;
   height: 38px;
   border: 0;
@@ -483,7 +487,12 @@ body,
 }
 
 .mobile-settings-title {
-  align-self: center;
+  position: absolute;
+  left: 50%;
+  top: calc(var(--wm-safe-area-top) + 26px);
+  transform: translate(-50%, -50%);
+  z-index: 0;
+  max-width: min(62vw, calc(100% - 176px));
   min-width: 0;
   overflow: hidden;
   text-align: center;
@@ -494,6 +503,8 @@ body,
 }
 
 .mobile-settings-actions {
+  position: relative;
+  z-index: 1;
   min-width: 44px;
   min-height: 38px;
   display: inline-flex;
