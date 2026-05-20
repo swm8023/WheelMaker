@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 )
@@ -18,18 +19,25 @@ type fakeSkillsRunner struct {
 	mu      sync.Mutex
 	calls   []skillsCommandCall
 	results map[string]skillsCommandResult
+	blocks  map[string]chan struct{}
 }
 
 func newFakeSkillsRunner() *fakeSkillsRunner {
-	return &fakeSkillsRunner{results: map[string]skillsCommandResult{}}
+	return &fakeSkillsRunner{results: map[string]skillsCommandResult{}, blocks: map[string]chan struct{}{}}
 }
 
 func (f *fakeSkillsRunner) Run(_ context.Context, dir string, name string, args ...string) skillsCommandResult {
+	key := skillsCallKey(dir, name, args...)
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	call := skillsCommandCall{Dir: dir, Name: name, Args: append([]string(nil), args...)}
 	f.calls = append(f.calls, call)
-	if result, ok := f.results[skillsCallKey(dir, name, args...)]; ok {
+	result, ok := f.results[key]
+	block := f.blocks[key]
+	f.mu.Unlock()
+	if block != nil {
+		<-block
+	}
+	if ok {
 		return result
 	}
 	return skillsCommandResult{ExitCode: 0, Stdout: "[]"}
@@ -39,6 +47,14 @@ func (f *fakeSkillsRunner) set(dir string, name string, args []string, result sk
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.results[skillsCallKey(dir, name, args...)] = result
+}
+
+func (f *fakeSkillsRunner) block(dir string, name string, args ...string) chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ch := make(chan struct{})
+	f.blocks[skillsCallKey(dir, name, args...)] = ch
+	return ch
 }
 
 func (f *fakeSkillsRunner) hasCall(dir string, name string, args ...string) bool {
@@ -55,6 +71,31 @@ func (f *fakeSkillsRunner) hasCall(dir string, name string, args ...string) bool
 
 func skillsCallKey(dir string, name string, args ...string) string {
 	return dir + "\x00" + name + "\x00" + strings.Join(args, "\x00")
+}
+
+func waitForSkillsCall(t *testing.T, runner *fakeSkillsRunner, dir string, name string, args ...string) {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		if runner.hasCall(dir, name, args...) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("call not found: dir=%q name=%q args=%#v calls=%#v", dir, name, args, runner.calls)
+}
+
+func waitForSkillsOperationDone(t *testing.T, cmd *SkillsCommand) *skillsOperationSnapshot {
+	t.Helper()
+	var operation *skillsOperationSnapshot
+	for i := 0; i < 100; i++ {
+		operation = cmd.currentOperationSnapshot()
+		if operation != nil && !operation.Running {
+			return operation
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("operation still running: %#v", operation)
+	return operation
 }
 
 func TestSkillsCommandScanReturnsHubAndProjectSkillsWithCategories(t *testing.T) {
@@ -164,8 +205,9 @@ func TestSkillsCommandInstallUsesFixedAgentsAndSymlinkInstall(t *testing.T) {
 	if cmdErr != nil {
 		t.Fatalf("hub install error: %#v", cmdErr)
 	}
-	if !runner.hasCall("", "skills", "add", "mattpocock/skills", "-g", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "tdd", "-y") {
-		t.Fatalf("hub install call not found: %#v", runner.calls)
+	waitForSkillsCall(t, runner, "", "skills", "add", "mattpocock/skills", "-g", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "tdd", "-y")
+	if operation := waitForSkillsOperationDone(t, cmd); operation.Status != "succeeded" {
+		t.Fatalf("operation=%#v, want succeeded", operation)
 	}
 	if runner.hasCall("", "skills", "add", "mattpocock/skills", "-g", "--copy") {
 		t.Fatalf("install should not request copy mode: %#v", runner.calls)
@@ -182,9 +224,7 @@ func TestSkillsCommandInstallUsesFixedAgentsAndSymlinkInstall(t *testing.T) {
 	if cmdErr != nil {
 		t.Fatalf("project install error: %#v", cmdErr)
 	}
-	if !runner.hasCall(projectRoot, "skills", "add", "mattpocock/skills", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "diagnose", "-y") {
-		t.Fatalf("project install call not found: %#v", runner.calls)
-	}
+	waitForSkillsCall(t, runner, projectRoot, "skills", "add", "mattpocock/skills", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "diagnose", "-y")
 }
 
 func TestSkillsCommandUninstallRemovesAllLinkedAgents(t *testing.T) {
@@ -201,9 +241,7 @@ func TestSkillsCommandUninstallRemovesAllLinkedAgents(t *testing.T) {
 	if cmdErr != nil {
 		t.Fatalf("uninstall error: %#v", cmdErr)
 	}
-	if !runner.hasCall("", "skills", "remove", "-g", "--skill", "tdd", "--agent", "*", "-y") {
-		t.Fatalf("uninstall call not found: %#v", runner.calls)
-	}
+	waitForSkillsCall(t, runner, "", "skills", "remove", "-g", "--skill", "tdd", "--agent", "*", "-y")
 }
 
 func TestSkillsCommandUpdateUsesHubAndProjectScopes(t *testing.T) {
@@ -224,6 +262,8 @@ func TestSkillsCommandUpdateUsesHubAndProjectScopes(t *testing.T) {
 	if cmdErr != nil {
 		t.Fatalf("hub update error: %#v", cmdErr)
 	}
+	waitForSkillsCall(t, runner, "", "skills", "update", "-g", "-y")
+	waitForSkillsOperationDone(t, cmd)
 	_, cmdErr = cmd.Handle(context.Background(), rawSkillsCommandPayload(t, map[string]any{
 		"action":      "update",
 		"hubId":       "hub-a",
@@ -233,11 +273,90 @@ func TestSkillsCommandUpdateUsesHubAndProjectScopes(t *testing.T) {
 	if cmdErr != nil {
 		t.Fatalf("project update error: %#v", cmdErr)
 	}
-	if !runner.hasCall("", "skills", "update", "-g", "-y") {
-		t.Fatalf("hub update call not found: %#v", runner.calls)
+	waitForSkillsCall(t, runner, projectRoot, "skills", "update", "-p", "-y")
+}
+
+func TestSkillsCommandWriteActionsReturnAcceptedOperation(t *testing.T) {
+	runner := newFakeSkillsRunner()
+	block := runner.block("", "skills", "remove", "-g", "--skill", "tdd", "--agent", "*", "-y")
+	cmd := newSkillsCommandWithRunner(runner, skillsCommandConfig{HubID: "hub-a"})
+
+	resp, cmdErr := cmd.Handle(context.Background(), rawSkillsCommandPayload(t, map[string]any{
+		"action": "uninstall",
+		"hubId":  "hub-a",
+		"scope":  "hub",
+		"skills": []string{"tdd"},
+	}))
+	if cmdErr != nil {
+		t.Fatalf("uninstall error: %#v", cmdErr)
 	}
-	if !runner.hasCall(projectRoot, "skills", "update", "-p", "-y") {
-		t.Fatalf("project update call not found: %#v", runner.calls)
+	body := resp.(skillsCommandResponse)
+	if !body.OK || !body.Accepted || body.Operation == nil || !body.Operation.Running {
+		t.Fatalf("response=%#v, want accepted running operation", body)
+	}
+	if body.Operation.Action != "uninstall" || body.Operation.Scope != "hub" || body.Operation.Status != "running" {
+		t.Fatalf("operation=%#v, want uninstall hub running", body.Operation)
+	}
+	close(block)
+	waitForSkillsOperationDone(t, cmd)
+}
+
+func TestSkillsCommandRejectsConcurrentWriteOperations(t *testing.T) {
+	runner := newFakeSkillsRunner()
+	block := runner.block("", "skills", "remove", "-g", "--skill", "tdd", "--agent", "*", "-y")
+	cmd := newSkillsCommandWithRunner(runner, skillsCommandConfig{HubID: "hub-a"})
+
+	_, cmdErr := cmd.Handle(context.Background(), rawSkillsCommandPayload(t, map[string]any{
+		"action": "uninstall",
+		"hubId":  "hub-a",
+		"scope":  "hub",
+		"skills": []string{"tdd"},
+	}))
+	if cmdErr != nil {
+		t.Fatalf("first uninstall error: %#v", cmdErr)
+	}
+	waitForSkillsCall(t, runner, "", "skills", "remove", "-g", "--skill", "tdd", "--agent", "*", "-y")
+	_, cmdErr = cmd.Handle(context.Background(), rawSkillsCommandPayload(t, map[string]any{
+		"action": "update",
+		"hubId":  "hub-a",
+		"scope":  "hub",
+	}))
+	if cmdErr == nil || cmdErr.Code != rp.CodeConflict {
+		t.Fatalf("cmdErr=%#v, want CONFLICT", cmdErr)
+	}
+	close(block)
+	waitForSkillsOperationDone(t, cmd)
+}
+
+func TestSkillsCommandUpdateCanIncludeOnlineProjectsInOneOperation(t *testing.T) {
+	projectRoot := t.TempDir()
+	runner := newFakeSkillsRunner()
+	cmd := newSkillsCommandWithRunner(runner, skillsCommandConfig{
+		HubID: "hub-a",
+		Projects: []ProjectInfo{
+			{Name: "WheelMaker", Path: projectRoot, Online: true},
+			{Name: "Offline", Path: t.TempDir(), Online: false},
+		},
+	})
+
+	resp, cmdErr := cmd.Handle(context.Background(), rawSkillsCommandPayload(t, map[string]any{
+		"action":          "update",
+		"hubId":           "hub-a",
+		"scope":           "hub",
+		"includeProjects": true,
+	}))
+	if cmdErr != nil {
+		t.Fatalf("update all error: %#v", cmdErr)
+	}
+	body := resp.(skillsCommandResponse)
+	if !body.OK || !body.Accepted || body.Operation == nil || !body.Operation.IncludeProjects {
+		t.Fatalf("response=%#v, want accepted includeProjects operation", body)
+	}
+	waitForSkillsCall(t, runner, "", "skills", "update", "-g", "-y")
+	waitForSkillsCall(t, runner, projectRoot, "skills", "update", "-p", "-y")
+	operation := waitForSkillsOperationDone(t, cmd)
+	if operation.Status != "succeeded" || !strings.Contains(operation.Message, "Updated skills") {
+		t.Fatalf("operation=%#v, want succeeded update operation", operation)
 	}
 }
 

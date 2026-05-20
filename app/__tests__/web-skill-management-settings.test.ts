@@ -43,9 +43,25 @@ describe('skill management settings UI source structure', () => {
     expect(mainTsx).toContain("kind: 'skillUpdate'");
   });
 
+  test('renders skill rows without linked agent labels', () => {
+    expect(mainTsx).not.toContain('skillAgentsLabel');
+    expect(mainTsx).not.toContain('No linked agents');
+  });
+
+  test('uses icon actions and operation polling for Skills tasks', () => {
+    expect(mainTsx).toContain('skillOperationPollTimerRef');
+    expect(mainTsx).toContain('operation?.running');
+    expect(mainTsx).toContain('includeProjects: true');
+    expect(mainTsx).toContain('settings-skill-icon-btn');
+    expect(mainTsx).toContain('codicon-add');
+    expect(mainTsx).toContain('codicon-sync');
+    expect(mainTsx).toContain('codicon-trash');
+  });
+
   test('uses compact settings skill styles', () => {
     expect(stylesCss).toContain('.settings-skills-hub');
     expect(stylesCss).toContain('.settings-skill-row');
     expect(stylesCss).toContain('.settings-skill-category');
+    expect(stylesCss).toContain('.settings-skill-icon-btn');
   });
 });

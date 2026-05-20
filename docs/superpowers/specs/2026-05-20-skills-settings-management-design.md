@@ -37,7 +37,7 @@ The CLI's `--json` list output does not include category. Category comes from th
 - Group skill rows by Skill Category within each scope.
 - Use fixed install target agents: Codex, Claude Code, OpenCode, and GitHub Copilot.
 - Default to upstream symlink installation behavior.
-- Make skill operations synchronous: Hub waits for completion and returns the final result.
+- Make write operations asynchronous: Hub accepts install, uninstall, and update operations, then the App polls scan until completion.
 
 ## Non-Goals
 
@@ -46,7 +46,7 @@ The CLI's `--json` list output does not include category. Category comes from th
 - Do not add a skills.sh marketplace browser in the first version.
 - Do not support per-agent install or per-agent unlink.
 - Do not support category-level update.
-- Do not make Registry persist task state, aggregate results, or poll operation status.
+- Do not make Registry persist task state, aggregate results, or poll operation status; Hub owns operation state and App polls Hub through `scan`.
 - Do not replace `ProjectAgentProfile.skills`; those remain provider visibility data for project display.
 - Do not hot-refresh agent provider registries after skill install or uninstall.
 
@@ -152,28 +152,31 @@ If one Project scan fails, the Hub scan remains `ok:true` and that Project carri
 
 ### Install, Uninstall, And Update Responses
 
-Write actions are synchronous and return the changed scope snapshot:
+Write actions return immediately after validation and task acceptance:
 
 ```json
 {
   "ok": true,
+  "accepted": true,
   "hubId": "hub-a",
   "scope": "project",
   "projectName": "WheelMaker",
   "updatedAt": "2026-05-20T10:00:00Z",
-  "skills": [
-    {
-      "name": "tdd",
-      "category": "Mattpocock Skills",
-      "categoryKey": "mattpocock-skills",
-      "agents": ["Codex", "Claude Code", "GitHub Copilot", "OpenCode"]
-    }
-  ],
-  "message": "Installed 1 skill"
+  "operation": {
+    "running": true,
+    "action": "install",
+    "scope": "project",
+    "projectName": "WheelMaker",
+    "source": "mattpocock/skills",
+    "skills": ["tdd"],
+    "status": "running",
+    "startedAt": "2026-05-20T10:00:00Z",
+    "exitCode": null
+  }
 }
 ```
 
-CLI failures return `ok:false` with `errorSummary` truncated to 500 characters. Protocol errors are reserved for invalid arguments, forbidden source shapes, unknown projects, offline hubs, and internal command execution failures.
+CLI failures are recorded on the operation returned by a later `scan` response with `status:"failed"` and `errorSummary` truncated to 500 characters. Protocol errors are reserved for invalid arguments, forbidden source shapes, unknown projects, offline hubs, concurrent operations, and internal command execution failures.
 
 ## Hub Command Behavior
 
@@ -190,6 +193,8 @@ Command mapping:
 - Project uninstall: same command without `-g`, run in the Project cwd
 - Hub update: `skills update -g -y`
 - Project update: `skills update -p -y`, run in the Project cwd
+
+Only one write operation may run per Hub. Hub-level "Update All" accepts a single operation that runs Hub update first and then each online Project update sequentially.
 
 The handler should resolve the CLI as `skills` when available, with a fallback to `npx --yes skills`. The fallback is still controlled: the App never chooses the executable or arguments.
 
@@ -232,7 +237,7 @@ The `Skills` detail page:
 - renders each hub with a Hub Skills section first
 - renders each Project below Hub Skills
 - groups rows by Skill Category
-- shows skill name, path when useful, linked agents, and row actions
+- shows one row per skill and does not display target Agents because install targets are fixed
 - has a Refresh action
 - has an Add action for Hub scope and each Project scope
 - uses the shared confirmation dialog for install, uninstall, and update
@@ -247,11 +252,13 @@ Install flow:
 4. User selects one or more candidates.
 5. App confirms installation with source, target scope, selected skill names, and fixed target agents.
 6. App calls `cmd.skills` `install`.
-7. App updates the changed scope from the response, then refreshes the hub scan if needed.
+7. Hub returns an accepted operation.
+8. App refreshes the Hub scan until the operation completes.
 
 Update flow:
 
 - Hub `Update All` calls `update` for Hub scope and each online Project scope.
+- Hub `Update All` calls one `update` request with `includeProjects:true`.
 - Hub Skills section `Update` calls `update` with `scope:"hub"`.
 - Project section `Update` calls `update` with `scope:"project"` and `projectName`.
 
@@ -259,7 +266,7 @@ Uninstall flow:
 
 - Each skill row has `Uninstall`.
 - Confirmation explains that the skill will be removed from all fixed Skill Target Agents in that scope.
-- App calls `cmd.skills` `uninstall` with the selected skill name.
+- App calls `cmd.skills` `uninstall` with the selected skill name, then polls scan until completion.
 
 ## Error Handling
 
@@ -308,7 +315,7 @@ Uninstall flow:
 
 - `cmd.skills` is explicitly allowlisted and routed by `hubId`.
 - Registry remains a forwarder and does not persist skill operation state.
-- Hub exposes synchronous `scan`, `list`, `install`, `uninstall`, and `update` actions.
+- Hub exposes synchronous `scan` and `list`, and asynchronous `install`, `uninstall`, and `update` actions.
 - The App never sends raw command, args, cwd, env, or filesystem paths.
 - Source installation only accepts Remote Skill Sources.
 - Install always targets Codex, Claude Code, OpenCode, and GitHub Copilot.

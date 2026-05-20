@@ -56,6 +56,7 @@ describe('skill management registry service', () => {
     });
     await repository.uninstallSkills({hubId: 'hub-a', scope: 'hub', skills: ['tdd']});
     await repository.updateSkills({hubId: 'hub-a', scope: 'project', projectName: 'WheelMaker'});
+    await repository.updateSkills({hubId: 'hub-a', scope: 'hub', includeProjects: true});
 
     expect(client.request).toHaveBeenNthCalledWith(1, {
       method: 'cmd.skills',
@@ -77,6 +78,11 @@ describe('skill management registry service', () => {
     expect(client.request).toHaveBeenNthCalledWith(3, {
       method: 'cmd.skills',
       payload: {action: 'update', hubId: 'hub-a', scope: 'project', projectName: 'WheelMaker'},
+      timeoutMs: 60000,
+    });
+    expect(client.request).toHaveBeenNthCalledWith(4, {
+      method: 'cmd.skills',
+      payload: {action: 'update', hubId: 'hub-a', scope: 'hub', includeProjects: true},
       timeoutMs: 60000,
     });
   });

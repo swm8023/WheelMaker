@@ -999,6 +999,39 @@ body,
   opacity: 0.56;
 }
 
+.settings-skill-icon-btn {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.settings-skill-icon-btn.danger {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+  background: color-mix(in srgb, var(--danger) 9%, var(--panel));
+}
+
+.settings-skill-icon-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.settings-skill-icon-btn:disabled {
+  cursor: default;
+  opacity: 0.56;
+}
+
+.settings-skill-icon-btn .codicon {
+  font-size: 14px;
+}
+
 .settings-skills-list {
   display: grid;
   gap: 10px;
@@ -1114,8 +1147,8 @@ body,
 
 .settings-skill-row-main {
   min-width: 0;
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: center;
 }
 
 .settings-skill-name {

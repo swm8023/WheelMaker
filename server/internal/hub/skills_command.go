@@ -83,8 +83,9 @@ type SkillsCommand struct {
 	hubID          string
 	globalLockPath string
 
-	mu       sync.RWMutex
-	projects []ProjectInfo
+	mu        sync.RWMutex
+	projects  []ProjectInfo
+	operation *skillsOperationSnapshot
 }
 
 func NewSkillsCommand(config skillsCommandConfig) *SkillsCommand {
@@ -114,27 +115,46 @@ func (c *SkillsCommand) SetProjects(projects []ProjectInfo) {
 }
 
 type skillsCommandPayload struct {
-	Action      string   `json:"action"`
-	HubID       string   `json:"hubId"`
-	Scope       string   `json:"scope,omitempty"`
-	ProjectName string   `json:"projectName,omitempty"`
-	Source      string   `json:"source,omitempty"`
-	Skills      []string `json:"skills,omitempty"`
+	Action          string   `json:"action"`
+	HubID           string   `json:"hubId"`
+	Scope           string   `json:"scope,omitempty"`
+	ProjectName     string   `json:"projectName,omitempty"`
+	Source          string   `json:"source,omitempty"`
+	Skills          []string `json:"skills,omitempty"`
+	IncludeProjects bool     `json:"includeProjects,omitempty"`
 }
 
 type skillsCommandResponse struct {
-	OK           bool                    `json:"ok"`
-	HubID        string                  `json:"hubId"`
-	UpdatedAt    string                  `json:"updatedAt,omitempty"`
-	Source       string                  `json:"source,omitempty"`
-	Scope        string                  `json:"scope,omitempty"`
-	ProjectName  string                  `json:"projectName,omitempty"`
-	HubSkills    skillsScopeSnapshot     `json:"hubSkills,omitempty"`
-	Projects     []skillsProjectSnapshot `json:"projects,omitempty"`
-	Skills       []skillsSkillSnapshot   `json:"skills,omitempty"`
-	Candidates   []skillsSourceCandidate `json:"candidates,omitempty"`
-	Message      string                  `json:"message,omitempty"`
-	ErrorSummary string                  `json:"errorSummary,omitempty"`
+	OK           bool                     `json:"ok"`
+	Accepted     bool                     `json:"accepted,omitempty"`
+	HubID        string                   `json:"hubId"`
+	UpdatedAt    string                   `json:"updatedAt,omitempty"`
+	Source       string                   `json:"source,omitempty"`
+	Scope        string                   `json:"scope,omitempty"`
+	ProjectName  string                   `json:"projectName,omitempty"`
+	HubSkills    skillsScopeSnapshot      `json:"hubSkills,omitempty"`
+	Projects     []skillsProjectSnapshot  `json:"projects,omitempty"`
+	Skills       []skillsSkillSnapshot    `json:"skills,omitempty"`
+	Candidates   []skillsSourceCandidate  `json:"candidates,omitempty"`
+	Operation    *skillsOperationSnapshot `json:"operation,omitempty"`
+	Message      string                   `json:"message,omitempty"`
+	ErrorSummary string                   `json:"errorSummary,omitempty"`
+}
+
+type skillsOperationSnapshot struct {
+	Running         bool     `json:"running"`
+	Action          string   `json:"action"`
+	Scope           string   `json:"scope,omitempty"`
+	ProjectName     string   `json:"projectName,omitempty"`
+	Source          string   `json:"source,omitempty"`
+	Skills          []string `json:"skills,omitempty"`
+	IncludeProjects bool     `json:"includeProjects,omitempty"`
+	Status          string   `json:"status"`
+	StartedAt       string   `json:"startedAt"`
+	FinishedAt      string   `json:"finishedAt,omitempty"`
+	ExitCode        *int     `json:"exitCode"`
+	ErrorSummary    string   `json:"errorSummary,omitempty"`
+	Message         string   `json:"message,omitempty"`
 }
 
 type skillsScopeSnapshot struct {
@@ -205,11 +225,11 @@ func (c *SkillsCommand) Handle(ctx context.Context, raw json.RawMessage) (any, *
 	case "list":
 		return c.listSource(ctx, payload)
 	case "install":
-		return c.install(ctx, payload)
+		return c.startInstall(payload)
 	case "uninstall":
-		return c.uninstall(ctx, payload)
+		return c.startUninstall(payload)
 	case "update":
-		return c.update(ctx, payload)
+		return c.startUpdate(payload)
 	default:
 		return nil, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "unsupported cmd.skills action"}
 	}
@@ -226,7 +246,8 @@ func (c *SkillsCommand) scan(ctx context.Context, hubID string) skillsCommandRes
 			Scope:  "hub",
 			Skills: hubSkills,
 		},
-		Projects: []skillsProjectSnapshot{},
+		Projects:  []skillsProjectSnapshot{},
+		Operation: c.currentOperationSnapshot(),
 	}
 	if hubErr != "" {
 		resp.ErrorSummary = hubErr
@@ -287,7 +308,7 @@ func (c *SkillsCommand) listSource(ctx context.Context, payload skillsCommandPay
 	}, nil
 }
 
-func (c *SkillsCommand) install(ctx context.Context, payload skillsCommandPayload) (any, *skillsCommandError) {
+func (c *SkillsCommand) startInstall(payload skillsCommandPayload) (any, *skillsCommandError) {
 	if err := validateRemoteSkillSource(payload.Source); err != nil {
 		return nil, err
 	}
@@ -308,14 +329,14 @@ func (c *SkillsCommand) install(ctx context.Context, payload skillsCommandPayloa
 	args = append(args, "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill")
 	args = append(args, payload.Skills...)
 	args = append(args, "-y")
-	result := c.runSkills(ctx, target.dir, args...)
-	if skillsCommandFailed(result) {
-		return c.writeFailureResponse(payload, target, result), nil
-	}
-	return c.writeSuccessResponse(ctx, payload, target, "Installed skills."), nil
+	return c.startOperation(payload, []skillsOperationRun{{
+		target:  target,
+		args:    args,
+		message: "Installed skills.",
+	}})
 }
 
-func (c *SkillsCommand) uninstall(ctx context.Context, payload skillsCommandPayload) (any, *skillsCommandError) {
+func (c *SkillsCommand) startUninstall(payload skillsCommandPayload) (any, *skillsCommandError) {
 	if len(payload.Skills) == 0 {
 		return nil, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "skills are required"}
 	}
@@ -333,30 +354,176 @@ func (c *SkillsCommand) uninstall(ctx context.Context, payload skillsCommandPayl
 	args = append(args, "--skill")
 	args = append(args, payload.Skills...)
 	args = append(args, "--agent", "*", "-y")
-	result := c.runSkills(ctx, target.dir, args...)
-	if skillsCommandFailed(result) {
-		return c.writeFailureResponse(payload, target, result), nil
-	}
-	return c.writeSuccessResponse(ctx, payload, target, "Uninstalled skills."), nil
+	return c.startOperation(payload, []skillsOperationRun{{
+		target:  target,
+		args:    args,
+		message: "Uninstalled skills.",
+	}})
 }
 
-func (c *SkillsCommand) update(ctx context.Context, payload skillsCommandPayload) (any, *skillsCommandError) {
+func (c *SkillsCommand) startUpdate(payload skillsCommandPayload) (any, *skillsCommandError) {
 	target, cmdErr := c.resolveTarget(payload)
 	if cmdErr != nil {
 		return nil, cmdErr
 	}
+	runs := []skillsOperationRun{{
+		target:  target,
+		args:    skillsUpdateArgs(target),
+		message: "Updated skills.",
+	}}
+	if payload.IncludeProjects {
+		if target.scope != "hub" {
+			return nil, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "includeProjects requires hub scope"}
+		}
+		projectRuns, err := c.projectUpdateRuns()
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, projectRuns...)
+	}
+	return c.startOperation(payload, runs)
+}
+
+type skillsOperationRun struct {
+	target  skillsCommandTarget
+	args    []string
+	message string
+}
+
+func (c *SkillsCommand) startOperation(payload skillsCommandPayload, runs []skillsOperationRun) (any, *skillsCommandError) {
+	operation, cmdErr := c.acceptOperation(payload)
+	if cmdErr != nil {
+		return nil, cmdErr
+	}
+	accepted := cloneSkillsOperation(operation)
+	go c.runSkillsOperation(operation, runs)
+	return skillsCommandResponse{
+		OK:          true,
+		Accepted:    true,
+		HubID:       payload.HubID,
+		UpdatedAt:   operation.StartedAt,
+		Source:      payload.Source,
+		Scope:       payload.Scope,
+		ProjectName: payload.ProjectName,
+		Operation:   accepted,
+	}, nil
+}
+
+func (c *SkillsCommand) acceptOperation(payload skillsCommandPayload) (*skillsOperationSnapshot, *skillsCommandError) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.operation != nil && c.operation.Running {
+		return nil, &skillsCommandError{Code: rp.CodeConflict, Message: "skills operation already running"}
+	}
+	operation := &skillsOperationSnapshot{
+		Running:         true,
+		Action:          payload.Action,
+		Scope:           payload.Scope,
+		ProjectName:     payload.ProjectName,
+		Source:          payload.Source,
+		Skills:          append([]string(nil), payload.Skills...),
+		IncludeProjects: payload.IncludeProjects,
+		Status:          "running",
+		StartedAt:       c.now().Format(time.RFC3339),
+	}
+	c.operation = operation
+	return operation, nil
+}
+
+func (c *SkillsCommand) runSkillsOperation(operation *skillsOperationSnapshot, runs []skillsOperationRun) {
+	messages := make([]string, 0, len(runs))
+	for _, run := range runs {
+		result := c.runSkills(context.Background(), run.target.dir, run.args...)
+		exitCode := result.ExitCode
+		if skillsCommandFailed(result) {
+			c.finishOperation(operation, "failed", &exitCode, skillsResultSummary(result), "")
+			return
+		}
+		if run.message != "" {
+			messages = append(messages, run.message)
+		}
+	}
+	message := "Skills operation completed."
+	if len(messages) > 0 {
+		message = messages[0]
+	}
+	c.finishOperation(operation, "succeeded", nil, "", message)
+}
+
+func (c *SkillsCommand) finishOperation(operation *skillsOperationSnapshot, status string, exitCode *int, errorSummary string, message string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.operation != operation {
+		return
+	}
+	operation.Running = false
+	operation.Status = status
+	operation.FinishedAt = c.now().Format(time.RFC3339)
+	if exitCode != nil {
+		code := *exitCode
+		operation.ExitCode = &code
+	}
+	operation.ErrorSummary = errorSummary
+	operation.Message = message
+}
+
+func (c *SkillsCommand) currentOperationSnapshot() *skillsOperationSnapshot {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return cloneSkillsOperation(c.operation)
+}
+
+func cloneSkillsOperation(operation *skillsOperationSnapshot) *skillsOperationSnapshot {
+	if operation == nil {
+		return nil
+	}
+	clone := *operation
+	clone.Skills = append([]string(nil), operation.Skills...)
+	if operation.ExitCode != nil {
+		code := *operation.ExitCode
+		clone.ExitCode = &code
+	}
+	return &clone
+}
+
+func skillsUpdateArgs(target skillsCommandTarget) []string {
 	args := []string{"update"}
 	if target.scope == "hub" {
 		args = append(args, "-g")
 	} else {
 		args = append(args, "-p")
 	}
-	args = append(args, "-y")
-	result := c.runSkills(ctx, target.dir, args...)
-	if skillsCommandFailed(result) {
-		return c.writeFailureResponse(payload, target, result), nil
+	return append(args, "-y")
+}
+
+func (c *SkillsCommand) projectUpdateRuns() ([]skillsOperationRun, *skillsCommandError) {
+	var runs []skillsOperationRun
+	for _, project := range c.projectSnapshot() {
+		if !project.Online {
+			continue
+		}
+		dir := strings.TrimSpace(project.Path)
+		if dir == "" {
+			return nil, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "project path is empty"}
+		}
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return nil, &skillsCommandError{Code: rp.CodeInternal, Message: err.Error()}
+		}
+		projectName := strings.TrimSpace(project.Name)
+		target := skillsCommandTarget{
+			scope:       "project",
+			projectName: projectName,
+			project:     project,
+			dir:         abs,
+		}
+		runs = append(runs, skillsOperationRun{
+			target:  target,
+			args:    skillsUpdateArgs(target),
+			message: "Updated skills.",
+		})
 	}
-	return c.writeSuccessResponse(ctx, payload, target, "Updated skills."), nil
+	return runs, nil
 }
 
 type skillsCommandTarget struct {
@@ -390,40 +557,6 @@ func (c *SkillsCommand) resolveTarget(payload skillsCommandPayload) (skillsComma
 		return skillsCommandTarget{}, &skillsCommandError{Code: rp.CodeInternal, Message: err.Error()}
 	}
 	return skillsCommandTarget{scope: "project", projectName: strings.TrimSpace(project.Name), project: project, dir: abs}, nil
-}
-
-func (c *SkillsCommand) writeFailureResponse(payload skillsCommandPayload, target skillsCommandTarget, result skillsCommandResult) skillsCommandResponse {
-	return skillsCommandResponse{
-		OK:           false,
-		HubID:        payload.HubID,
-		UpdatedAt:    c.now().Format(time.RFC3339),
-		Source:       payload.Source,
-		Scope:        target.scope,
-		ProjectName:  target.projectName,
-		ErrorSummary: skillsResultSummary(result),
-	}
-}
-
-func (c *SkillsCommand) writeSuccessResponse(ctx context.Context, payload skillsCommandPayload, target skillsCommandTarget, message string) skillsCommandResponse {
-	skills, errSummary := c.scanTargetSkills(ctx, target)
-	return skillsCommandResponse{
-		OK:           errSummary == "",
-		HubID:        payload.HubID,
-		UpdatedAt:    c.now().Format(time.RFC3339),
-		Source:       payload.Source,
-		Scope:        target.scope,
-		ProjectName:  target.projectName,
-		Skills:       skills,
-		Message:      message,
-		ErrorSummary: errSummary,
-	}
-}
-
-func (c *SkillsCommand) scanTargetSkills(ctx context.Context, target skillsCommandTarget) ([]skillsSkillSnapshot, string) {
-	if target.scope == "hub" {
-		return c.scanHubSkills(ctx)
-	}
-	return c.scanProjectSkills(ctx, target.project)
 }
 
 func (c *SkillsCommand) scanHubSkills(ctx context.Context) ([]skillsSkillSnapshot, string) {

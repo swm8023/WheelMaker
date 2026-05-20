@@ -302,8 +302,25 @@ export interface RegistrySkillSourceCandidate {
   categoryKey: string;
 }
 
+export interface RegistrySkillOperation {
+  running: boolean;
+  action: 'install' | 'uninstall' | 'update' | string;
+  scope?: RegistrySkillScope;
+  projectName?: string;
+  source?: string;
+  skills?: string[];
+  includeProjects?: boolean;
+  status: 'running' | 'succeeded' | 'failed' | string;
+  startedAt: string;
+  finishedAt?: string;
+  exitCode: number | null;
+  errorSummary?: string;
+  message?: string;
+}
+
 export interface RegistrySkillCommandResponse {
   ok: boolean;
+  accepted?: boolean;
   hubId: string;
   updatedAt?: string;
   source?: string;
@@ -313,6 +330,7 @@ export interface RegistrySkillCommandResponse {
   projects?: RegistrySkillProjectSnapshot[];
   skills?: RegistrySkillSnapshot[];
   candidates?: RegistrySkillSourceCandidate[];
+  operation?: RegistrySkillOperation | null;
   message?: string;
   errorSummary?: string;
 }
@@ -330,6 +348,7 @@ export interface RegistrySkillScopePayload {
   scope: RegistrySkillScope;
   projectName?: string;
   skills?: string[];
+  includeProjects?: boolean;
 }
 
 export interface RegistrySessionMessageEventPayload {
