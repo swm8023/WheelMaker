@@ -3410,6 +3410,16 @@ function App() {
   }, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, resizeChatComposerTextarea]);
 
   useEffect(() => {
+    if (tab !== 'chat') {
+      return;
+    }
+    if (chatKeyboardInset <= 0) {
+      return;
+    }
+    scrollChatToBottom();
+  }, [tab, chatKeyboardInset, scrollChatToBottom]);
+
+  useEffect(() => {
     gitSelectedBranchesRef.current = gitSelectedBranches;
   }, [gitSelectedBranches]);
 
