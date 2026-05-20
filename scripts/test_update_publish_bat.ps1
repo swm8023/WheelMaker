@@ -43,6 +43,8 @@ Assert-Contains -Label "update-publish.bat" -Text $bat -Needle "updater trigger 
 Assert-NotContains -Label "update-publish.bat" -Text $bat -Needle "deploy.bat"
 Assert-NotContains -Label "update-publish.bat" -Text $bat -Needle "refresh_server.ps1"
 Assert-NotContains -Label "update-publish.bat" -Text $bat -Needle "build:web:release"
+Assert-NotContains -Label "update-publish.bat" -Text $bat -Needle "publish_desktop.ps1"
+Assert-NotContains -Label "update-publish.bat" -Text $bat -Needle "publish-desktop.bat"
 
 Assert-Contains -Label "CLAUDE.md" -Text $claude -Needle $updatePublishProjectPhrase
 Assert-Contains -Label "CLAUDE.md" -Text $claude -Needle "update-publish.bat"

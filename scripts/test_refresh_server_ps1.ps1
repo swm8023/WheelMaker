@@ -38,6 +38,8 @@ Assert-Contains "Ensure-AcpDependencies"
 Assert-Contains "git stash push -u -m"
 Assert-Contains "wheelmaker deploy auto-stash before pull"
 Assert-NotContains "skip git pull and continue"
+Assert-NotContains "publish_desktop.ps1"
+Assert-NotContains "publish-desktop.bat"
 
 $pullIndex = $text.IndexOf("Pull-Latest", [StringComparison]::Ordinal)
 $appDepsIndex = $text.LastIndexOf("Ensure-AppDependencies", [StringComparison]::Ordinal)
