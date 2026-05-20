@@ -10,6 +10,11 @@ import {
   type CodeFontId,
   type CodeThemeId,
 } from './shikiRenderer';
+import {
+  DEFAULT_CHAT_FONT,
+  isChatFontId,
+  type ChatFontId,
+} from '../chat/chatTypography';
 
 export type PersistedTab = 'chat' | 'file' | 'git';
 export type PersistedThemeMode = 'dark' | 'light';
@@ -57,6 +62,7 @@ export type PersistedGlobalState = {
   codeFontSize: number;
   codeLineHeight: number;
   codeTabSize: number;
+  chatFont: ChatFontId;
   wrapLines: boolean;
   showLineNumbers: boolean;
   hideToolCalls: boolean;
@@ -126,6 +132,7 @@ const GLOBAL_KEYS = {
   codeFontSize: 'codeFontSize',
   codeLineHeight: 'codeLineHeight',
   codeTabSize: 'codeTabSize',
+  chatFont: 'chatFont',
   wrapLines: 'wrapLines',
   showLineNumbers: 'showLineNumbers',
   hideToolCalls: 'hideToolCalls',
@@ -154,6 +161,7 @@ function defaultGlobalState(): PersistedGlobalState {
     codeFontSize: DEFAULT_CODE_FONT_SIZE,
     codeLineHeight: DEFAULT_CODE_LINE_HEIGHT,
     codeTabSize: DEFAULT_CODE_TAB_SIZE,
+    chatFont: DEFAULT_CHAT_FONT,
     wrapLines: false,
     showLineNumbers: true,
     hideToolCalls: false,
@@ -359,6 +367,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     codeFontSize: typeof input.codeFontSize === 'number' && Number.isFinite(input.codeFontSize) ? input.codeFontSize : base.codeFontSize,
     codeLineHeight: typeof input.codeLineHeight === 'number' && Number.isFinite(input.codeLineHeight) ? input.codeLineHeight : base.codeLineHeight,
     codeTabSize: typeof input.codeTabSize === 'number' && Number.isFinite(input.codeTabSize) ? input.codeTabSize : base.codeTabSize,
+    chatFont: typeof input.chatFont === 'string' && isChatFontId(input.chatFont) ? input.chatFont : base.chatFont,
     wrapLines: typeof input.wrapLines === 'boolean' ? input.wrapLines : base.wrapLines,
     showLineNumbers: typeof input.showLineNumbers === 'boolean' ? input.showLineNumbers : base.showLineNumbers,
     hideToolCalls: typeof input.hideToolCalls === 'boolean' ? input.hideToolCalls : base.hideToolCalls,
@@ -822,6 +831,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.codeFontSize, v: serialize(this.state.global.codeFontSize), updatedAt: now},
       {k: GLOBAL_KEYS.codeLineHeight, v: serialize(this.state.global.codeLineHeight), updatedAt: now},
       {k: GLOBAL_KEYS.codeTabSize, v: serialize(this.state.global.codeTabSize), updatedAt: now},
+      {k: GLOBAL_KEYS.chatFont, v: serialize(this.state.global.chatFont), updatedAt: now},
       {k: GLOBAL_KEYS.wrapLines, v: serialize(this.state.global.wrapLines), updatedAt: now},
       {k: GLOBAL_KEYS.showLineNumbers, v: serialize(this.state.global.showLineNumbers), updatedAt: now},
       {k: GLOBAL_KEYS.hideToolCalls, v: serialize(this.state.global.hideToolCalls), updatedAt: now},
@@ -1165,6 +1175,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeFontSize, v: serialize(next.codeFontSize), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeLineHeight, v: serialize(next.codeLineHeight), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeTabSize, v: serialize(next.codeTabSize), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.chatFont, v: serialize(next.chatFont), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.wrapLines, v: serialize(next.wrapLines), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.showLineNumbers, v: serialize(next.showLineNumbers), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.hideToolCalls, v: serialize(next.hideToolCalls), updatedAt: now});

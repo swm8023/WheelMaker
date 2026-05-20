@@ -52,6 +52,13 @@ import {createChatReadRepairQueue} from './chat/chatReadRepair';
 import {buildChatDisplayIndex} from './chat/chatDisplayIndex';
 import {useChatLayoutMetrics} from './chat/chatLayoutMetrics';
 import {ChatVirtuosoTurnList, type ChatVirtuosoTurnListHandle} from './chat/ChatVirtuosoTurnList';
+import {
+  CHAT_FONT_OPTIONS,
+  DEFAULT_CHAT_FONT,
+  isChatFontId,
+  resolveChatFontFamily,
+  type ChatFontId,
+} from './chat/chatTypography';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
 import {RegistryDebugPanel} from './debug/RegistryDebugPanel';
 import {createRegistryDebugStore} from './debug/registryDebug';
@@ -2226,6 +2233,12 @@ function App() {
   const [codeTabSize, setCodeTabSize] = useState<number>(
     clampCodeTabSize(Number(persistedGlobal.codeTabSize)),
   );
+  const [chatFont, setChatFont] = useState<ChatFontId>(
+    typeof persistedGlobal.chatFont === 'string' &&
+      isChatFontId(persistedGlobal.chatFont)
+      ? persistedGlobal.chatFont
+      : DEFAULT_CHAT_FONT,
+  );
   const [wrapLines, setWrapLines] = useState(!!persistedGlobal.wrapLines);
   const [showLineNumbers, setShowLineNumbers] = useState(
     typeof persistedGlobal.showLineNumbers === 'boolean'
@@ -2265,6 +2278,10 @@ function App() {
   const codeFontFamily = useMemo(
     () => resolveCodeFontFamily(codeFont),
     [codeFont],
+  );
+  const chatFontFamily = useMemo(
+    () => resolveChatFontFamily(chatFont),
+    [chatFont],
   );
   const setiFontCss = useMemo(() => setiFontFaceCss(), []);
   const resolveFileIcon = (name: string) => resolveSetiIcon(name, themeMode);
@@ -2854,6 +2871,14 @@ function App() {
     setChatShowScrollToBottom(false);
     scrollChatToBottom(true);
   }, [scrollChatToBottom, setVisibleChatMessagesForRuntimeKey]);
+
+  const chatMainStyle = useMemo(
+    () => ({
+      '--chat-message-font-family': chatFontFamily,
+      ...(chatKeyboardInset > 0 ? { paddingBottom: `${chatKeyboardInset}px` } : {}),
+    }) as React.CSSProperties,
+    [chatFontFamily, chatKeyboardInset],
+  );
 
   useEffect(() => {
     if (!chatSlashMenuVisible) {
@@ -3777,6 +3802,7 @@ function App() {
       codeFontSize,
       codeLineHeight,
       codeTabSize,
+      chatFont,
       wrapLines,
       showLineNumbers,
       hideToolCalls,
@@ -3799,6 +3825,7 @@ function App() {
     codeFontSize,
     codeLineHeight,
     codeTabSize,
+    chatFont,
     wrapLines,
     showLineNumbers,
     hideToolCalls,
@@ -8810,6 +8837,23 @@ function App() {
             onChange={e => setHideToolCalls(e.target.checked)}
           />
         </label>
+        <label className="settings-row sidebar-setting-row">
+          <span>Chat Font</span>
+          <select
+            className="sidebar-setting-select"
+            value={chatFont}
+            onChange={event => {
+              const next = event.target.value;
+              if (isChatFontId(next)) setChatFont(next);
+            }}
+          >
+            {CHAT_FONT_OPTIONS.map(item => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
         </>
         ))}
         {renderSettingsSection('Code Display', (
@@ -10210,7 +10254,7 @@ function App() {
           </div>
           <div
             className="chat-main"
-            style={chatKeyboardInset > 0 ? { paddingBottom: `${chatKeyboardInset}px` } : undefined}
+            style={chatMainStyle}
           >
             <div
               ref={chatScrollRef}

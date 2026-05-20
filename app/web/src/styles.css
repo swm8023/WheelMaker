@@ -4419,8 +4419,10 @@ body,
   line-height: 1.4;
 }
 .chat-main-message {
+  font-family: var(--chat-message-font-family, 'IBM Plex Sans', 'Noto Sans', sans-serif);
   line-height: 1.55;
   font-size: 14px;
+  font-weight: 400;
   color: var(--text);
   white-space: normal;
   word-break: break-word;
