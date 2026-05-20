@@ -38,4 +38,12 @@ describe('web registry debug settings', () => {
     expect(mainTsx).toContain('setRegistryDebugPanelOpen(true)');
     expect(mainTsx).not.toContain('registryDebugRecordsJson');
   });
+
+  test('places the debug settings section at the bottom of settings', () => {
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    const debugSectionIndex = mainTsx.indexOf("renderSettingsSection('Debug'");
+    const moreSectionIndex = mainTsx.indexOf("renderSettingsSection('More'");
+    expect(debugSectionIndex).toBeGreaterThan(moreSectionIndex);
+  });
 });

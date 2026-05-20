@@ -8812,29 +8812,6 @@ function App() {
         </label>
         </>
         ))}
-        {renderSettingsSection('Debug', (
-        <>
-        <label className="settings-row sidebar-setting-row">
-          <span>Debug</span>
-          <input
-            type="checkbox"
-            checked={registryDebug}
-            onChange={event => setRegistryDebug(event.target.checked)}
-          />
-        </label>
-        <button
-          type="button"
-          className="settings-row settings-detail-row"
-          disabled={!registryDebug}
-          onClick={() => {
-            setRegistryDebugPanelOpen(true);
-          }}
-        >
-          <span>Open</span>
-          <span className="codicon codicon-debug-alt" />
-        </button>
-        </>
-        ))}
         {renderSettingsSection('Code Display', (
         <>
         <label className="settings-row sidebar-setting-row">
@@ -8988,6 +8965,29 @@ function App() {
         >
           <span>Clear Local Cache</span>
           <span className="codicon codicon-trash" />
+        </button>
+        </>
+        ))}
+        {renderSettingsSection('Debug', (
+        <>
+        <label className="settings-row sidebar-setting-row">
+          <span>Debug</span>
+          <input
+            type="checkbox"
+            checked={registryDebug}
+            onChange={event => setRegistryDebug(event.target.checked)}
+          />
+        </label>
+        <button
+          type="button"
+          className="settings-row settings-detail-row"
+          disabled={!registryDebug}
+          onClick={() => {
+            setRegistryDebugPanelOpen(true);
+          }}
+        >
+          <span>Open</span>
+          <span className="codicon codicon-debug-alt" />
         </button>
         </>
         ))}
