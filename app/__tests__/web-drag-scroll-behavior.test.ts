@@ -133,10 +133,10 @@ describe('web drag scroll behavior', () => {
 
     expect(resolveChatScrollBottomTop({scrollHeight: 1200, clientHeight: 500})).toBe(700);
     expect(resolveChatScrollBottomTop({scrollHeight: 300, clientHeight: 500})).toBe(0);
-    expect(mainTsx).toContain('const CHAT_HISTORY_BOTTOM_BUFFER = 28;');
-    expect(mainTsx).toContain('bottomBuffer={CHAT_HISTORY_BOTTOM_BUFFER}');
+    expect(mainTsx).not.toContain('CHAT_HISTORY_BOTTOM_BUFFER');
+    expect(mainTsx).not.toContain('bottomBuffer={CHAT_HISTORY_BOTTOM_BUFFER}');
     expect(virtualList).toContain('const scrollToLastDisplayItem = React.useCallback(');
-    expect(virtualList).toContain('offset: virtuosoContext.bottomBuffer,');
+    expect(virtualList).not.toContain('offset: virtuosoContext.bottomBuffer,');
     expect(virtualList).toContain('const requestScrollToLastDisplayItem = React.useCallback(');
     expect(virtualList).toContain("window.requestAnimationFrame(() => scrollToLastDisplayItem('auto'));");
     expect(virtualList).toContain('onAtBottomChange?.(true);');

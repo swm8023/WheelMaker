@@ -41,7 +41,7 @@ describe('web chat turn rendering', () => {
     expect(virtualList).toContain('const scrollToLastDisplayItem = React.useCallback(');
     expect(virtualList).toContain("index: 'LAST',");
     expect(virtualList).toContain("align: 'end',");
-    expect(virtualList).toContain('offset: virtuosoContext.bottomBuffer,');
+    expect(virtualList).not.toContain('offset: virtuosoContext.bottomBuffer,');
     expect(virtualList).toContain('virtuosoRef.current?.autoscrollToBottom();');
     expect(virtualList).toContain('components={ChatVirtuosoComponents}');
     expect(virtualList).toContain('context={virtuosoContext}');

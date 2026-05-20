@@ -188,18 +188,18 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('respondToChatPermission');
     expect(mainTsx).not.toContain("const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);");
     expect(stylesCss).toContain('.chat-composer');
-    expect(stylesCss).toContain('.chat-composer::before {');
-    expect(stylesCss).toContain('--chat-history-bottom-buffer: 28px;');
+    expect(stylesCss).not.toContain('.chat-composer::before {');
+    expect(stylesCss).not.toContain('--chat-history-bottom-buffer');
     expect(stylesCss).toMatch(
-      /\.chat-block \{[\s\S]*overflow-y: scroll;[\s\S]*scrollbar-gutter: stable;[\s\S]*padding: 18px 18px 0;[\s\S]*\}/,
+      /\.chat-main \{[\s\S]*display: flex;[\s\S]*flex-direction: column;[\s\S]*gap: 5px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-virtuoso-footer {');
     expect(stylesCss).toMatch(
-      /\.chat-composer \{[\s\S]*--chat-composer-frame-top: 12px;[\s\S]*--chat-composer-fade-distance: 28px;[\s\S]*margin-top: calc\(-1 \* var\(--chat-composer-frame-top\)\);[\s\S]*padding: var\(--chat-composer-frame-top\) 14px 12px;[\s\S]*background: transparent;/,
+      /\.chat-composer \{[\s\S]*position: relative;[\s\S]*z-index: 1;[\s\S]*padding: 0 14px 12px;[\s\S]*background: transparent;/,
     );
-    expect(stylesCss).toMatch(
-      /\.chat-composer::before \{[\s\S]*top: calc\(var\(--chat-composer-frame-top\) - var\(--chat-composer-fade-distance\)\);[\s\S]*height: var\(--chat-composer-fade-distance\);[\s\S]*transparent 0%,[\s\S]*color-mix\(in srgb, var\(--bg\) 22%, transparent\) 34%,[\s\S]*color-mix\(in srgb, var\(--bg\) 78%, transparent\) 76%,[\s\S]*var\(--bg\) 100%/,
-    );
+    expect(stylesCss).not.toContain('--chat-composer-frame-top');
+    expect(stylesCss).not.toContain('--chat-composer-fade-distance');
+    expect(stylesCss).not.toContain('margin-top: calc(-1 * var(--chat-composer-frame-top));');
     expect(stylesCss).not.toContain('transform: translateY(calc(-100% + 4px));');
     expect(stylesCss).not.toContain('.chat-session-item');
     expect(stylesCss).not.toContain('.chat-session-swipe-row');
@@ -637,11 +637,11 @@ describe('web chat integration', () => {
       /button,\s*\[role='button'\],\s*\[role='menuitemradio'\],\s*\[role='option'\]\s*\{[\s\S]*-webkit-tap-highlight-color: transparent;/,
     );
     expect(stylesCss).toMatch(
-      /\.chat-composer \{[\s\S]*--chat-composer-frame-top: 12px;[\s\S]*--chat-composer-fade-distance: 28px;[\s\S]*background: transparent;/,
+      /\.chat-composer \{[\s\S]*padding: 0 14px 12px;[\s\S]*background: transparent;/,
     );
-    expect(stylesCss).toMatch(
-      /\.chat-composer::before \{[\s\S]*top: calc\(var\(--chat-composer-frame-top\) - var\(--chat-composer-fade-distance\)\);[\s\S]*height: var\(--chat-composer-fade-distance\);/,
-    );
+    expect(stylesCss).not.toContain('.chat-composer::before {');
+    expect(stylesCss).not.toContain('--chat-composer-frame-top');
+    expect(stylesCss).not.toContain('--chat-composer-fade-distance');
     expect(stylesCss).toContain('.chat-composer-frame {');
     expect(stylesCss).toMatch(
       /\.chat-composer-frame \{[\s\S]*gap: 0;[\s\S]*padding: 5px 6px 3px;[\s\S]*\}/,

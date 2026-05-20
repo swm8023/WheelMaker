@@ -3,7 +3,7 @@ import {Virtuoso, type Components, type VirtuosoHandle} from 'react-virtuoso';
 import type {ChatDisplayIndex, ChatDisplayIndexItem} from './chatDisplayIndex';
 
 const DEFAULT_AT_BOTTOM_THRESHOLD = 80;
-const DEFAULT_BOTTOM_BUFFER = 12;
+const DEFAULT_BOTTOM_BUFFER = 0;
 
 type ChatVirtuosoScrollBehavior = 'auto' | 'smooth';
 
@@ -164,9 +164,9 @@ export const ChatVirtuosoTurnList = React.forwardRef<
   );
   const initialTopMostItemIndex = React.useMemo(
     () => displayIndex.items.length > 0
-      ? {index: 'LAST' as const, align: 'end' as const, offset: virtuosoContext.bottomBuffer}
+      ? {index: 'LAST' as const, align: 'end' as const}
       : 0,
-    [displayIndex.items.length, virtuosoContext.bottomBuffer],
+    [displayIndex.items.length],
   );
 
   const shouldAutoscrollNow = React.useCallback(
@@ -189,7 +189,6 @@ export const ChatVirtuosoTurnList = React.forwardRef<
       virtuosoRef.current?.scrollToIndex({
         index: 'LAST',
         align: 'end',
-        offset: virtuosoContext.bottomBuffer,
         behavior,
       });
       onAtBottomChange?.(true);
