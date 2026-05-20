@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,8 @@ var (
 	skillNamePattern       = regexp.MustCompile(`^[@A-Za-z0-9][@A-Za-z0-9_.:-]*$`)
 	ansiEscapePattern      = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 )
+
+var fixedSkillAgents = []string{"codex", "claude-code", "opencode", "github-copilot"}
 
 type skillsCommandCall struct {
 	Dir  string
@@ -325,13 +328,7 @@ func (c *SkillsCommand) startInstall(payload skillsCommandPayload) (any, *skills
 	if cmdErr != nil {
 		return nil, cmdErr
 	}
-	args := []string{"add", payload.Source}
-	if target.scope == "hub" {
-		args = append(args, "-g")
-	}
-	args = append(args, "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill")
-	args = append(args, payload.Skills...)
-	args = append(args, "-y")
+	args := skillsAddArgs(target, payload.Source, payload.Skills)
 	return c.startOperation(payload, []skillsOperationRun{{
 		target:             target,
 		args:               args,
@@ -370,18 +367,17 @@ func (c *SkillsCommand) startUpdate(payload skillsCommandPayload) (any, *skillsC
 	if cmdErr != nil {
 		return nil, cmdErr
 	}
-	runs := []skillsOperationRun{{
-		target:  target,
-		args:    skillsUpdateArgs(target),
-		message: "Updated skills.",
-	}}
+	runs, err := c.updateRuns(target)
+	if err != nil {
+		return nil, err
+	}
 	if payload.IncludeProjects {
 		if target.scope != "hub" {
 			return nil, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "includeProjects requires hub scope"}
 		}
-		projectRuns, err := c.projectUpdateRuns()
-		if err != nil {
-			return nil, err
+		projectRuns, projectErr := c.projectUpdateRuns()
+		if projectErr != nil {
+			return nil, projectErr
 		}
 		runs = append(runs, projectRuns...)
 	}
@@ -498,12 +494,17 @@ func cloneSkillsOperation(operation *skillsOperationSnapshot) *skillsOperationSn
 	return &clone
 }
 
-func skillsUpdateArgs(target skillsCommandTarget) []string {
-	args := []string{"update"}
+func skillsAddArgs(target skillsCommandTarget, source string, skills []string) []string {
+	args := []string{"add", source}
 	if target.scope == "hub" {
 		args = append(args, "-g")
-	} else {
-		args = append(args, "-p")
+	}
+	args = append(args, "--agent")
+	args = append(args, fixedSkillAgents...)
+	args = append(args, "--skill")
+	args = append(args, skills...)
+	if target.scope == "project" {
+		args = append(args, "--copy")
 	}
 	return append(args, "-y")
 }
@@ -529,13 +530,46 @@ func (c *SkillsCommand) projectUpdateRuns() ([]skillsOperationRun, *skillsComman
 			project:     project,
 			dir:         abs,
 		}
+		projectRuns, cmdErr := c.updateRuns(target)
+		if cmdErr != nil {
+			return nil, cmdErr
+		}
+		runs = append(runs, projectRuns...)
+	}
+	return runs, nil
+}
+
+func (c *SkillsCommand) updateRuns(target skillsCommandTarget) ([]skillsOperationRun, *skillsCommandError) {
+	lockPath := c.skillsLockFile(target)
+	groups := readSkillsLockInstallGroups(lockPath)
+	if len(groups) == 0 {
+		return []skillsOperationRun{{
+			target:             target,
+			args:               fallbackSkillsUpdateArgs(target),
+			message:            "Updated skills.",
+			prepareInstallDirs: target.scope == "hub",
+		}}, nil
+	}
+	runs := make([]skillsOperationRun, 0, len(groups))
+	for _, group := range groups {
 		runs = append(runs, skillsOperationRun{
-			target:  target,
-			args:    skillsUpdateArgs(target),
-			message: "Updated skills.",
+			target:             target,
+			args:               skillsAddArgs(target, group.Source, group.Skills),
+			message:            "Updated skills.",
+			prepareInstallDirs: target.scope == "hub",
 		})
 	}
 	return runs, nil
+}
+
+func fallbackSkillsUpdateArgs(target skillsCommandTarget) []string {
+	args := []string{"update"}
+	if target.scope == "hub" {
+		args = append(args, "-g")
+	} else {
+		args = append(args, "-p")
+	}
+	return append(args, "-y")
 }
 
 func (c *SkillsCommand) prepareSkillsInstallDirs(target skillsCommandTarget) error {
@@ -584,6 +618,16 @@ func (c *SkillsCommand) skillsInstallDirs(target skillsCommandTarget) ([]string,
 	default:
 		return nil, fmt.Errorf("unsupported skills scope: %s", target.scope)
 	}
+}
+
+func (c *SkillsCommand) skillsLockFile(target skillsCommandTarget) string {
+	if target.scope == "hub" {
+		return c.globalLockFile()
+	}
+	if strings.TrimSpace(target.dir) == "" {
+		return ""
+	}
+	return filepath.Join(target.dir, "skills-lock.json")
 }
 
 func (c *SkillsCommand) skillsHomeDir() (string, error) {
@@ -776,6 +820,75 @@ func readSkillsLockPluginNames(path string) map[string]string {
 		}
 	}
 	return out
+}
+
+type skillsLockInstallGroup struct {
+	Source string
+	Skills []string
+}
+
+func readSkillsLockInstallGroups(path string) []skillsLockInstallGroup {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var body struct {
+		Skills map[string]struct {
+			Source     string `json:"source"`
+			SourceURL  string `json:"sourceUrl"`
+			SourceType string `json:"sourceType"`
+			Ref        string `json:"ref"`
+		} `json:"skills"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(body.Skills))
+	for name := range body.Skills {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	grouped := map[string][]string{}
+	var sources []string
+	for _, name := range names {
+		skillName := strings.TrimSpace(name)
+		if skillName == "" {
+			continue
+		}
+		entry := body.Skills[name]
+		sourceType := strings.ToLower(strings.TrimSpace(entry.SourceType))
+		if sourceType == "local" || sourceType == "node_modules" {
+			continue
+		}
+		source := strings.TrimSpace(entry.Source)
+		if source == "" {
+			source = strings.TrimSpace(entry.SourceURL)
+		}
+		if source == "" {
+			continue
+		}
+		if ref := strings.TrimSpace(entry.Ref); ref != "" {
+			source += "#" + ref
+		}
+		if _, ok := grouped[source]; !ok {
+			sources = append(sources, source)
+		}
+		grouped[source] = append(grouped[source], skillName)
+	}
+	sort.Strings(sources)
+
+	groups := make([]skillsLockInstallGroup, 0, len(sources))
+	for _, source := range sources {
+		groups = append(groups, skillsLockInstallGroup{
+			Source: source,
+			Skills: grouped[source],
+		})
+	}
+	return groups
 }
 
 func parseSkillsSourceCandidates(raw string) []skillsSourceCandidate {

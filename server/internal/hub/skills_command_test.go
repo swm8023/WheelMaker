@@ -196,7 +196,7 @@ Mattpocock Skills
 	}
 }
 
-func TestSkillsCommandInstallUsesFixedAgentsAndSymlinkInstall(t *testing.T) {
+func TestSkillsCommandInstallUsesGlobalSymlinkAndProjectCopy(t *testing.T) {
 	baseDir := t.TempDir()
 	homeRoot := filepath.Join(baseDir, "home")
 	projectRoot := filepath.Join(baseDir, "project")
@@ -233,8 +233,8 @@ func TestSkillsCommandInstallUsesFixedAgentsAndSymlinkInstall(t *testing.T) {
 	if operation := waitForSkillsOperationDone(t, cmd); operation.Status != "succeeded" {
 		t.Fatalf("operation=%#v, want succeeded", operation)
 	}
-	if runner.hasCall("", "skills", "add", "mattpocock/skills", "-g", "--copy") {
-		t.Fatalf("install should not request copy mode: %#v", runner.calls)
+	if runner.hasCall("", "skills", "add", "mattpocock/skills", "-g", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "tdd", "--copy", "-y") {
+		t.Fatalf("global install should not request copy mode: %#v", runner.calls)
 	}
 
 	_, cmdErr = cmd.Handle(context.Background(), rawSkillsCommandPayload(t, map[string]any{
@@ -248,7 +248,7 @@ func TestSkillsCommandInstallUsesFixedAgentsAndSymlinkInstall(t *testing.T) {
 	if cmdErr != nil {
 		t.Fatalf("project install error: %#v", cmdErr)
 	}
-	waitForSkillsCall(t, runner, projectRoot, "skills", "add", "mattpocock/skills", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "diagnose", "-y")
+	waitForSkillsCall(t, runner, projectRoot, "skills", "add", "mattpocock/skills", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "diagnose", "--copy", "-y")
 	assertDirExists(t, filepath.Join(projectRoot, ".agents", "skills"))
 	assertDirExists(t, filepath.Join(projectRoot, ".claude", "skills"))
 }
@@ -271,13 +271,24 @@ func TestSkillsCommandUninstallRemovesAllLinkedAgents(t *testing.T) {
 }
 
 func TestSkillsCommandUpdateUsesHubAndProjectScopes(t *testing.T) {
-	projectRoot := t.TempDir()
+	baseDir := t.TempDir()
+	homeRoot := filepath.Join(baseDir, "home")
+	projectRoot := filepath.Join(baseDir, "project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	globalLock := filepath.Join(baseDir, "global-lock.json")
+	writeSkillsLockSourcesForTest(t, globalLock, map[string]string{"tdd": "mattpocock/skills"})
+	writeSkillsLockSourcesForTest(t, filepath.Join(projectRoot, "skills-lock.json"), map[string]string{"diagnose": "mattpocock/skills"})
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(homeRoot, ".claude"))
 	runner := newFakeSkillsRunner()
 	runner.set("", "skills", []string{"list", "-g", "--json"}, skillsCommandResult{Stdout: "[]", ExitCode: 0})
 	runner.set(projectRoot, "skills", []string{"list", "--json"}, skillsCommandResult{Stdout: "[]", ExitCode: 0})
 	cmd := newSkillsCommandWithRunner(runner, skillsCommandConfig{
-		HubID:    "hub-a",
-		Projects: []ProjectInfo{{Name: "WheelMaker", Path: projectRoot, Online: true}},
+		HubID:          "hub-a",
+		HomeDir:        homeRoot,
+		GlobalLockPath: globalLock,
+		Projects:       []ProjectInfo{{Name: "WheelMaker", Path: projectRoot, Online: true}},
 	})
 
 	_, cmdErr := cmd.Handle(context.Background(), rawSkillsCommandPayload(t, map[string]any{
@@ -288,7 +299,9 @@ func TestSkillsCommandUpdateUsesHubAndProjectScopes(t *testing.T) {
 	if cmdErr != nil {
 		t.Fatalf("hub update error: %#v", cmdErr)
 	}
-	waitForSkillsCall(t, runner, "", "skills", "update", "-g", "-y")
+	waitForSkillsCall(t, runner, "", "skills", "add", "mattpocock/skills", "-g", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "tdd", "-y")
+	assertDirExists(t, filepath.Join(homeRoot, ".agents", "skills"))
+	assertDirExists(t, filepath.Join(homeRoot, ".claude", "skills"))
 	waitForSkillsOperationDone(t, cmd)
 	_, cmdErr = cmd.Handle(context.Background(), rawSkillsCommandPayload(t, map[string]any{
 		"action":      "update",
@@ -299,7 +312,7 @@ func TestSkillsCommandUpdateUsesHubAndProjectScopes(t *testing.T) {
 	if cmdErr != nil {
 		t.Fatalf("project update error: %#v", cmdErr)
 	}
-	waitForSkillsCall(t, runner, projectRoot, "skills", "update", "-p", "-y")
+	waitForSkillsCall(t, runner, projectRoot, "skills", "add", "mattpocock/skills", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "diagnose", "--copy", "-y")
 }
 
 func TestSkillsCommandWriteActionsReturnAcceptedOperation(t *testing.T) {
@@ -355,10 +368,19 @@ func TestSkillsCommandRejectsConcurrentWriteOperations(t *testing.T) {
 }
 
 func TestSkillsCommandUpdateCanIncludeOnlineProjectsInOneOperation(t *testing.T) {
-	projectRoot := t.TempDir()
+	baseDir := t.TempDir()
+	projectRoot := filepath.Join(baseDir, "project")
+	globalLock := filepath.Join(baseDir, "global-lock.json")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	writeSkillsLockSourcesForTest(t, globalLock, map[string]string{"tdd": "mattpocock/skills"})
+	writeSkillsLockSourcesForTest(t, filepath.Join(projectRoot, "skills-lock.json"), map[string]string{"diagnose": "mattpocock/skills"})
 	runner := newFakeSkillsRunner()
 	cmd := newSkillsCommandWithRunner(runner, skillsCommandConfig{
-		HubID: "hub-a",
+		HubID:          "hub-a",
+		HomeDir:        filepath.Join(baseDir, "home"),
+		GlobalLockPath: globalLock,
 		Projects: []ProjectInfo{
 			{Name: "WheelMaker", Path: projectRoot, Online: true},
 			{Name: "Offline", Path: t.TempDir(), Online: false},
@@ -378,8 +400,8 @@ func TestSkillsCommandUpdateCanIncludeOnlineProjectsInOneOperation(t *testing.T)
 	if !body.OK || !body.Accepted || body.Operation == nil || !body.Operation.IncludeProjects {
 		t.Fatalf("response=%#v, want accepted includeProjects operation", body)
 	}
-	waitForSkillsCall(t, runner, "", "skills", "update", "-g", "-y")
-	waitForSkillsCall(t, runner, projectRoot, "skills", "update", "-p", "-y")
+	waitForSkillsCall(t, runner, "", "skills", "add", "mattpocock/skills", "-g", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "tdd", "-y")
+	waitForSkillsCall(t, runner, projectRoot, "skills", "add", "mattpocock/skills", "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill", "diagnose", "--copy", "-y")
 	operation := waitForSkillsOperationDone(t, cmd)
 	if operation.Status != "succeeded" || !strings.Contains(operation.Message, "Updated skills") {
 		t.Fatalf("operation=%#v, want succeeded update operation", operation)
@@ -468,6 +490,31 @@ func writeSkillsLockForTest(t *testing.T, path string, plugins map[string]string
 	}
 	for name, pluginName := range plugins {
 		body.Skills[name] = lockSkill{PluginName: pluginName}
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal lock: %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+}
+
+func writeSkillsLockSourcesForTest(t *testing.T, path string, sources map[string]string) {
+	t.Helper()
+	type lockSkill struct {
+		Source     string `json:"source"`
+		SourceType string `json:"sourceType"`
+	}
+	body := struct {
+		Version int                  `json:"version"`
+		Skills  map[string]lockSkill `json:"skills"`
+	}{
+		Version: 1,
+		Skills:  map[string]lockSkill{},
+	}
+	for name, source := range sources {
+		body.Skills[name] = lockSkill{Source: source, SourceType: "github"}
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
