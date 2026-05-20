@@ -149,12 +149,14 @@ describe('web chat turn rendering', () => {
     expect(main).not.toContain('updateSelectedChatWindowFromScroll(event.currentTarget, direction);');
   });
 
-  test('settles chat bottom after the mobile keyboard inset changes', () => {
+  test('settles chat bottom after the mobile keyboard inset changes without fighting keyboard close animation', () => {
     const main = readMain();
 
-    expect(main).toContain(
-      "useEffect(() => {\n    if (tab !== 'chat') {\n      return;\n    }\n    scrollChatToBottom();\n  }, [tab, chatKeyboardInset, scrollChatToBottom]);",
-    );
+    expect(main).toContain('const keyboardInsetScrollAction = resolveChatKeyboardInsetScrollAction({');
+    expect(main).toContain("if (keyboardInsetScrollAction === 'immediate') {");
+    expect(main).toContain("if (keyboardInsetScrollAction === 'deferred') {");
+    expect(main).toContain('chatKeyboardInsetSettleTimerRef.current = window.setTimeout(() => {');
+    expect(main).toContain('}, CHAT_KEYBOARD_INSET_SETTLE_DELAY_MS);');
   });
 
   test('resets follow-bottom intent only for explicit latest-window resets', () => {

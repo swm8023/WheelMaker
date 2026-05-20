@@ -20,6 +20,24 @@ export function shouldAutoScrollChatToBottom(input: {
   return input.force || (input.followsLatest && !input.pointerScrolling && !input.userScrollLocked);
 }
 
+export type ChatKeyboardInsetScrollAction = 'none' | 'immediate' | 'deferred';
+
+function normalizeChatKeyboardInset(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+}
+
+export function resolveChatKeyboardInsetScrollAction(input: {
+  previousInset: number;
+  nextInset: number;
+}): ChatKeyboardInsetScrollAction {
+  const previousInset = normalizeChatKeyboardInset(input.previousInset);
+  const nextInset = normalizeChatKeyboardInset(input.nextInset);
+  if (nextInset === previousInset) {
+    return 'none';
+  }
+  return nextInset > previousInset ? 'immediate' : 'deferred';
+}
+
 export type ChatScrollToBottomVisibility = {
   atBottom: boolean;
   showScrollToBottom: boolean;

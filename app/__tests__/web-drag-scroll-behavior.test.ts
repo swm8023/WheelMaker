@@ -4,6 +4,7 @@ import {
   CHAT_USER_SCROLL_LOCK_MS,
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
+  resolveChatKeyboardInsetScrollAction,
   resolveChatSessionReadWindowUpdate,
   resolveChatScrollBottomTop,
   resolveChatScrollToBottomVisibility,
@@ -121,6 +122,23 @@ describe('web drag scroll behavior', () => {
     expect(mainTsx).toContain('const handleChatScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {');
     expect(mainTsx).toContain('resolveChatScrollToBottomVisibility({');
     expect(mainTsx).toContain('onScroll={handleChatScroll}');
+  });
+
+  test('defers chat bottom settling while the mobile keyboard inset is shrinking', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    expect(resolveChatKeyboardInsetScrollAction({previousInset: 0, nextInset: 180})).toBe('immediate');
+    expect(resolveChatKeyboardInsetScrollAction({previousInset: 180, nextInset: 120})).toBe('deferred');
+    expect(resolveChatKeyboardInsetScrollAction({previousInset: 120, nextInset: 0})).toBe('deferred');
+    expect(resolveChatKeyboardInsetScrollAction({previousInset: 80, nextInset: 80})).toBe('none');
+    expect(mainTsx).toContain('const CHAT_KEYBOARD_INSET_SETTLE_DELAY_MS = 120;');
+    expect(mainTsx).toContain('const chatKeyboardInsetRef = useRef(chatKeyboardInset);');
+    expect(mainTsx).toContain('const chatKeyboardInsetSettleTimerRef = useRef<number | null>(null);');
+    expect(mainTsx).toContain('resolveChatKeyboardInsetScrollAction({');
+    expect(mainTsx).toContain("if (keyboardInsetScrollAction === 'immediate') {");
+    expect(mainTsx).toContain("if (keyboardInsetScrollAction === 'deferred') {");
+    expect(mainTsx).toContain('CHAT_KEYBOARD_INSET_SETTLE_DELAY_MS');
   });
 
   test('settles programmatic chat bottom scrolling against the actual scroll parent', () => {

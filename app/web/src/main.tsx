@@ -68,6 +68,7 @@ import { insertChatSlashCommandText } from './chat/chatSlashInsertion';
 import {
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
+  resolveChatKeyboardInsetScrollAction,
   resolveChatSessionReadWindowUpdate,
   resolveChatScrollToBottomVisibility,
   shouldAutoScrollChatToBottom,
@@ -399,6 +400,7 @@ const RECONNECT_GRACE_PERIOD_MS = 30_000;
 const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
 const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
+const CHAT_KEYBOARD_INSET_SETTLE_DELAY_MS = 120;
 const CHAT_PENDING_CONFIRM_TIMEOUT_MS = 5000;
 const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
@@ -2324,6 +2326,8 @@ function App() {
   const sidebarSettingsOpen = workspaceUiState.shared.settingsOpen;
   const chatConfigOverflowOpen = workspaceUiState.mobile.chatConfigOverflowOpen;
   const chatKeyboardInset = workspaceUiState.transient.chatKeyboardInset;
+  const chatKeyboardInsetRef = useRef(chatKeyboardInset);
+  const chatKeyboardInsetSettleTimerRef = useRef<number | null>(null);
   const tabRef = useRef<Tab>(tab);
   const floatingDragStateRef = useRef<FloatingDragState | null>(null);
   const [gestureNavState, setGestureNavState] = useState<GestureNavigationState | null>(null);
@@ -3407,13 +3411,42 @@ function App() {
       return;
     }
     resizeChatComposerTextarea();
-  }, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, resizeChatComposerTextarea]);
+  }, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, resizeChatComposerTextarea]);
 
   useEffect(() => {
     if (tab !== 'chat') {
+      chatKeyboardInsetRef.current = chatKeyboardInset;
+      if (chatKeyboardInsetSettleTimerRef.current !== null) {
+        window.clearTimeout(chatKeyboardInsetSettleTimerRef.current);
+        chatKeyboardInsetSettleTimerRef.current = null;
+      }
       return;
     }
-    scrollChatToBottom();
+    const keyboardInsetScrollAction = resolveChatKeyboardInsetScrollAction({
+      previousInset: chatKeyboardInsetRef.current,
+      nextInset: chatKeyboardInset,
+    });
+    chatKeyboardInsetRef.current = chatKeyboardInset;
+    if (chatKeyboardInsetSettleTimerRef.current !== null) {
+      window.clearTimeout(chatKeyboardInsetSettleTimerRef.current);
+      chatKeyboardInsetSettleTimerRef.current = null;
+    }
+    if (keyboardInsetScrollAction === 'immediate') {
+      scrollChatToBottom();
+      return;
+    }
+    if (keyboardInsetScrollAction === 'deferred') {
+      chatKeyboardInsetSettleTimerRef.current = window.setTimeout(() => {
+        chatKeyboardInsetSettleTimerRef.current = null;
+        scrollChatToBottom();
+      }, CHAT_KEYBOARD_INSET_SETTLE_DELAY_MS);
+    }
+    return () => {
+      if (chatKeyboardInsetSettleTimerRef.current !== null) {
+        window.clearTimeout(chatKeyboardInsetSettleTimerRef.current);
+        chatKeyboardInsetSettleTimerRef.current = null;
+      }
+    };
   }, [tab, chatKeyboardInset, scrollChatToBottom]);
 
   useEffect(() => {

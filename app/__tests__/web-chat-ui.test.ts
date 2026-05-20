@@ -134,7 +134,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('}, [resizeChatComposerTextarea, chatComposerText, tab, selectedChatId, currentChatDraftKey]);');
     expect(mainTsx).not.toContain('const chatBottomFollowAction = resolveChatBottomFollowAction({');
     expect(mainTsx).not.toContain("if (chatBottomFollowAction === 'scrollToBottom') {");
-    expect(mainTsx).toContain('}, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, resizeChatComposerTextarea]);');
+    expect(mainTsx).toContain('}, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, resizeChatComposerTextarea]);');
+    expect(mainTsx).not.toContain('chatLoading, chatKeyboardInset, resizeChatComposerTextarea');
     expect(mainTsx).toContain('onScroll={handleChatScroll}');
     expect(mainTsx).toContain('onWheel={event => { if (event.deltaY < 0) { markChatUserScrollIntent(); } }}');
     expect(mainTsx).toContain('<ChatVirtuosoTurnList');
