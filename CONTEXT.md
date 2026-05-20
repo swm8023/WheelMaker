@@ -148,6 +148,58 @@ _Avoid_: Missing slot, skipped index, empty message
 A **Gap Turn** emitted by the live `session.read` path with method `session/gap`.
 _Avoid_: Archive gap, system fallback
 
+**Conversation Registry**:
+The Registry connection that owns Chat and Session traffic for a Workspace client, including realtime session events that must reach outside clients.
+_Avoid_: Chat registry, remote registry when ownership matters, current registry without scope
+
+**Local Hub Read Endpoint**:
+A same-machine Hub-owned endpoint used only for heavy workspace reads such as File and Git operations for projects hosted by that Hub.
+_Avoid_: Local registry mode, local chat link, local session endpoint
+
+**Local Workspace Read**:
+A File or Git read served through a **Local Hub Read Endpoint** while the Workspace still keeps Chat and Session traffic on the **Conversation Registry**.
+_Avoid_: Local conversation, local session read, project switch
+
+**Local Read Project Match**:
+The exact `projectId` equality required before a Workspace client may use a **Local Hub Read Endpoint** for a selected project.
+_Avoid_: Same project name, same path, local project guess
+
+**Local Read Envelope**:
+The Registry envelope shape reused by the **Local Hub Read Endpoint** for its File/Git-only method subset.
+_Avoid_: REST file API, raw file endpoint, custom local protocol
+
+**Local Read Principal**:
+The authenticated local client role for a **Local Hub Read Endpoint**, limited to project discovery, File reads, and Git reads.
+_Avoid_: Client role, monitor role, local admin
+
+**Local Hub Read Acceleration**:
+The default-on workspace behavior that uses a same-machine **Local Hub Read Endpoint** for eligible File and Git reads when one is available.
+_Avoid_: Manual probe, local chat acceleration, remote file endpoint
+
+**Local Hub Read Candidate**:
+A Hub-reported localhost-only connection candidate that a Workspace client may try for **Local Hub Read Acceleration**.
+_Avoid_: Public Hub URL, remote file endpoint, fixed local port
+
+**Local Read Endpoint Proof**:
+The pre-authentication check that proves a localhost endpoint matches its Hub-reported **Local Hub Read Candidate** before the Workspace client sends any registry token.
+_Avoid_: Token-first connect, blind localhost trust, port ownership assumption
+
+**Local Read Fallback**:
+The rule that returns eligible File and Git reads to the **Conversation Registry** when the local read path cannot connect, authenticate, or match the selected project.
+_Avoid_: Business error retry, stale data repair, remote overwrite
+
+**Local Read Hub Tag**:
+A compact status label shown next to a Hub identity to indicate that Hub's **Local Hub Read Acceleration** state.
+_Avoid_: Probe button, transport selector, chat status
+
+**Local Read State**:
+The Hub-level status shown by a **Local Read Hub Tag**: `Local` when File/Git reads use a local read path, or `Remote` when they use the **Conversation Registry**.
+_Avoid_: Chat connection state, project online state, endpoint configuration
+
+**Local Read Audit Metadata**:
+The non-secret operational metadata logged for local read endpoint lifecycle, proof, authentication, routing, and request summaries.
+_Avoid_: File content, diff body, grep result text, token, proof private key
+
 **Hub Skill**:
 A skill installed in the global skill scope of one WheelMaker Hub machine.
 _Avoid_: Repository skill, source skill, global project skill
@@ -295,6 +347,65 @@ _Avoid_: Symbol install, copy install
 - A schema or shape mismatch crosses the **Cache Reset Boundary**; the client clears all non-token local persistent cache and rebuilds tables instead of migrating old rows
 - A client may show turns beyond a local cache hole in the **Live Turn Buffer**, but the **Finished Cursor** remains before the hole until `session.read` repairs it
 - If a realtime turn arrives after a gap, the client keeps it in the **Live Turn Buffer** and triggers serialized **Read Repair**
+- A Workspace client has exactly one **Conversation Registry** for Chat and Session traffic
+- A Workspace client may also use one **Local Hub Read Endpoint** when the selected project is hosted by the same machine
+- A **Local Hub Read Endpoint** may serve **Local Workspace Reads**, but it must not own Chat, Session, or realtime session event traffic
+- Chat and Session methods remain on the **Conversation Registry** even when a **Local Hub Read Endpoint** can reach the same project
+- File and Git methods, including file search and grep, may use **Local Workspace Reads** to avoid moving large file content or diffs over the external network
+- File and Git sync checks follow the same read path selected for that project: local when **Local Read Project Match** succeeds, otherwise the **Conversation Registry**
+- Command, monitor, batch, Chat, and Session methods are not **Local Workspace Reads**
+- A Workspace client may use a **Local Hub Read Endpoint** only after a **Local Read Project Match**
+- A **Local Read Project Match** uses exact `projectId` equality and must not fall back to project name, filesystem path, or hub name similarity
+- A **Local Hub Read Endpoint** uses the **Local Read Envelope** and does not introduce a separate REST or raw file protocol
+- The **Local Read Envelope** supports only the method subset needed for project discovery, File reads, and Git reads
+- A **Local Hub Read Endpoint** exposes its owning Hub's project list for **Local Read Project Match**
+- A **Local Read Project Match** compares the **Conversation Registry** project identity against the **Local Hub Read Endpoint** project identity
+- A **Local Hub Read Endpoint** authenticates a **Local Read Principal** before serving any local read method
+- A **Local Read Principal** is not a normal client principal and must not call Chat, Session, command, or monitor methods
+- A **Local Hub Read Endpoint** is local-only and token-gated; it should not start when its shared token is empty
+- A **Local Read Principal** authenticates with the same token the Workspace client uses for the **Conversation Registry**
+- **Local Hub Read Acceleration** is default-on and opportunistic: if a usable local read path exists, eligible File and Git reads use it
+- **Local Hub Read Acceleration** may be disabled from the Workspace client without disabling the **Conversation Registry**
+- Enabling **Local Hub Read Acceleration** from Settings immediately tries current **Local Hub Read Candidates**
+- Disabling **Local Hub Read Acceleration** from Settings closes active local read connections
+- **Local Hub Read Acceleration** must not change the **Conversation Registry** or move Chat and Session traffic
+- **Local Hub Read Acceleration** tries **Local Hub Read Candidates** reported by the Hub through the **Conversation Registry**
+- **Local Hub Read Acceleration** is retried on Registry connection, project snapshot changes, candidate changes, or explicit user refresh, not by high-frequency background probing
+- **Local Hub Read Acceleration** keeps at most one active local read connection per Hub candidate
+- A changed **Local Hub Read Candidate** replaces the previous local read connection for that Hub
+- **Local Hub Read Candidate** changes flow through Hub/project snapshot refresh, not a separate realtime local-read event
+- Closing the **Conversation Registry** also closes active local read connections
+- If **Local Hub Read Acceleration** cannot connect or authenticate, the Workspace keeps using the **Conversation Registry** for File and Git reads
+- **Local Read Fallback** applies to local connection, authentication, and project-match failures, not to business-level File or Git errors
+- A business-level File or Git error from a matched **Local Hub Read Endpoint** should surface as the operation result instead of silently retrying against the **Conversation Registry**
+- A **Local Hub Read Candidate** belongs to a Hub, not to an individual Project configuration
+- A **Local Hub Read Candidate** relies on the existing unique Hub identity model; duplicate `hubId` handling is outside local read scope
+- The **Conversation Registry** carries **Local Hub Read Candidates** at Hub scope, not as per-Project configuration
+- The Workspace discovers **Local Hub Read Candidates** from the Hub snapshot in project listing, not from Registry connection setup
+- A **Local Hub Read Candidate** is a local connection hint, not a network address usable by other machines
+- A **Local Hub Read Candidate** must describe only localhost semantics and must not advertise a LAN IP, public hostname, or remotely reachable file endpoint
+- A mobile or remote Workspace client that cannot use a localhost **Local Hub Read Candidate** stays on `Remote` reads
+- A **Local Hub Read Candidate** must not carry tokens or other secrets
+- A Workspace client must complete a **Local Read Endpoint Proof** before sending its **Conversation Registry** token to a **Local Hub Read Endpoint**
+- A failed **Local Read Endpoint Proof** must not send a token and must trigger **Local Read Fallback**
+- A **Local Read Endpoint Proof** identity belongs to the current Hub process and is not persisted across Hub restarts
+- A **Local Hub Read Endpoint** is secured by loopback binding, **Local Read Endpoint Proof**, and token authentication rather than a first-version TLS requirement
+- Browser blocking of loopback WebSocket access is a **Local Read Fallback** condition, not a normal workspace error
+- A fixed local read port is not part of the product language; the Hub reports the bound local read port it actually owns
+- A **Local Hub Read Endpoint** binds an available loopback port at runtime and reports that actual bound port as its **Local Hub Read Candidate**
+- A **Local Hub Read Endpoint** is optional for Hub availability; failure to start local reads must not make the Hub unavailable for Chat and Session work
+- A **Local Hub Read Endpoint** may serve multiple local Workspace clients, with each client proving and authenticating independently
+- A **Local Hub Read Endpoint** may log **Local Read Audit Metadata**, but must not log file content, diff bodies, grep result text, tokens, or proof private key material
+- A **Local Read Hub Tag** reports local File/Git read acceleration state for a Hub and must not imply Chat or Session traffic is local
+- A **Local Read Hub Tag** is status display, not a local read settings control
+- Local read enablement belongs in Settings, not in the Hub dropdown
+- A **Local Read Hub Tag** displays a **Local Read State**
+- A **Local Read Hub Tag** is Hub-level status; individual File and Git requests still require **Local Read Project Match**
+- A project-level **Local Read Project Match** failure must not change the Hub-level **Local Read Hub Tag** by itself
+- **Local Read State** uses only `Local` and `Remote` in normal workspace UI
+- Disabling **Local Hub Read Acceleration** in Settings makes affected **Local Read Hub Tags** show `Remote`
+- Local read failure details belong in debug output, not in the **Local Read Hub Tag**
+- **Local Read State** must not expose local port numbers in normal workspace UI
 - A **Hub Skill** belongs to exactly one WheelMaker Hub machine, not to every Hub connected through the Registry
 - A **Project Skill** belongs to exactly one **Skill Managed Project** and is shown under that Project inside its owning Hub
 - A **Skill Managed Project** is selected from Hub-reported project state, never from an App-supplied filesystem path
@@ -438,6 +549,105 @@ _Avoid_: Symbol install, copy install
 > **Dev:** "Do we need both a sync index and sub-index cursor in the client?"
 > **Domain expert:** "No — the current model has one **Finished Cursor** per chat session."
 
+> **Dev:** "If the browser can reach a same-machine Hub endpoint, should Chat move to that local link?"
+> **Domain expert:** "No — Chat and Session traffic stay on the **Conversation Registry** so outside clients receive the same conversation events."
+
+> **Dev:** "Then what is the same-machine Hub endpoint for?"
+> **Domain expert:** "It is a **Local Hub Read Endpoint** for **Local Workspace Reads**, mainly File and Git data that would otherwise carry large content through the external network."
+
+> **Dev:** "Can a local read request run command, monitor, or session methods if the token is valid?"
+> **Domain expert:** "No — **Local Workspace Reads** are limited to project discovery plus File and Git reads, including search and grep."
+
+> **Dev:** "Should File/Git sync checks still use the remote Registry after local reads are active?"
+> **Domain expert:** "No — File and Git sync checks follow the selected read path for that project. Chat and Session state still use the **Conversation Registry**."
+
+> **Dev:** "Can File/Git use the local endpoint when the project name matches?"
+> **Domain expert:** "No — require a **Local Read Project Match** with exact `projectId` equality."
+
+> **Dev:** "Should the local read endpoint know which remote project the App currently selected?"
+> **Domain expert:** "No — it exposes its Hub project list, and the Workspace performs a **Local Read Project Match**."
+
+> **Dev:** "Should the local endpoint expose files through REST URLs?"
+> **Domain expert:** "No — use the **Local Read Envelope** so File and Git keep the same wire shape and error model."
+
+> **Dev:** "Can the local endpoint trust loopback without a token?"
+> **Domain expert:** "No — it authenticates a **Local Read Principal** and should not start without a shared token."
+
+> **Dev:** "Should local read acceleration require a button click before it works?"
+> **Domain expert:** "No — **Local Hub Read Acceleration** is default-on. If a reported local read path works and the project matches, File and Git use it."
+
+> **Dev:** "Should disabling local reads disconnect the main Registry?"
+> **Domain expert:** "No — it only disables **Local Hub Read Acceleration**. The **Conversation Registry** remains active."
+
+> **Dev:** "Should turning local reads back on wait for the next Registry refresh?"
+> **Domain expert:** "No — it immediately tries the current **Local Hub Read Candidates**."
+
+> **Dev:** "Should the App constantly retry local read ports in the background?"
+> **Domain expert:** "No — retry when registry/project/candidate state changes or the user explicitly refreshes."
+
+> **Dev:** "If a local file read returns file not found, should the App retry the remote Registry?"
+> **Domain expert:** "No — **Local Read Fallback** is for local path availability and identity failures, not normal File or Git business errors."
+
+> **Dev:** "Can the App assume the local read endpoint always uses the same local port?"
+> **Domain expert:** "No — it should try Hub-reported **Local Hub Read Candidates** because the fixed port may be occupied."
+
+> **Dev:** "Should the Registry handshake advertise local read endpoints?"
+> **Domain expert:** "No — local read candidates belong to Hub snapshot data, not Registry connection setup."
+
+> **Dev:** "Should the Registry push a special local-read changed event?"
+> **Domain expert:** "No — **Local Hub Read Candidate** changes flow through Hub/project snapshot refresh."
+
+> **Dev:** "Should the Hub reserve a fixed local read port?"
+> **Domain expert:** "No — the **Local Hub Read Endpoint** binds an available loopback port at runtime and reports the actual port."
+
+> **Dev:** "Should Hub startup fail if the local read endpoint cannot start?"
+> **Domain expert:** "No — local reads are opportunistic. Hub Chat and Session availability must continue."
+
+> **Dev:** "Should the local read endpoint allow only one App window?"
+> **Domain expert:** "No — it may serve multiple local Workspace clients, each with its own proof and authentication."
+
+> **Dev:** "Should local read logs include returned file content or diffs for debugging?"
+> **Domain expert:** "No — logs are limited to **Local Read Audit Metadata** and must not include content or secrets."
+
+> **Dev:** "Should every Project report its own local read endpoint?"
+> **Domain expert:** "No — a **Local Hub Read Candidate** belongs to the Hub, and individual projects still require a **Local Read Project Match** before local reads are used."
+
+> **Dev:** "Should local reads resolve duplicate Hub IDs?"
+> **Domain expert:** "No — they rely on the existing unique Hub identity model."
+
+> **Dev:** "Can the Hub advertise a LAN address so nearby devices can use File/Git directly?"
+> **Domain expert:** "No — a **Local Hub Read Candidate** has localhost semantics only and is tried from the current client machine."
+
+> **Dev:** "Should mobile clients get a different local read path?"
+> **Domain expert:** "No — a mobile client that cannot use the localhost candidate stays on `Remote` reads."
+
+> **Dev:** "Does the Hub include a token in the local read candidate?"
+> **Domain expert:** "No — the candidate is only a local hint. The **Local Read Principal** authenticates with the current **Conversation Registry** token."
+
+> **Dev:** "Can the App send the registry token as soon as a localhost port accepts WebSocket?"
+> **Domain expert:** "No — first complete a **Local Read Endpoint Proof**. A random localhost service must not receive the token."
+
+> **Dev:** "Should the local read proof identity persist across Hub restarts?"
+> **Domain expert:** "No — the proof identity belongs to the current Hub process."
+
+> **Dev:** "Does local read require TLS on loopback in the first version?"
+> **Domain expert:** "No — first-version local read security comes from loopback binding, endpoint proof, and token authentication."
+
+> **Dev:** "If the browser blocks `ws://127.0.0.1`, should the Workspace show a failure?"
+> **Domain expert:** "No — keep the Hub tag at `Remote` and record the local read failure reason in debug output."
+
+> **Dev:** "Should the Hub dropdown show a button to activate local reads?"
+> **Domain expert:** "No — show a **Local Read Hub Tag** beside the Hub. Local reads are default-on and opportunistic."
+
+> **Dev:** "Should the Hub dropdown contain the local read on/off switch?"
+> **Domain expert:** "No — the Hub dropdown shows status. Local read enablement belongs in Settings."
+
+> **Dev:** "Should the local read tag show failure details or the bound port?"
+> **Domain expert:** "No — the **Local Read Hub Tag** shows only `Local` or `Remote`. Details belong in debug output."
+
+> **Dev:** "If a Hub tag says `Local`, can every project request skip project matching?"
+> **Domain expert:** "No — the tag is Hub-level status. Each File or Git request still requires a **Local Read Project Match**."
+
 > **Dev:** "When the Settings page shows skills grouped by Hub, are those skills from a remote skill repository?"
 > **Domain expert:** "No — those are **Hub Skills** installed in that WheelMaker Hub's global skill scope; the repository is the **Skill Source**."
 
@@ -510,6 +720,22 @@ _Avoid_: Symbol install, copy install
 - "window" could imply mounted DOM count defines scrollbar height — resolved: the **Dynamic Turn Virtualizer** owns logical scrollbar height from the **Display Index**
 - "accurate height" could imply pre-rendering all turns — resolved: use **Lazy Height Estimates** plus **Virtuoso Measurement Cache**
 - "special render" could imply React components guess from raw JSON on mount — resolved: classify special UI as **Display Items** during shallow parsing
+- "local registry mode" could imply starting a second Registry or moving Chat traffic locally — resolved: use **Local Hub Read Endpoint** only for File and Git **Local Workspace Reads**
+- "current registry" could mean the conversation owner or a nearby optimization endpoint — resolved: use **Conversation Registry** for Chat and Session ownership
+- "direct local hub" could imply all Hub capabilities are local — resolved: the current concept is **Local Hub Read Endpoint**, limited to workspace reads
+- "same project" could mean same display name or path — resolved: use **Local Read Project Match** with exact `projectId` equality
+- "local file API" could imply REST or raw file serving — resolved: use the **Local Read Envelope** subset
+- "local client" could imply the full Registry client role — resolved: use **Local Read Principal** for the local File/Git-only role
+- "loopback is safe" could imply no authentication is needed — resolved: **Local Hub Read Endpoint** remains token-gated
+- "探测" could imply a required user action — resolved: use default-on **Local Hub Read Acceleration**
+- "local read port" could imply a stable fixed port — resolved: use Hub-reported **Local Hub Read Candidates**
+- "Hub 上报地址" could imply a remote file-serving URL — resolved: **Local Hub Read Candidate** has localhost semantics only
+- "Hub 上报辅助连接信息" could imply distributing credentials — resolved: **Local Hub Read Candidate** never carries tokens
+- "localhost accepted connection" could imply the endpoint is trusted — resolved: require **Local Read Endpoint Proof** before token authentication
+- "per-project local read config" could imply each Project has its own endpoint candidate — resolved: **Local Hub Read Candidate** belongs to a Hub
+- "Project carries local read endpoint" could imply endpoint configuration is project-scoped — resolved: the **Conversation Registry** carries **Local Hub Read Candidates** at Hub scope
+- "hub tag" could imply a click-to-enable control — resolved: **Local Read Hub Tag** is status display only
+- "local read status" could imply the Chat connection state or detailed failure state — resolved: **Local Read State** describes only `Local` or `Remote` File/Git read routing for that Hub
 - "Hub 上的 Skill" could mean skills available from a skill repository — resolved: use **Hub Skill** for globally installed skills on a WheelMaker Hub machine and **Skill Source** for the repository or endpoint they came from
 - "Skill Source" could imply local paths or arbitrary git remotes — resolved: the Skills Page install flow accepts only **Remote Skill Sources**
 - "Skills in Settings" could mean extending the Update detail — resolved: the **Skills Page** is a separate Settings detail
