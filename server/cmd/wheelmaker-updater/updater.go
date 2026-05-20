@@ -222,7 +222,7 @@ func refreshInvocationForOS(cfg UpdaterConfig, skipUpdate bool, goos string) (re
 			command:    "powershell",
 			args:       args,
 		}, nil
-	case "darwin", "linux":
+	case "darwin":
 		refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server.sh")
 		args := []string{
 			refreshScript,
@@ -233,6 +233,23 @@ func refreshInvocationForOS(cfg UpdaterConfig, skipUpdate bool, goos string) (re
 		}
 		if skipUpdate {
 			args = append(args, "--skip-update")
+		}
+		return refreshInvocation{
+			scriptPath: refreshScript,
+			command:    "bash",
+			args:       args,
+		}, nil
+	case "linux":
+		refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server_linux.sh")
+		args := []string{
+			refreshScript,
+			"--repo-root", cfg.RepoDir,
+			"--install-dir", cfg.InstallDir,
+			"--skip-updater-install",
+			"--skip-service-config",
+		}
+		if skipUpdate {
+			args = append(args, "--skip-update", "--skip-web-publish")
 		}
 		return refreshInvocation{
 			scriptPath: refreshScript,

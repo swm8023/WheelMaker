@@ -69,23 +69,37 @@ func TestParseLaunchAgentServiceInfo(t *testing.T) {
 	}
 }
 
-func TestSystemdUserUnitName(t *testing.T) {
-	got := systemdUserUnitName(launchAgentHubLabel)
-	if got != "com.wheelmaker.hub.service" {
-		t.Fatalf("unit name=%q", got)
+func TestSystemdUserServiceNames(t *testing.T) {
+	all := allSystemdUserServiceNames()
+	want := []string{systemdUserHubService, systemdUserMonitorService, systemdUserUpdaterService}
+	if strings.Join(all, ",") != strings.Join(want, ",") {
+		t.Fatalf("systemd services=%#v want %#v", all, want)
+	}
+	managed := managedSystemdUserServiceNames()
+	if strings.Join(managed, ",") != strings.Join([]string{systemdUserHubService, systemdUserUpdaterService}, ",") {
+		t.Fatalf("managed systemd services=%#v", managed)
+	}
+}
+
+func TestSystemdUserUnitPath(t *testing.T) {
+	home := filepath.Join("home", "me")
+	got := systemdUserUnitPath(home, systemdUserHubService)
+	want := filepath.Join(home, ".config", "systemd", "user", systemdUserHubService)
+	if got != want {
+		t.Fatalf("unit path=%q want %q", got, want)
 	}
 }
 
 func TestParseSystemdUserServiceInfo(t *testing.T) {
-	running := parseSystemdUserServiceInfo(launchAgentHubLabel, []byte("LoadState=loaded\nActiveState=active\nUnitFileState=enabled\n"))
-	if !running.Installed || running.Status != "Running" || running.StartType != "systemd-user" {
+	running := parseSystemdUserServiceInfo(systemdUserHubService, true, []byte("LoadState=loaded\nActiveState=active\nUnitFileState=enabled\n"))
+	if !running.Installed || running.Status != "Running" || running.StartType != "systemd --user" {
 		t.Fatalf("running info=%#v", running)
 	}
-	stopped := parseSystemdUserServiceInfo(launchAgentHubLabel, []byte("LoadState=loaded\nActiveState=inactive\nUnitFileState=enabled\n"))
-	if !stopped.Installed || stopped.Status != "Stopped" {
+	stopped := parseSystemdUserServiceInfo(systemdUserHubService, true, []byte("LoadState=loaded\nActiveState=inactive\nUnitFileState=enabled\n"))
+	if stopped.Status != "Stopped" {
 		t.Fatalf("stopped info=%#v", stopped)
 	}
-	missing := parseSystemdUserServiceInfo(launchAgentHubLabel, []byte("LoadState=not-found\nActiveState=inactive\nUnitFileState=disabled\n"))
+	missing := parseSystemdUserServiceInfo(systemdUserHubService, false, []byte("LoadState=not-found\nActiveState=inactive\n"))
 	if missing.Installed || missing.Status != "NotInstalled" {
 		t.Fatalf("missing info=%#v", missing)
 	}
@@ -96,6 +110,9 @@ func TestParseUnixWheelmakerProcessesExcludesUpdaterAndShell(t *testing.T) {
 124 Mon May 18 20:01:03 2026 /Users/me/.wheelmaker/bin/wheelmaker --hub-worker
 125 Mon May 18 20:01:04 2026 /Users/me/.wheelmaker/bin/wheelmaker-updater --repo /repo
 126 Mon May 18 20:01:05 2026 bash -lc wheelmaker --hub-worker
+127 Mon May 18 20:01:06 2026 /Users/me/.wheelmaker/bin/wheelmaker-monitor
+128 Mon May 18 20:01:07 2026 grep wheelmaker
+129 Mon May 18 20:01:08 2026 /bin/bash /usr/local/bin/wheelmaker-wrapper --hub-worker
 `)
 
 	procs := parseUnixWheelmakerProcessesFromPS(out)

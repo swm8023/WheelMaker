@@ -44,6 +44,10 @@ const (
 	launchAgentHubLabel     = "com.wheelmaker.hub"
 	launchAgentMonitorLabel = "com.wheelmaker.monitor"
 	launchAgentUpdaterLabel = "com.wheelmaker.updater"
+
+	systemdUserHubService     = "wheelmaker-hub.service"
+	systemdUserMonitorService = "wheelmaker-monitor.service"
+	systemdUserUpdaterService = "wheelmaker-updater.service"
 )
 
 var errServiceNotInstalled = errors.New("service not installed")
@@ -408,38 +412,41 @@ func getLaunchAgentServiceInfo(label string) (ServiceInfo, error) {
 	return parseLaunchAgentServiceInfo(label, true, out), nil
 }
 
-func systemdUserUnitName(label string) string {
-	return label + ".service"
+func allSystemdUserServiceNames() []string {
+	return []string{systemdUserHubService, systemdUserMonitorService, systemdUserUpdaterService}
 }
 
-func systemdUserUnitPath(home string, label string) string {
-	return filepath.Join(home, ".config", "systemd", "user", systemdUserUnitName(label))
+func managedSystemdUserServiceNames() []string {
+	return []string{systemdUserHubService, systemdUserUpdaterService}
 }
 
-func parseSystemdUserServiceInfo(label string, output []byte) ServiceInfo {
-	values := map[string]string{}
+func systemdUserUnitPath(home string, service string) string {
+	return filepath.Join(home, ".config", "systemd", "user", service)
+}
+
+func parseSystemdUserServiceInfo(service string, installed bool, output []byte) ServiceInfo {
+	fields := make(map[string]string)
 	for _, line := range strings.Split(string(output), "\n") {
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {
 			continue
 		}
-		values[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		fields[strings.TrimSpace(key)] = strings.TrimSpace(value)
 	}
-	loadState := strings.ToLower(values["LoadState"])
-	if loadState == "" || loadState == "not-found" {
-		return ServiceInfo{Name: label, Installed: false, Status: "NotInstalled", StartType: "-"}
+	if !installed && fields["LoadState"] != "loaded" {
+		return ServiceInfo{Name: service, Installed: false, Status: "NotInstalled", StartType: "-"}
 	}
 	status := "Stopped"
-	if strings.EqualFold(values["ActiveState"], "active") {
+	if fields["ActiveState"] == "active" {
 		status = "Running"
 	}
-	return ServiceInfo{Name: label, Installed: true, Status: status, StartType: "systemd-user"}
+	return ServiceInfo{Name: service, Installed: true, Status: status, StartType: "systemd --user"}
 }
 
 func listSystemdUserServices() ([]ServiceInfo, error) {
-	infos := make([]ServiceInfo, 0, len(allLaunchAgentLabels()))
-	for _, label := range allLaunchAgentLabels() {
-		info, err := getSystemdUserServiceInfo(label)
+	infos := make([]ServiceInfo, 0, len(allSystemdUserServiceNames()))
+	for _, service := range allSystemdUserServiceNames() {
+		info, err := getSystemdUserServiceInfo(service)
 		if err != nil {
 			return nil, err
 		}
@@ -448,13 +455,18 @@ func listSystemdUserServices() ([]ServiceInfo, error) {
 	return infos, nil
 }
 
-func getSystemdUserServiceInfo(label string) (ServiceInfo, error) {
-	unit := systemdUserUnitName(label)
-	out, err := exec.Command("systemctl", "--user", "show", unit, "--property=LoadState", "--property=ActiveState", "--property=UnitFileState", "--no-pager").CombinedOutput()
-	if err != nil && len(out) == 0 {
-		return ServiceInfo{}, fmt.Errorf("query systemd user unit %s: %w", unit, err)
+func getSystemdUserServiceInfo(service string) (ServiceInfo, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ServiceInfo{}, fmt.Errorf("home dir: %w", err)
 	}
-	return parseSystemdUserServiceInfo(label, out), nil
+	unit := systemdUserUnitPath(home, service)
+	installed := fileExists(unit)
+	out, err := exec.Command("systemctl", "--user", "show", service, "--property=LoadState,ActiveState,UnitFileState").CombinedOutput()
+	if err != nil {
+		return parseSystemdUserServiceInfo(service, installed, nil), nil
+	}
+	return parseSystemdUserServiceInfo(service, installed, out), nil
 }
 
 func listWheelmakerProcesses() ([]ProcessInfo, error) {
@@ -1454,8 +1466,8 @@ func (m *Monitor) RestartMonitor() error {
 	}
 	if monitorGOOS == "linux" {
 		home, homeErr := os.UserHomeDir()
-		if homeErr == nil && fileExists(systemdUserUnitPath(home, launchAgentMonitorLabel)) {
-			cmd := exec.Command("systemctl", "--user", "restart", systemdUserUnitName(launchAgentMonitorLabel))
+		if homeErr == nil && fileExists(systemdUserUnitPath(home, systemdUserMonitorService)) {
+			cmd := exec.Command("systemctl", "--user", "restart", systemdUserMonitorService)
 			if err := cmd.Start(); err != nil {
 				return fmt.Errorf("schedule monitor systemd user restart: %w", err)
 			}
@@ -1652,8 +1664,8 @@ func restartManagedSystemdUserServices() error {
 func runManagedSystemdUserAction(action string) error {
 	performed := false
 	errs := make([]string, 0)
-	for _, label := range managedLaunchAgentLabels() {
-		err := runSystemdUserAction(label, action)
+	for _, service := range managedSystemdUserServiceNames() {
+		err := runSystemdUserAction(service, action)
 		if err == nil {
 			performed = true
 			continue
@@ -1661,10 +1673,10 @@ func runManagedSystemdUserAction(action string) error {
 		if errors.Is(err, errServiceNotInstalled) {
 			continue
 		}
-		errs = append(errs, fmt.Sprintf("%s: %v", label, err))
+		errs = append(errs, fmt.Sprintf("%s: %v", service, err))
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("%s systemd user unit failed: %s", action, strings.Join(errs, "; "))
+		return fmt.Errorf("%s systemd user service failed: %s", action, strings.Join(errs, "; "))
 	}
 	if !performed {
 		return errServiceNotInstalled
@@ -1672,23 +1684,36 @@ func runManagedSystemdUserAction(action string) error {
 	return nil
 }
 
-func runSystemdUserAction(label string, action string) error {
+func runSystemdUserAction(service string, action string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("home dir: %w", err)
 	}
-	if !fileExists(systemdUserUnitPath(home, label)) {
+	unit := systemdUserUnitPath(home, service)
+	if !fileExists(unit) {
 		return errServiceNotInstalled
 	}
-	unit := systemdUserUnitName(label)
+	if out, err := exec.Command("systemctl", "--user", "daemon-reload").CombinedOutput(); err != nil {
+		return fmt.Errorf("systemctl --user daemon-reload: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
 	switch action {
-	case "start", "stop", "restart":
-		if out, err := exec.Command("systemctl", "--user", action, unit).CombinedOutput(); err != nil {
-			return fmt.Errorf("systemctl --user %s %s: %w (%s)", action, unit, err, strings.TrimSpace(string(out)))
+	case "start":
+		if out, err := exec.Command("systemctl", "--user", "start", service).CombinedOutput(); err != nil {
+			return fmt.Errorf("systemctl --user start %s: %w (%s)", service, err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	case "stop":
+		if out, err := exec.Command("systemctl", "--user", "stop", service).CombinedOutput(); err != nil {
+			return fmt.Errorf("systemctl --user stop %s: %w (%s)", service, err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	case "restart":
+		if out, err := exec.Command("systemctl", "--user", "restart", service).CombinedOutput(); err != nil {
+			return fmt.Errorf("systemctl --user restart %s: %w (%s)", service, err, strings.TrimSpace(string(out)))
 		}
 		return nil
 	default:
-		return fmt.Errorf("unsupported systemd user action: %s", action)
+		return fmt.Errorf("unsupported systemd user service action: %s", action)
 	}
 }
 

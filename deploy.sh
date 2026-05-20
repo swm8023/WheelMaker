@@ -15,23 +15,23 @@ cat <<'BANNER'
 BANNER
 
 case "$(uname -s)" in
-  Darwin|Linux)
+  Darwin)
+    refresh_script="scripts/refresh_server.sh"
     ;;
-  MINGW*|MSYS*|CYGWIN*)
-    echo "[FAILED] deploy.sh supports macOS and Linux. Use deploy.bat on Windows." >&2
-    exit 1
+  Linux)
+    refresh_script="scripts/refresh_server_linux.sh"
     ;;
   *)
-    echo "[FAILED] deploy.sh supports macOS and Linux only." >&2
+    echo "[FAILED] deploy.sh supports macOS and Linux. Use deploy.bat on Windows." >&2
     exit 1
     ;;
 esac
 
-if [[ ! -x "scripts/refresh_server.sh" ]]; then
-  chmod +x "scripts/refresh_server.sh"
+if [[ ! -x "$refresh_script" ]]; then
+  chmod +x "$refresh_script"
 fi
 
-bash "scripts/refresh_server.sh" "$@"
+bash "$refresh_script" "$@"
 
 echo
 echo "[OK] deploy complete"

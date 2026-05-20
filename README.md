@@ -149,6 +149,75 @@ The shell deploy script does not install or configure Nginx, Caddy, certificates
 | `/ws` | `http://127.0.0.1:9630` with WebSocket upgrade |
 | `/monitor/` | `http://127.0.0.1:9631` |
 
+### Linux Machine A deployment
+
+WheelMaker can also run as a complete Machine A on Linux using current-user `systemd --user` services. This path runs under the active user account, so agent CLIs can keep using the same `$HOME`, npm global packages, PATH, SSH keys, and local auth files.
+
+Requirements:
+
+- **Go 1.26+**
+- **Node.js 22.11+**
+- `git`
+- `npm` and `npx`
+- `systemd` with a usable `systemctl --user` session
+- the agent CLIs you plan to use, already installed and logged in for the current user
+
+One-shot refresh from the repository root:
+
+```bash
+bash deploy.sh
+```
+
+The Linux refresh flow will:
+
+- pull with `git pull --ff-only` when the worktree is clean
+- build the current Linux architecture binaries
+- install `wheelmaker`, `wheelmaker-monitor`, and `wheelmaker-updater` to `~/.wheelmaker/bin`
+- preserve or initialize `~/.wheelmaker/config.json`
+- publish the Web UI to `~/.wheelmaker/web`
+- write the current shell environment to `~/.wheelmaker/systemd.env`
+- generate user unit files under `~/.config/systemd/user`
+- start these `systemd --user` services:
+  - `wheelmaker-hub.service`
+  - `wheelmaker-monitor.service`
+  - `wheelmaker-updater.service`
+
+Lifecycle commands:
+
+```bash
+bash deploy.sh status
+bash deploy.sh start
+bash deploy.sh stop
+bash deploy.sh restart
+bash deploy.sh uninstall
+```
+
+Or call the underlying script directly:
+
+```bash
+bash scripts/refresh_server_linux.sh status
+bash scripts/refresh_server_linux.sh start
+bash scripts/refresh_server_linux.sh stop
+bash scripts/refresh_server_linux.sh restart
+bash scripts/refresh_server_linux.sh uninstall
+```
+
+`uninstall` stops and disables the user services and removes their unit files, but keeps `~/.wheelmaker/config.json`, logs, SQLite state, and Web assets.
+
+The Linux deploy script does not install or configure Nginx, Caddy, certificates, public ports, or lingering. If you need the user services to start before interactive login, enable lingering yourself:
+
+```bash
+loginctl enable-linger "$USER"
+```
+
+Point your own reverse proxy at the same contract used by Windows and macOS:
+
+| External path | Local target |
+| --- | --- |
+| `/` | static files from `~/.wheelmaker/web` |
+| `/ws` | `http://127.0.0.1:9630` with WebSocket upgrade |
+| `/monitor/` | `http://127.0.0.1:9631` |
+
 ### 2. Configure Machine A
 
 Edit:

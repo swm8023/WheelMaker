@@ -170,7 +170,7 @@ func TestRunUpdateRound_LinuxRunsRefreshShell(t *testing.T) {
 	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
 		t.Fatalf("mkdir scripts: %v", err)
 	}
-	refreshPath := filepath.Join(scriptsDir, "refresh_server.sh")
+	refreshPath := filepath.Join(scriptsDir, "refresh_server_linux.sh")
 	if err := os.WriteFile(refreshPath, []byte(""), 0o755); err != nil {
 		t.Fatalf("write refresh script: %v", err)
 	}
@@ -193,12 +193,15 @@ func TestRunUpdateRound_LinuxRunsRefreshShell(t *testing.T) {
 	if !strings.Contains(args, refreshPath) || !strings.Contains(args, "--install-dir /home/test/.wheelmaker/bin") {
 		t.Fatalf("unexpected args: %s", args)
 	}
+	if !strings.Contains(args, "--skip-updater-install") || !strings.Contains(args, "--skip-service-config") {
+		t.Fatalf("linux updater should skip self-install and service config, got: %s", args)
+	}
 	if strings.Contains(args, "--skip-web-publish") {
-		t.Fatalf("full update should publish web through refresh_server.sh: %s", args)
+		t.Fatalf("full update should publish web through refresh_server_linux.sh: %s", args)
 	}
 }
 
-func TestRunUpdateRound_LinuxManualSignalSkipsUpdateAndPublishesWeb(t *testing.T) {
+func TestRunUpdateRound_LinuxManualSignalSkipsUpdateAndWebPublish(t *testing.T) {
 	old := runtimeGOOS
 	runtimeGOOS = "linux"
 	defer func() { runtimeGOOS = old }()
@@ -208,8 +211,7 @@ func TestRunUpdateRound_LinuxManualSignalSkipsUpdateAndPublishesWeb(t *testing.T
 	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
 		t.Fatalf("mkdir scripts: %v", err)
 	}
-	refreshPath := filepath.Join(scriptsDir, "refresh_server.sh")
-	if err := os.WriteFile(refreshPath, []byte(""), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(scriptsDir, "refresh_server_linux.sh"), []byte(""), 0o755); err != nil {
 		t.Fatalf("write refresh script: %v", err)
 	}
 
@@ -221,11 +223,8 @@ func TestRunUpdateRound_LinuxManualSignalSkipsUpdateAndPublishesWeb(t *testing.T
 	}
 
 	args := strings.Join(f.calls[0].args, " ")
-	if !strings.Contains(args, "--skip-update") {
-		t.Fatalf("manual signal should skip update, got: %s", args)
-	}
-	if strings.Contains(args, "--skip-web-publish") {
-		t.Fatalf("manual signal should still publish web through refresh_server.sh, got: %s", args)
+	if !strings.Contains(args, "--skip-update") || !strings.Contains(args, "--skip-web-publish") {
+		t.Fatalf("manual signal should skip update and web publish, got: %s", args)
 	}
 }
 
