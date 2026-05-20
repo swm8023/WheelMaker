@@ -272,7 +272,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('aria-modal="true"');
     expect(mainTsx).toContain('className="mobile-settings-nav"');
     expect(mainTsx).toContain('className="mobile-settings-back"');
-    expect(mainTsx).toContain('<div className="mobile-settings-title">Settings</div>');
+    expect(mainTsx).toContain('<div className="mobile-settings-title">{mobileSettingsTitle}</div>');
     expect(mainTsx).toContain('className="mobile-settings-group"');
     const chatSettingsStart = mainTsx.indexOf("renderSettingsSection('Chat'");
     const latestTitleSettingStart = mainTsx.indexOf('<span>Use Latest Prompt Title</span>', chatSettingsStart);
@@ -820,7 +820,7 @@ describe('web chat integration', () => {
     expect(codeDisplaySettingsIndex).toBeLessThan(moreSettingsIndex);
     expect(mainTsx).toContain("setSettingsDetailView('database');");
     expect(mainTsx).toContain("settingsDetailView === 'database'");
-    expect(mainTsx).toContain('renderDatabaseSettingsDetail()');
+    expect(mainTsx).toContain('renderDatabaseSettingsDetail(options)');
     expect(mainTsx).toContain('className="settings-section-title"');
     expect(mainTsx).toContain('className="settings-row settings-detail-row"');
     expect(mainTsx).not.toContain('title="Token stats"');

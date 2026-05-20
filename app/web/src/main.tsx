@@ -99,6 +99,13 @@ import {
   shouldStartGestureMove,
   type GestureNavigationTab,
 } from './services/gestureNavigation';
+import {
+  createMobileSettingsHistoryState,
+  isMobileSettingsHistoryState,
+  mobileSettingsHistoryKey,
+  resolveMobileSettingsPopAction,
+  type MobileSettingsHistoryDetail,
+} from './services/mobileSettingsHistory';
 import { resolveLayoutMode } from './services/responsiveLayout';
 import {
   buildTokenStatCards,
@@ -248,6 +255,10 @@ type ConfirmTarget =
       includeProjects?: boolean;
     };
 type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | null;
+type ActiveSettingsDetailView = Exclude<SettingsDetailView, null>;
+type SettingsDetailShellOptions = {
+  hideDetailHeader?: boolean;
+};
 const SKILLS_MARKETPLACE_URL = 'https://www.skills.sh/';
 type WheelMakerUpdateHubView = {
   hubId: string;
@@ -591,6 +602,20 @@ function gestureTabFromElement(element: Element | null): GestureNavigationTab | 
   return tab === 'chat' || tab === 'file' || tab === 'git' ? tab : null;
 }
 
+function settingsDetailTitle(detail: ActiveSettingsDetailView): string {
+  switch (detail) {
+    case 'update':
+      return 'Update';
+    case 'skills':
+      return 'Skills';
+    case 'tokenStats':
+      return 'Token Stats';
+    case 'ccSwitch':
+      return 'CC Switch';
+    case 'database':
+      return 'Database';
+  }
+}
 
 const AGENT_TAG_VARIANT_INDEX: Record<string, number> = {
   codex: 0,
@@ -2478,6 +2503,9 @@ function App() {
   const [databaseError, setDatabaseError] = useState('');
   const [databaseDumpText, setDatabaseDumpText] = useState('');
   const [settingsDetailView, setSettingsDetailView] = useState<SettingsDetailView>(null);
+  const mobileSettingsHistoryKeyRef = useRef<string | null>(null);
+  const sidebarSettingsOpenRef = useRef(sidebarSettingsOpen);
+  const settingsDetailViewRef = useRef<SettingsDetailView>(settingsDetailView);
   const [desktopSidebarResizing, setDesktopSidebarResizing] = useState(false);
   const [desktopSidebarDraftWidth, setDesktopSidebarDraftWidth] = useState<number | null>(null);
   const [tokenStatsLoading, setTokenStatsLoading] = useState(false);
@@ -3402,6 +3430,12 @@ function App() {
   useEffect(() => {
     gestureNavStateRef.current = gestureNavState;
   }, [gestureNavState]);
+  useEffect(() => {
+    sidebarSettingsOpenRef.current = sidebarSettingsOpen;
+  }, [sidebarSettingsOpen]);
+  useEffect(() => {
+    settingsDetailViewRef.current = settingsDetailView;
+  }, [settingsDetailView]);
   useEffect(() => {
     tabRef.current = tab;
     if (tab !== 'chat') {
@@ -4584,6 +4618,64 @@ function App() {
     }
     setSettingsDetailView(detail);
   }, [setSidebarSettingsOpen, setSidebarCollapsed]);
+  useEffect(() => {
+    if (isWide || !sidebarSettingsOpen) {
+      mobileSettingsHistoryKeyRef.current = null;
+      return;
+    }
+    const nextKey = mobileSettingsHistoryKey(settingsDetailView as MobileSettingsHistoryDetail | null);
+    if (mobileSettingsHistoryKeyRef.current === nextKey) {
+      return;
+    }
+    window.history.pushState(createMobileSettingsHistoryState(settingsDetailView as MobileSettingsHistoryDetail | null), '', window.location.href);
+    mobileSettingsHistoryKeyRef.current = nextKey;
+  }, [isWide, sidebarSettingsOpen, settingsDetailView]);
+  useEffect(() => {
+    const handleMobileSettingsPopState = (event: PopStateEvent) => {
+      const nextState = event.state;
+      const nextIsMobileSettingsHistory = isMobileSettingsHistoryState(nextState);
+      const hadMobileSettingsHistory = mobileSettingsHistoryKeyRef.current !== null;
+      if (!nextIsMobileSettingsHistory && !hadMobileSettingsHistory) {
+        return;
+      }
+      mobileSettingsHistoryKeyRef.current = nextIsMobileSettingsHistory
+        ? mobileSettingsHistoryKey(nextState.detail)
+        : null;
+      const action = resolveMobileSettingsPopAction({
+        nextState,
+        settingsOpen: sidebarSettingsOpenRef.current,
+        settingsDetailView: settingsDetailViewRef.current as MobileSettingsHistoryDetail | null,
+      });
+      if (action === 'back-to-list') {
+        setSettingsDetailView(null);
+        return;
+      }
+      if (action === 'close-settings') {
+        setSettingsDetailView(null);
+        setSidebarSettingsOpen(false);
+      }
+    };
+    window.addEventListener('popstate', handleMobileSettingsPopState);
+    return () => window.removeEventListener('popstate', handleMobileSettingsPopState);
+  }, [setSidebarSettingsOpen]);
+  const handleSettingsDetailBack = useCallback(() => {
+    if (!isWide && sidebarSettingsOpen && settingsDetailView !== null && mobileSettingsHistoryKeyRef.current !== null) {
+      window.history.back();
+      return;
+    }
+    setSettingsDetailView(null);
+  }, [isWide, sidebarSettingsOpen, settingsDetailView]);
+  const handleMobileSettingsBackButton = useCallback(() => {
+    if (!isWide && sidebarSettingsOpen && mobileSettingsHistoryKeyRef.current !== null) {
+      window.history.back();
+      return;
+    }
+    if (settingsDetailView !== null) {
+      setSettingsDetailView(null);
+      return;
+    }
+    setSidebarSettingsOpen(false);
+  }, [isWide, sidebarSettingsOpen, settingsDetailView, setSidebarSettingsOpen]);
   const clampDesktopSidebarWidthForViewport = useCallback((width: number) => {
     const viewportMax = windowWidth > 0
       ? Math.floor(windowWidth * DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO)
@@ -8813,25 +8905,86 @@ function App() {
     </section>
   );
 
+  const renderSettingsDetailActions = (detail: ActiveSettingsDetailView): React.ReactNode => {
+    if (detail === 'skills') {
+      return (
+        <button
+          type="button"
+          className="token-stats-refresh-btn token-stats-refresh-inline"
+          onClick={() => refreshSkillManagement().catch(() => undefined)}
+          disabled={skillsLoading}
+        >
+          {skillsLoading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      );
+    }
+    if (detail === 'update') {
+      return (
+        <button
+          type="button"
+          className="token-stats-refresh-btn token-stats-refresh-inline"
+          onClick={() => {
+            refreshWheelMakerUpdates().catch(() => undefined);
+            refreshAgentPackages().catch(() => undefined);
+          }}
+          disabled={wheelMakerUpdatesLoading || agentPackagesLoading}
+        >
+          {wheelMakerUpdatesLoading || agentPackagesLoading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      );
+    }
+    if (detail === 'tokenStats') {
+      return (
+        <button
+          type="button"
+          className="token-stats-refresh-btn token-stats-refresh-inline"
+          onClick={() => {
+            refreshTokenStats().catch(() => undefined);
+          }}
+          disabled={tokenStatsLoading}
+        >
+          {tokenStatsLoading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      );
+    }
+    if (detail === 'database') {
+      return (
+        <button
+          type="button"
+          className="git-section-btn"
+          onClick={exportDatabaseDump}
+          disabled={databaseLoading || !!databaseError || !databaseDumpText}
+          title="Export current database dump"
+        >
+          Export
+        </button>
+      );
+    }
+    return null;
+  };
+
   const renderSettingsDetailShell = (
     title: string,
     content: React.ReactNode,
     actions?: React.ReactNode,
+    options: SettingsDetailShellOptions = {},
   ) => (
-    <div className="settings-detail-page">
-      <div className="settings-detail-header">
-        <button
-          type="button"
-          className="mobile-settings-back settings-detail-back"
-          onClick={() => setSettingsDetailView(null)}
-          aria-label="Back to settings"
-          title="Back"
-        >
-          <span className="codicon codicon-arrow-left" />
-        </button>
-        <div className="settings-detail-title">{title}</div>
-        {actions ?? <span className="settings-detail-header-spacer" aria-hidden="true" />}
-      </div>
+    <div className={`settings-detail-page${options.hideDetailHeader ? ' settings-detail-page-body-only' : ''}`}>
+      {options.hideDetailHeader ? null : (
+        <div className="settings-detail-header">
+          <button
+            type="button"
+            className="mobile-settings-back settings-detail-back"
+            onClick={handleSettingsDetailBack}
+            aria-label="Back to settings"
+            title="Back"
+          >
+            <span className="codicon codicon-arrow-left" />
+          </button>
+          <div className="settings-detail-title">{title}</div>
+          {actions ?? <span className="settings-detail-header-spacer" aria-hidden="true" />}
+        </div>
+      )}
       <div className="settings-detail-body">{content}</div>
     </div>
   );
@@ -9055,7 +9208,7 @@ function App() {
     );
   };
 
-  const renderSkillsSettingsDetail = () =>
+  const renderSkillsSettingsDetail = (options?: SettingsDetailShellOptions) =>
     renderSettingsDetailShell(
       'Skills',
       <>
@@ -9131,17 +9284,11 @@ function App() {
           })}
         </div>
       </>,
-      <button
-        type="button"
-        className="token-stats-refresh-btn token-stats-refresh-inline"
-        onClick={() => refreshSkillManagement().catch(() => undefined)}
-        disabled={skillsLoading}
-      >
-        {skillsLoading ? 'Refreshing...' : 'Refresh'}
-      </button>,
+      renderSettingsDetailActions('skills'),
+      options,
     );
 
-  const renderUpdateSettingsDetail = () =>
+  const renderUpdateSettingsDetail = (options?: SettingsDetailShellOptions) =>
     renderSettingsDetailShell(
       'Update',
       <>
@@ -9285,20 +9432,11 @@ function App() {
           })}
         </div>
       </>,
-      <button
-        type="button"
-        className="token-stats-refresh-btn token-stats-refresh-inline"
-        onClick={() => {
-          refreshWheelMakerUpdates().catch(() => undefined);
-          refreshAgentPackages().catch(() => undefined);
-        }}
-        disabled={wheelMakerUpdatesLoading || agentPackagesLoading}
-      >
-        {wheelMakerUpdatesLoading || agentPackagesLoading ? 'Refreshing...' : 'Refresh'}
-      </button>,
+      renderSettingsDetailActions('update'),
+      options,
     );
 
-  const renderTokenStatsSettingsDetail = () =>
+  const renderTokenStatsSettingsDetail = (options?: SettingsDetailShellOptions) =>
     renderSettingsDetailShell(
       'Token Stats',
       <>
@@ -9343,19 +9481,11 @@ function App() {
           ))}
         </div>
       </>,
-      <button
-        type="button"
-        className="token-stats-refresh-btn token-stats-refresh-inline"
-        onClick={() => {
-          refreshTokenStats().catch(() => undefined);
-        }}
-        disabled={tokenStatsLoading}
-      >
-        {tokenStatsLoading ? 'Refreshing...' : 'Refresh'}
-      </button>,
+      renderSettingsDetailActions('tokenStats'),
+      options,
     );
 
-  const renderCCSwitchSettingsDetail = () => {
+  const renderCCSwitchSettingsDetail = (options?: SettingsDetailShellOptions) => {
     const activeHub = (currentProject?.hubId || 'unknown').trim() || 'unknown';
     const activeAgent = (selectedChatSession?.agentType || '').trim() || '-';
     const profileCards = projects
@@ -9434,10 +9564,12 @@ function App() {
           <div className="muted block">No CC Switch profile metadata found.</div>
         ) : null}
       </>,
+      undefined,
+      options,
     );
   };
 
-  const renderDatabaseSettingsDetail = () =>
+  const renderDatabaseSettingsDetail = (options?: SettingsDetailShellOptions) =>
     renderSettingsDetailShell(
       'Database',
       <>
@@ -9451,32 +9583,28 @@ function App() {
           <pre className="settings-database-dump">{databaseDumpText}</pre>
         ) : null}
       </>,
-      <button
-        type="button"
-        className="git-section-btn"
-        onClick={exportDatabaseDump}
-        disabled={databaseLoading || !!databaseError || !databaseDumpText}
-        title="Export current database dump"
-      >
-        Export
-      </button>,
+      renderSettingsDetailActions('database'),
+      options,
     );
 
-  const renderSettingsContent = (showSectionTitle: boolean) => {
+  const renderSettingsContent = (
+    showSectionTitle: boolean,
+    options: SettingsDetailShellOptions = {},
+  ) => {
     if (settingsDetailView === 'update') {
-      return renderUpdateSettingsDetail();
+      return renderUpdateSettingsDetail(options);
     }
     if (settingsDetailView === 'skills') {
-      return renderSkillsSettingsDetail();
+      return renderSkillsSettingsDetail(options);
     }
     if (settingsDetailView === 'ccSwitch') {
-      return renderCCSwitchSettingsDetail();
+      return renderCCSwitchSettingsDetail(options);
     }
     if (settingsDetailView === 'tokenStats') {
-      return renderTokenStatsSettingsDetail();
+      return renderTokenStatsSettingsDetail(options);
     }
     if (settingsDetailView === 'database') {
-      return renderDatabaseSettingsDetail();
+      return renderDatabaseSettingsDetail(options);
     }
     return (
     <>
@@ -9745,6 +9873,7 @@ function App() {
             className="drawer-settings-icon-btn"
             onClick={() => {
               setProjectMenuOpen(false);
+              setSettingsDetailView(null);
               setSidebarSettingsOpen(true);
             }}
             title="Open settings"
@@ -10336,6 +10465,7 @@ function App() {
               className="drawer-settings-icon-btn"
               onClick={() => {
                 setProjectMenuOpen(false);
+                setSettingsDetailView(null);
                 setSidebarSettingsOpen(true);
               }}
               title="Open settings"
@@ -11927,29 +12057,36 @@ function App() {
     </div>
   ) : null;
 
+  const mobileSettingsTitle = settingsDetailView
+    ? settingsDetailTitle(settingsDetailView)
+    : 'Settings';
+  const mobileSettingsActions = settingsDetailView
+    ? renderSettingsDetailActions(settingsDetailView)
+    : <span className="mobile-settings-action-spacer" aria-hidden="true" />;
+
   const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (
     <div
       className="mobile-settings-screen"
       role="dialog"
       aria-modal="true"
-      aria-label="Settings"
+      aria-label={mobileSettingsTitle}
     >
       <div className="mobile-settings-nav">
         <button
           type="button"
           className="mobile-settings-back"
-          onClick={() => setSidebarSettingsOpen(false)}
-          aria-label="Back to drawer"
+          onClick={handleMobileSettingsBackButton}
+          aria-label={settingsDetailView ? 'Back to settings' : 'Back to drawer'}
           title="Back"
         >
           <span className="codicon codicon-arrow-left" />
         </button>
-        <div className="mobile-settings-title">Settings</div>
-        <div aria-hidden="true" />
+        <div className="mobile-settings-title">{mobileSettingsTitle}</div>
+        <div className="mobile-settings-actions">{mobileSettingsActions}</div>
       </div>
       <div className="mobile-settings-scroll">
         <div className="mobile-settings-group">
-          {renderSettingsContent(false)}
+          {renderSettingsContent(false, { hideDetailHeader: true })}
         </div>
       </div>
     </div>

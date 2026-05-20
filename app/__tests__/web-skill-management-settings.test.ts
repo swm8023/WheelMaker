@@ -9,7 +9,7 @@ describe('skill management settings UI source structure', () => {
   test('adds Skills as a settings detail and More row after Update', () => {
     expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | null;");
     expect(mainTsx).toContain("settingsDetailView === 'skills'");
-    expect(mainTsx).toContain('renderSkillsSettingsDetail()');
+    expect(mainTsx).toContain('renderSkillsSettingsDetail(options)');
 
     const moreStart = mainTsx.indexOf("renderSettingsSection('More'");
     const moreEnd = mainTsx.indexOf("renderSettingsSection(", moreStart + 1);
@@ -31,7 +31,7 @@ describe('skill management settings UI source structure', () => {
   });
 
   test('renders Skills detail with controlled command hooks and confirmations', () => {
-    expect(mainTsx).toContain('const renderSkillsSettingsDetail = () =>');
+    expect(mainTsx).toContain('const renderSkillsSettingsDetail = (options?: SettingsDetailShellOptions) =>');
     expect(mainTsx).toContain('refreshSkillManagement');
     expect(mainTsx).toContain('service.scanSkills');
     expect(mainTsx).toContain('service.listSkillsSource');

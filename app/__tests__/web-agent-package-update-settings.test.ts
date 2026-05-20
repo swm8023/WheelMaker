@@ -8,7 +8,7 @@ describe('agent package update settings UI source structure', () => {
 
     expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | null;");
     expect(mainTsx).toContain("settingsDetailView === 'update'");
-    expect(mainTsx).toContain('renderUpdateSettingsDetail()');
+    expect(mainTsx).toContain('renderUpdateSettingsDetail(options)');
     expect(mainTsx).toContain("renderSettingsSection('More'");
     expect(mainTsx).not.toContain("renderSettingsSection('Storage'");
 
@@ -44,7 +44,7 @@ describe('agent package update settings UI source structure', () => {
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
-    expect(mainTsx).toContain('const renderUpdateSettingsDetail = () =>');
+    expect(mainTsx).toContain('const renderUpdateSettingsDetail = (options?: SettingsDetailShellOptions) =>');
     expect(mainTsx).toContain("'Update'");
     expect(mainTsx).toContain('WheelMaker');
     expect(mainTsx).toContain('refreshWheelMakerUpdates');

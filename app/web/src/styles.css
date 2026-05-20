@@ -454,7 +454,7 @@ body,
   flex: 0 0 auto;
   min-height: calc(var(--wm-safe-area-top) + 52px);
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  grid-template-columns: 44px minmax(0, 1fr) minmax(44px, auto);
   align-items: end;
   gap: 6px;
   padding: var(--wm-safe-area-top) 12px 8px;
@@ -491,6 +491,24 @@ body,
   white-space: nowrap;
   font-size: 17px;
   font-weight: 700;
+}
+
+.mobile-settings-actions {
+  min-width: 44px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.mobile-settings-action-spacer {
+  width: 38px;
+  height: 38px;
+}
+
+.mobile-settings-actions .token-stats-refresh-inline {
+  height: 34px;
+  min-height: 34px;
 }
 
 .mobile-settings-scroll {
@@ -540,6 +558,10 @@ body,
   flex-direction: column;
   overflow: hidden;
   padding: 8px;
+}
+
+.settings-detail-page-body-only {
+  padding: 0;
 }
 
 .settings-detail-header {
