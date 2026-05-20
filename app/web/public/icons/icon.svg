@@ -1,41 +1,63 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="WheelMaker icon">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#01112b"/>
-      <stop offset="100%" stop-color="#00103a"/>
+    <radialGradient id="tileGlow" cx="50%" cy="42%" r="72%">
+      <stop offset="0%" stop-color="#092354"/>
+      <stop offset="56%" stop-color="#03183f"/>
+      <stop offset="100%" stop-color="#000b24"/>
+    </radialGradient>
+    <linearGradient id="tileEdge" x1="0.04" y1="0" x2="0.98" y2="1">
+      <stop offset="0%" stop-color="#214779" stop-opacity="0.82"/>
+      <stop offset="38%" stop-color="#0d2a58" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#001127" stop-opacity="0.94"/>
     </linearGradient>
-    <linearGradient id="wmBlue" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#2bd6ff"/>
-      <stop offset="100%" stop-color="#149cff"/>
+    <linearGradient id="markBlue" x1="0.08" y1="0.12" x2="0.85" y2="0.94">
+      <stop offset="0%" stop-color="#54c7ff"/>
+      <stop offset="54%" stop-color="#22aaff"/>
+      <stop offset="100%" stop-color="#128bfa"/>
     </linearGradient>
-    <linearGradient id="wmWhite" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="markWhite" x1="0.22" y1="0.1" x2="0.9" y2="0.92">
       <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#dfe7f5"/>
+      <stop offset="58%" stop-color="#f8fbff"/>
+      <stop offset="100%" stop-color="#e7ecf5"/>
     </linearGradient>
-    <filter id="glowBlue" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#22c5ff" flood-opacity="0.45"/>
+    <linearGradient id="markTopBlue" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0%" stop-color="#25baff"/>
+      <stop offset="100%" stop-color="#078dfa"/>
+    </linearGradient>
+    <filter id="tileShadow" x="-8%" y="-8%" width="116%" height="116%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#000000" flood-opacity="0.52"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#3d71b2" flood-opacity="0.48"/>
     </filter>
-    <filter id="glowWhite" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#e7f0ff" flood-opacity="0.35"/>
+    <filter id="markShadow" x="-16%" y="-22%" width="132%" height="144%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000000" flood-opacity="0.38"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="2.5" flood-color="#0f76c9" flood-opacity="0.24"/>
     </filter>
   </defs>
 
-  <rect x="0" y="0" width="512" height="512" rx="96" fill="url(#bg)"/>
+  <rect x="12" y="12" width="488" height="488" rx="78" fill="url(#tileGlow)" filter="url(#tileShadow)" id="appTile"/>
+  <rect x="13.5" y="13.5" width="485" height="485" rx="76.5" fill="none" stroke="url(#tileEdge)" stroke-width="2.5"/>
+  <path
+    d="M42 436C72 471 116 490 172 490H340C424 490 490 424 490 340V172C490 116 471 72 436 42C456 72 466 112 466 162V350C466 414 414 466 350 466H162C112 466 72 456 42 436Z"
+    fill="#000717"
+    opacity="0.28"
+  />
 
-  <g transform="translate(-6 0)">
-    <g transform="translate(256 256) scale(0.86) translate(-256 -256)">
-      <path
-        d="M 86 182 L 124 182 L 160 260 L 196 182 L 228 182 L 288 320 L 254 320 L 196 236 L 170 320 L 146 320 Z"
-        fill="url(#wmBlue)"
-        filter="url(#glowBlue)"
-      />
-
-      <path
-        d="M 268 236 L 296 182 L 338 260 L 380 182 L 442 320 L 408 320 L 380 262 L 344 320 L 332 320 L 296 262 L 282 288 L 268 264 Z"
-        fill="url(#wmWhite)"
-        filter="url(#glowWhite)"
-      />
-    </g>
+  <g filter="url(#markShadow)">
+    <path
+      id="wmMarkBlue"
+      d="M104 154L148 202V282L209 219L344 354H286L213 281L141 354H104Z"
+      fill="url(#markBlue)"
+    />
+    <path
+      id="wmMarkTop"
+      d="M224 210H293L259 249Z"
+      fill="url(#markTopBlue)"
+    />
+    <path
+      id="wmMarkWhite"
+      d="M264 244L300 208L327 235L405 154V354H361V267L317 310L294 286L282 299Z"
+      fill="url(#markWhite)"
+    />
   </g>
 </svg>

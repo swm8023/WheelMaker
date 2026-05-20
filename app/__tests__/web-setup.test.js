@@ -66,6 +66,23 @@ describe('web runtime setup', () => {
     expect(sw).toContain("event.data?.type === 'WM_PWA_NOTIFY'");
   });
 
+  test('uses the current WheelMaker brand icon for PWA and desktop publishing', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const iconPath = path.join(projectRoot, 'web', 'public', 'icons', 'icon.svg');
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(projectRoot, 'web', 'public', 'manifest.webmanifest'), 'utf8'),
+    );
+    const icon = fs.readFileSync(iconPath, 'utf8');
+
+    expect(manifest.icons?.[0]?.src).toBe('/icons/icon.svg');
+    expect(icon).toContain('id="appTile"');
+    expect(icon).toContain('id="wmMarkBlue"');
+    expect(icon).toContain('id="wmMarkWhite"');
+    expect(icon).toContain('id="wmMarkTop"');
+    expect(icon).toContain('rx="78"');
+    expect(icon).toContain('filter="url(#tileShadow)"');
+  });
+
   test('webpack output path can be redirected for desktop staging', () => {
     const projectRoot = path.join(__dirname, '..');
     const webpackConfigPath = path.join(projectRoot, 'web', 'webpack.config.js');
