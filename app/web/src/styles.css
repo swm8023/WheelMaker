@@ -1162,8 +1162,8 @@ body,
 }
 
 .settings-skills-scope-project > .settings-skills-scope-header {
-  border-color: color-mix(in srgb, var(--border) 78%, var(--accent));
-  background: color-mix(in srgb, var(--panel-3) 84%, var(--accent) 4%);
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--panel-2) 74%, transparent);
 }
 
 .settings-skills-scope-body {
