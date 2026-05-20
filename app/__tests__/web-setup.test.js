@@ -79,7 +79,9 @@ describe('web runtime setup', () => {
     expect(icon).toContain('id="wmMarkBlue"');
     expect(icon).toContain('id="wmMarkWhite"');
     expect(icon).toContain('id="wmMarkTop"');
-    expect(icon).toContain('rx="78"');
+    expect(icon).toContain('rx="92"');
+    expect(icon).toContain('d="M104 354V154L149 202V282L211 219L287 354H345L214 222L141 354Z"');
+    expect(icon).toContain('d="M264 244L300 208L327 235L405 154V354H361V267L317 310L294 287L282 300Z"');
     expect(icon).toContain('filter="url(#tileShadow)"');
   });
 

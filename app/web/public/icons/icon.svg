@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="WheelMaker icon">
   <defs>
-    <radialGradient id="tileGlow" cx="50%" cy="42%" r="72%">
-      <stop offset="0%" stop-color="#092354"/>
-      <stop offset="56%" stop-color="#03183f"/>
-      <stop offset="100%" stop-color="#000b24"/>
+    <radialGradient id="tileGlow" cx="50%" cy="42%" r="74%">
+      <stop offset="0%" stop-color="#082154"/>
+      <stop offset="58%" stop-color="#03183e"/>
+      <stop offset="100%" stop-color="#000a22"/>
     </radialGradient>
     <linearGradient id="tileEdge" x1="0.04" y1="0" x2="0.98" y2="1">
       <stop offset="0%" stop-color="#214779" stop-opacity="0.82"/>
@@ -35,8 +35,8 @@
     </filter>
   </defs>
 
-  <rect x="12" y="12" width="488" height="488" rx="78" fill="url(#tileGlow)" filter="url(#tileShadow)" id="appTile"/>
-  <rect x="13.5" y="13.5" width="485" height="485" rx="76.5" fill="none" stroke="url(#tileEdge)" stroke-width="2.5"/>
+  <rect x="12" y="12" width="488" height="488" rx="92" fill="url(#tileGlow)" filter="url(#tileShadow)" id="appTile"/>
+  <rect x="13.5" y="13.5" width="485" height="485" rx="90.5" fill="none" stroke="url(#tileEdge)" stroke-width="2.5"/>
   <path
     d="M42 436C72 471 116 490 172 490H340C424 490 490 424 490 340V172C490 116 471 72 436 42C456 72 466 112 466 162V350C466 414 414 466 350 466H162C112 466 72 456 42 436Z"
     fill="#000717"
@@ -46,7 +46,7 @@
   <g filter="url(#markShadow)">
     <path
       id="wmMarkBlue"
-      d="M104 154L148 202V282L209 219L344 354H286L213 281L141 354H104Z"
+      d="M104 354V154L149 202V282L211 219L287 354H345L214 222L141 354Z"
       fill="url(#markBlue)"
     />
     <path
@@ -56,7 +56,7 @@
     />
     <path
       id="wmMarkWhite"
-      d="M264 244L300 208L327 235L405 154V354H361V267L317 310L294 286L282 299Z"
+      d="M264 244L300 208L327 235L405 154V354H361V267L317 310L294 287L282 300Z"
       fill="url(#markWhite)"
     />
   </g>
