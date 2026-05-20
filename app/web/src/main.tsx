@@ -10285,7 +10285,6 @@ function App() {
                   scrollRef={chatScrollRef}
                   displayIndex={chatDisplayIndex}
                   runtimeKey={selectedChatEncodedKey}
-                  heightEstimateRevision={chatLayoutMetrics.contentWidth}
                   atBottomThreshold={CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD}
                   onAtBottomChange={handleChatAtBottomChange}
                   shouldAutoscroll={shouldAutoscrollChat}

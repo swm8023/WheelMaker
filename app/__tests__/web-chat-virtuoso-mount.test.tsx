@@ -215,7 +215,7 @@ describe('chat virtuoso mount fallback', () => {
     }
   });
 
-  test('keeps height estimates stable while the same turn streams', async () => {
+  test('updates height estimates while the same turn streams so the tail is not clipped', async () => {
     const scrollRef = {current: {} as HTMLElement};
     let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
 
@@ -251,8 +251,8 @@ describe('chat virtuoso mount fallback', () => {
       });
 
       const latestProps = mockVirtuosoProps[mockVirtuosoProps.length - 1];
-      expect(latestProps.heightEstimates).toBe(firstHeightEstimates);
-      expect(latestProps.heightEstimates).toEqual([87]);
+      expect(latestProps.heightEstimates).not.toBe(firstHeightEstimates);
+      expect(latestProps.heightEstimates).toEqual([247]);
     } finally {
       if (renderer) {
         await ReactTestRenderer.act(() => {
@@ -348,7 +348,8 @@ describe('chat virtuoso mount fallback', () => {
 
       await flushAnimationFrames(animationFrames.frameCallbacks);
 
-      expect(mockAutoscrollToBottomCalls).toHaveLength(1);
+      expect(mockAutoscrollToBottomCalls).toHaveLength(0);
+      expect(mockScrollToIndexCalls).toHaveLength(0);
       expect(scrollTo).toHaveBeenLastCalledWith({
         top: 480,
         behavior: 'auto',
@@ -401,8 +402,8 @@ describe('chat virtuoso mount fallback', () => {
 
       await flushAnimationFrames(animationFrames.frameCallbacks);
 
-      expect(mockAutoscrollToBottomCalls).toHaveLength(1);
-      expect(mockScrollToIndexCalls).toHaveLength(2);
+      expect(mockAutoscrollToBottomCalls).toHaveLength(0);
+      expect(mockScrollToIndexCalls).toHaveLength(0);
       expect(scrollTo).toHaveBeenCalledTimes(2);
       expect(scrollTo).toHaveBeenLastCalledWith({
         top: 480,
@@ -452,8 +453,8 @@ describe('chat virtuoso mount fallback', () => {
 
       await flushAnimationFrames(animationFrames.frameCallbacks);
 
-      expect(mockAutoscrollToBottomCalls).toHaveLength(1);
-      expect(mockScrollToIndexCalls).toHaveLength(2);
+      expect(mockAutoscrollToBottomCalls).toHaveLength(0);
+      expect(mockScrollToIndexCalls).toHaveLength(0);
       expect(scrollTo).toHaveBeenCalledTimes(2);
       expect(scrollTo).toHaveBeenLastCalledWith({
         top: 480,
