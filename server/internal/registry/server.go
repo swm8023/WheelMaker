@@ -279,7 +279,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			_ = s.writeResponse(state.peer, in.RequestID, in.Method, "", map[string]any{"ok": true})
 		case "monitor.status", "monitor.log", "monitor.db", "monitor.action":
 			s.handleMonitorForwardRequest(state.peer, state, in)
-		case "cmd.npm", "cmd.update":
+		case "cmd.npm", "cmd.update", "cmd.skills":
 			s.handleHubCommandForwardRequest(state.peer, state, in)
 		case "chat.send",
 			"session.list", "session.read", "session.new", "session.resume.list", "session.resume.import", "session.reload", "session.archive", "session.send", "session.cancel", "session.markRead", "session.setConfig", "session.token.providers", "session.token.deepseek.stats", "session.token.scan",
@@ -329,7 +329,7 @@ func methodAllowed(role string, method string) bool {
 		return method == "registry.reportProjects" || method == "registry.updateProject" || method == "registry.session.updated" || method == "registry.session.message" || method == "hub.ping"
 	case "client":
 		return method == "project.list" || method == "project.syncCheck" || method == "batch" ||
-			method == "cmd.npm" || method == "cmd.update" ||
+			method == "cmd.npm" || method == "cmd.update" || method == "cmd.skills" ||
 			method == "chat.send" || strings.HasPrefix(method, "session.") ||
 			strings.HasPrefix(method, "fs.") || strings.HasPrefix(method, "git.")
 	case "monitor":
@@ -667,7 +667,9 @@ func (s *Server) executeHubCommandRequest(state *connectionState, in envelope) e
 	}
 
 	timeout := defaultRequestTimeout
-	if strings.TrimSpace(payload.Action) == "scan" || (in.Method == "cmd.update" && strings.TrimSpace(payload.Action) == "query") {
+	if strings.TrimSpace(payload.Action) == "scan" ||
+		(in.Method == "cmd.skills" && strings.TrimSpace(payload.Action) == "list") ||
+		(in.Method == "cmd.update" && strings.TrimSpace(payload.Action) == "query") {
 		timeout = 60 * time.Second
 	}
 	select {
@@ -802,7 +804,7 @@ func (s *Server) executeBatchRequest(state *connectionState, in envelope) envelo
 				"ok": true,
 			}),
 		}
-	case "cmd.npm", "cmd.update":
+	case "cmd.npm", "cmd.update", "cmd.skills":
 		if state.role != "client" {
 			return s.errorEnvelope(in.Method, codeForbidden, "method not allowed for role", map[string]any{"role": state.role})
 		}

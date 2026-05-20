@@ -313,7 +313,7 @@ Hub 上报（`reportProjects`、`updateProject`）和 Client 查询（`project.l
 | 角色 | 允许的请求方法 |
 |------|---------------|
 | `hub` | `registry.reportProjects`、`registry.updateProject`、`registry.session.updated`、`registry.session.message`、`hub.ping` |
-| `client` | `project.list`、`project.syncCheck`、`cmd.npm`、`cmd.update`、`chat.send`、`session.*`、`fs.*`、`git.*`、`batch` |
+| `client` | `project.list`、`project.syncCheck`、`cmd.npm`、`cmd.update`、`cmd.skills`、`chat.send`、`session.*`、`fs.*`、`git.*`、`batch` |
 | `monitor` | `project.list`、`monitor.listHub`、`monitor.status`、`monitor.log`、`monitor.db`、`monitor.action`、`batch` |
 
 - 方法与角色不匹配返回 `FORBIDDEN`。
@@ -1503,6 +1503,130 @@ App 侧不使用 `query`。如果 `operation.running=true`，继续定时发 `sc
 - signal 写失败：`INTERNAL`。
 - `query` 的 git fetch/对比失败不使用协议 error，返回 `ok:false`、`status:"checking_failed"` 和 `error`。
 
+#### 5.12.3 `cmd.skills`
+
+`cmd.skills` 管理 Hub 全局 scope 和 Project scope 中通过 upstream `skills` CLI 安装的 agent skills。支持 action：
+
+- `scan`
+- `list`
+- `install`
+- `uninstall`
+- `update`
+
+所有 action 都是同步请求：Hub 等待 CLI 完成后返回最终结构化结果，不返回 `accepted`，App 不轮询。Registry 只按 `payload.hubId` 转发；Project scope 由 Hub 根据 `projectName` 查本地已上报 Project，不接受 App 传入 cwd、path、raw command、args 或 env。
+
+请求 payload：
+
+```json
+{
+  "action": "scan|list|install|uninstall|update",
+  "hubId": "hub-a",
+  "scope": "hub|project",
+  "projectName": "WheelMaker",
+  "source": "mattpocock/skills",
+  "skills": ["tdd", "diagnose"]
+}
+```
+
+约束：
+
+- `scan` 需要 `action`、`hubId`，返回目标 Hub 的 Hub Skills 和所有 Project Skills。
+- `list` 需要 `action`、`hubId`、`source`，列出一个 Remote Skill Source 可安装的 skills。
+- `install` 需要 `action`、`hubId`、`scope`、`source`、`skills[]`；Project scope 还需要 `projectName`。
+- `uninstall` 需要 `action`、`hubId`、`scope`、`skills[]`；Project scope 还需要 `projectName`。
+- `update` 需要 `action`、`hubId`、`scope`；Project scope 还需要 `projectName`。
+- `source` 只接受 GitHub `owner/repo`、GitHub HTTPS repository URL、或 well-known HTTPS skill endpoint。
+- 安装固定目标 agent：`codex`、`claude-code`、`opencode`、`github-copilot`。
+- 默认使用 upstream symlink 安装行为，不传 `--copy`。
+
+`scan` 响应：
+
+```json
+{
+  "ok": true,
+  "hubId": "hub-a",
+  "updatedAt": "2026-05-20T10:00:00Z",
+  "hubSkills": {
+    "scope": "hub",
+    "skills": [
+      {
+        "name": "tdd",
+        "path": "C:/Users/me/.agents/skills/tdd",
+        "category": "Mattpocock Skills",
+        "categoryKey": "mattpocock-skills",
+        "agents": ["Codex", "Claude Code", "GitHub Copilot", "OpenCode"]
+      }
+    ]
+  },
+  "projects": [
+    {
+      "projectName": "WheelMaker",
+      "projectId": "hub-a:WheelMaker",
+      "online": true,
+      "path": "D:/Code/WheelMaker",
+      "skills": [
+        {
+          "name": "diagnose",
+          "category": "Mattpocock Skills",
+          "categoryKey": "mattpocock-skills",
+          "agents": ["Codex", "Claude Code"]
+        }
+      ],
+      "error": ""
+    }
+  ],
+  "message": ""
+}
+```
+
+`list` 响应：
+
+```json
+{
+  "ok": true,
+  "hubId": "hub-a",
+  "source": "mattpocock/skills",
+  "candidates": [
+    {
+      "name": "tdd",
+      "description": "Test-driven development with red-green-refactor loop.",
+      "category": "Mattpocock Skills",
+      "categoryKey": "mattpocock-skills"
+    }
+  ],
+  "message": ""
+}
+```
+
+`install`、`uninstall`、`update` 返回变更后的 scope snapshot：
+
+```json
+{
+  "ok": true,
+  "hubId": "hub-a",
+  "scope": "project",
+  "projectName": "WheelMaker",
+  "updatedAt": "2026-05-20T10:00:00Z",
+  "skills": [
+    {
+      "name": "tdd",
+      "category": "Mattpocock Skills",
+      "categoryKey": "mattpocock-skills",
+      "agents": ["Codex", "Claude Code", "GitHub Copilot", "OpenCode"]
+    }
+  ],
+  "message": "Installed 1 skill"
+}
+```
+
+错误约束：
+
+- payload 非法、缺少 `hubId`、未知 action、缺少 scope 或 projectName：`INVALID_ARGUMENT`。
+- 非 Remote Skill Source：`FORBIDDEN` 或 `INVALID_ARGUMENT`。
+- Project 不存在：`NOT_FOUND`。
+- 目标 hub 离线：`UNAVAILABLE`。
+- CLI 执行失败不暴露完整 stdout/stderr，响应 payload 使用 `ok:false` 和最多 500 字符的 `errorSummary`。
+
 ### 5.13 Chat / Session 透传方法
 
 Registry 对以下 client 请求按 `projectId` 转发到 hub，并把 hub 响应原样返回：
@@ -1730,7 +1854,7 @@ Registry 即将关闭客户端连接时提前通知：
 
 4. **Client 方法白名单收敛**：移除 `chat.session.list` / `chat.session.read`，统一使用 `session.*` 族方法。
 
-5. **Hub 级维护命令收敛**：新增显式 allowlist 的 `cmd.npm` 与 `cmd.update`。二者均按 `payload.hubId` 路由到目标 Hub，不使用 `projectId`，Registry 不持久化任务状态。
+5. **Hub 级维护命令收敛**：新增显式 allowlist 的 `cmd.npm`、`cmd.update` 与 `cmd.skills`。三者均按 `payload.hubId` 路由到目标 Hub，不使用 `projectId`，Registry 不持久化任务状态。
 
 6. **`fs.read` 语义收敛**：改为整文件返回，不再定义 `offset` / `count` / `hasMore` 分段语义；大文件由客户端先 `fs.info` 再确认拉取。
 

@@ -993,6 +993,94 @@ func TestCmdUpdateForwardsByHubIDWithoutProjectID(t *testing.T) {
 	}
 }
 
+func TestCmdSkillsForwardsByHubIDWithoutProjectID(t *testing.T) {
+	s := New(Config{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	hub := dialWS(t, ts.URL+"/ws")
+	defer hub.Close()
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wheelmaker-hub",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.2",
+			"role":            "hub",
+			"hubId":           "hub-skills",
+		},
+	})
+	initResp := mustReadEnvelope(t, hub)
+	principal, _ := initResp.Payload["principal"].(map[string]any)
+	connectionEpoch, _ := principal["connectionEpoch"].(float64)
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "registry.reportProjects",
+		Payload: map[string]any{
+			"hubId":           "hub-skills",
+			"connectionEpoch": int64(connectionEpoch),
+			"projects":        []map[string]any{},
+		},
+	})
+	_ = mustReadEnvelope(t, hub)
+
+	client := dialWS(t, ts.URL+"/ws")
+	defer client.Close()
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-web",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.2",
+			"role":            "client",
+		},
+	})
+	_ = mustReadEnvelope(t, client)
+
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "cmd.skills",
+		Payload: map[string]any{
+			"action": "scan",
+			"hubId":  "hub-skills",
+		},
+	})
+	_ = hub.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	forwarded := mustReadEnvelope(t, hub)
+	if forwarded.Type != "request" || forwarded.Method != "cmd.skills" {
+		t.Fatalf("forwarded=%#v, want cmd.skills request", forwarded)
+	}
+	if forwarded.ProjectID != "" {
+		t.Fatalf("forwarded projectId=%q, want empty", forwarded.ProjectID)
+	}
+	if forwarded.Payload["hubId"] != "hub-skills" || forwarded.Payload["action"] != "scan" {
+		t.Fatalf("forwarded payload=%#v", forwarded.Payload)
+	}
+
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: forwarded.RequestID,
+		Type:      "response",
+		Method:    "cmd.skills",
+		Payload: map[string]any{
+			"ok":    true,
+			"hubId": "hub-skills",
+		},
+	})
+	resp := mustReadEnvelope(t, client)
+	if resp.Type != "response" || resp.Method != "cmd.skills" {
+		t.Fatalf("client response=%#v, want cmd.skills response", resp)
+	}
+	if resp.ProjectID != "" {
+		t.Fatalf("client response projectId=%q, want empty", resp.ProjectID)
+	}
+}
+
 func TestCmdPrefixIsNotAllowedByWildcard(t *testing.T) {
 	s := New(Config{})
 	ts := httptest.NewServer(s.Handler())
@@ -1027,6 +1115,10 @@ func TestCmdPrefixIsNotAllowedByWildcard(t *testing.T) {
 	}
 	if resp.Payload["code"] != codeForbidden {
 		t.Fatalf("code=%v, want %s", resp.Payload["code"], codeForbidden)
+	}
+
+	if !methodAllowed("client", "cmd.skills") {
+		t.Fatal("cmd.skills should be explicitly allowed")
 	}
 }
 
