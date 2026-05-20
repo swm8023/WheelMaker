@@ -65,4 +65,26 @@ describe('web runtime setup', () => {
     expect(sw).toContain("event.data?.type === 'WM_PWA_DEMO_NOTIFY'");
     expect(sw).toContain("event.data?.type === 'WM_PWA_NOTIFY'");
   });
+
+  test('webpack output path can be redirected for desktop staging', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const webpackConfigPath = path.join(projectRoot, 'web', 'webpack.config.js');
+    const target = path.join(projectRoot, '..', 'server', 'cmd', 'wheelmaker-desktop', 'webroot');
+    const previous = process.env.WHEELMAKER_WEB_TARGET;
+
+    jest.resetModules();
+    process.env.WHEELMAKER_WEB_TARGET = target;
+    const redirected = require(webpackConfigPath);
+
+    if (previous === undefined) {
+      delete process.env.WHEELMAKER_WEB_TARGET;
+    } else {
+      process.env.WHEELMAKER_WEB_TARGET = previous;
+    }
+    jest.resetModules();
+    const normal = require(webpackConfigPath);
+
+    expect(redirected.output.path).toBe(path.resolve(target));
+    expect(normal.output.path).toBe(path.join(require('os').homedir(), '.wheelmaker', 'web'));
+  });
 });

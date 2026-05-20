@@ -33,5 +33,7 @@ Assert-NotContains -Text $deployBat -Needle "npm run build:web:release"
 Assert-NotContains -Text $deployBat -Needle "[FAILED] web publish exited with code"
 Assert-NotContains -Text $deployBat -Needle "call npm ci --include=dev"
 Assert-NotContains -Text $deployBat -Needle "syncing app Web dependencies"
+Assert-NotContains -Text $deployBat -Needle "publish_desktop.ps1"
+Assert-NotContains -Text $deployBat -Needle "publish-desktop.bat"
 
 Write-Host "deploy.bat internal web publish checks passed"

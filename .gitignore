@@ -17,6 +17,8 @@ app/node_modules/
 .gomodcache/
 app/dist/
 app/android/app/src/main/assets/wheelmaker-web/
+server/cmd/wheelmaker-desktop/webroot/*
+!server/cmd/wheelmaker-desktop/webroot/.gitkeep
 
 # Runtime log files
 wheelmaker_*.log

@@ -2,7 +2,9 @@ const path = require('path');
 const os = require('os');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 
-const webTarget = path.join(os.homedir(), '.wheelmaker', 'web');
+const webTarget = process.env.WHEELMAKER_WEB_TARGET
+  ? path.resolve(process.env.WHEELMAKER_WEB_TARGET)
+  : path.join(os.homedir(), '.wheelmaker', 'web');
 
 module.exports = {
   entry: {
