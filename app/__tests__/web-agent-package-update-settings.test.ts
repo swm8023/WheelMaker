@@ -69,7 +69,9 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('handleAgentPackageConfirmedAction');
     expect(mainTsx).toContain('packageStatusLabel');
     expect(mainTsx).toContain('const showWheelMakerUpdateAction =');
-    expect(mainTsx).toContain("wheelMakerStatus !== 'up_to_date'");
+    expect(mainTsx).toContain('shouldShowWheelMakerUpdateAction({');
+    expect(mainTsx).toContain('loading: wheelMaker?.loading === true,');
+    expect(mainTsx).not.toContain("wheelMakerStatus !== 'up_to_date'");
     expect(mainTsx).not.toContain('Agent Packages');
     expect(mainTsx).not.toContain('>Prefix:');
     expect(mainTsx).not.toContain('title={hub?.npmPrefix');

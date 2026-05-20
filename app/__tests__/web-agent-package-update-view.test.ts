@@ -1,4 +1,10 @@
-import {deriveRegistryHubIds, packageStatusLabel, wheelMakerUpdateStatusLabel, withAgentPackageTimeout} from '../web/src/agentPackageUpdateView';
+import {
+  deriveRegistryHubIds,
+  packageStatusLabel,
+  shouldShowWheelMakerUpdateAction,
+  wheelMakerUpdateStatusLabel,
+  withAgentPackageTimeout,
+} from '../web/src/agentPackageUpdateView';
 import type {RegistryHub} from '../web/src/types/registry';
 
 describe('agent package update view helpers', () => {
@@ -30,6 +36,55 @@ describe('agent package update view helpers', () => {
     expect(wheelMakerUpdateStatusLabel('ahead_of_remote')).toBe('Ahead of remote');
     expect(wheelMakerUpdateStatusLabel('diverged')).toBe('Diverged');
     expect(wheelMakerUpdateStatusLabel('custom_status')).toBe('custom_status');
+  });
+
+  test('does not allow WheelMaker update while the hub is still checking', () => {
+    expect(
+      shouldShowWheelMakerUpdateAction({
+        data: null,
+        loading: true,
+        pending: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowWheelMakerUpdateAction({
+        data: {
+          ok: true,
+          status: 'up_to_date',
+          hubId: 'hub-a',
+          pendingSignal: false,
+          canUpdatePublish: true,
+        },
+        loading: false,
+        pending: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowWheelMakerUpdateAction({
+        data: {
+          ok: true,
+          status: 'update_available',
+          hubId: 'hub-a',
+          pendingSignal: false,
+          canUpdatePublish: true,
+        },
+        loading: false,
+        pending: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowWheelMakerUpdateAction({
+        data: {
+          ok: true,
+          status: 'update_pending',
+          hubId: 'hub-a',
+          pendingSignal: true,
+          canUpdatePublish: true,
+        },
+        loading: true,
+        pending: false,
+      }),
+    ).toBe(true);
   });
 
   test('turns a stuck scan promise into a timeout error', async () => {

@@ -109,6 +109,7 @@ import {
   AGENT_PACKAGE_SCAN_TIMEOUT_MS,
   deriveRegistryHubIds,
   packageStatusLabel,
+  shouldShowWheelMakerUpdateAction,
   wheelMakerUpdateStatusLabel,
   withAgentPackageTimeout,
 } from './agentPackageUpdateView';
@@ -9139,10 +9140,11 @@ function App() {
             const hub = agentCard?.hub;
             const operation = agentCard?.operation;
             const wheelMakerPending = wheelMakerUpdatePendingHubId === card.hubId;
-            const showWheelMakerUpdateAction =
-              wheelMakerPending ||
-              wheelMakerData?.pendingSignal === true ||
-              wheelMakerStatus !== 'up_to_date';
+            const showWheelMakerUpdateAction = shouldShowWheelMakerUpdateAction({
+              data: wheelMakerData,
+              loading: wheelMaker?.loading === true,
+              pending: wheelMakerPending,
+            });
             const wheelMakerCurrentSha = wheelMakerData?.release?.sha || wheelMakerData?.git?.currentSha || '';
             const wheelMakerLatestSha = wheelMakerData?.git?.latestSha || '';
             const wheelMakerCurrentTime = formatWheelMakerDateTime(

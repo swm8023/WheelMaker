@@ -1,4 +1,8 @@
-import type {RegistryHub, RegistryNpmPackageStatus} from './types/registry';
+import type {
+  RegistryHub,
+  RegistryNpmPackageStatus,
+  RegistryWheelMakerUpdateResponse,
+} from './types/registry';
 
 export const AGENT_PACKAGE_SCAN_TIMEOUT_MS = 65000;
 
@@ -67,6 +71,20 @@ export function wheelMakerUpdateStatusLabel(status: string): string {
     default:
       return status || 'Unknown';
   }
+}
+
+export function shouldShowWheelMakerUpdateAction(input: {
+  data: RegistryWheelMakerUpdateResponse | null;
+  loading: boolean;
+  pending: boolean;
+}): boolean {
+  if (input.pending || input.data?.pendingSignal === true) {
+    return true;
+  }
+  if (input.loading || !input.data) {
+    return false;
+  }
+  return input.data.canUpdatePublish === true && input.data.status !== 'up_to_date';
 }
 
 export function withAgentPackageTimeout<T>(
