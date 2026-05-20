@@ -234,9 +234,16 @@ export const ChatVirtuosoTurnList = React.forwardRef<
   const handleTotalListHeightChanged = React.useCallback(() => {
     if (shouldAutoscrollNow()) {
       virtuosoRef.current?.autoscrollToBottom();
+      scrollToLastDisplayItem('auto');
+      settleScrollParentToBottom('auto');
       requestScrollToLastDisplayItem('auto');
     }
-  }, [requestScrollToLastDisplayItem, shouldAutoscrollNow]);
+  }, [
+    requestScrollToLastDisplayItem,
+    scrollToLastDisplayItem,
+    settleScrollParentToBottom,
+    shouldAutoscrollNow,
+  ]);
 
   React.useImperativeHandle(ref, () => ({
     autoscrollToBottom: () => {

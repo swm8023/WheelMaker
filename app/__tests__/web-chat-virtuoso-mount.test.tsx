@@ -279,6 +279,13 @@ describe('chat virtuoso mount fallback', () => {
       await ReactTestRenderer.act(() => {
         props.totalListHeightChanged();
       });
+
+      expect(mockAutoscrollToBottomCalls).toHaveLength(1);
+      expect(scrollTo).toHaveBeenLastCalledWith({
+        top: 480,
+        behavior: 'auto',
+      });
+
       await flushAnimationFrames(animationFrames.frameCallbacks);
 
       expect(mockAutoscrollToBottomCalls).toHaveLength(1);
