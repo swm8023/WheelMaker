@@ -267,7 +267,7 @@ func TestSkillsCommandUninstallRemovesAllLinkedAgents(t *testing.T) {
 	if cmdErr != nil {
 		t.Fatalf("uninstall error: %#v", cmdErr)
 	}
-	waitForSkillsCall(t, runner, "", "skills", "remove", "-g", "--skill", "tdd", "--agent", "*", "-y")
+	waitForSkillsCall(t, runner, "", "skills", "remove", "-g", "--skill", "tdd", "--agent", "codex", "claude-code", "opencode", "github-copilot", "-y")
 }
 
 func TestSkillsCommandUpdateUsesHubAndProjectScopes(t *testing.T) {
@@ -317,7 +317,7 @@ func TestSkillsCommandUpdateUsesHubAndProjectScopes(t *testing.T) {
 
 func TestSkillsCommandWriteActionsReturnAcceptedOperation(t *testing.T) {
 	runner := newFakeSkillsRunner()
-	block := runner.block("", "skills", "remove", "-g", "--skill", "tdd", "--agent", "*", "-y")
+	block := runner.block("", "skills", "remove", "-g", "--skill", "tdd", "--agent", "codex", "claude-code", "opencode", "github-copilot", "-y")
 	cmd := newSkillsCommandWithRunner(runner, skillsCommandConfig{HubID: "hub-a"})
 
 	resp, cmdErr := cmd.Handle(context.Background(), rawSkillsCommandPayload(t, map[string]any{
@@ -342,7 +342,7 @@ func TestSkillsCommandWriteActionsReturnAcceptedOperation(t *testing.T) {
 
 func TestSkillsCommandRejectsConcurrentWriteOperations(t *testing.T) {
 	runner := newFakeSkillsRunner()
-	block := runner.block("", "skills", "remove", "-g", "--skill", "tdd", "--agent", "*", "-y")
+	block := runner.block("", "skills", "remove", "-g", "--skill", "tdd", "--agent", "codex", "claude-code", "opencode", "github-copilot", "-y")
 	cmd := newSkillsCommandWithRunner(runner, skillsCommandConfig{HubID: "hub-a"})
 
 	_, cmdErr := cmd.Handle(context.Background(), rawSkillsCommandPayload(t, map[string]any{
@@ -354,7 +354,7 @@ func TestSkillsCommandRejectsConcurrentWriteOperations(t *testing.T) {
 	if cmdErr != nil {
 		t.Fatalf("first uninstall error: %#v", cmdErr)
 	}
-	waitForSkillsCall(t, runner, "", "skills", "remove", "-g", "--skill", "tdd", "--agent", "*", "-y")
+	waitForSkillsCall(t, runner, "", "skills", "remove", "-g", "--skill", "tdd", "--agent", "codex", "claude-code", "opencode", "github-copilot", "-y")
 	_, cmdErr = cmd.Handle(context.Background(), rawSkillsCommandPayload(t, map[string]any{
 		"action": "update",
 		"hubId":  "hub-a",

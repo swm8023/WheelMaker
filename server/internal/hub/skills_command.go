@@ -348,13 +348,7 @@ func (c *SkillsCommand) startUninstall(payload skillsCommandPayload) (any, *skil
 	if cmdErr != nil {
 		return nil, cmdErr
 	}
-	args := []string{"remove"}
-	if target.scope == "hub" {
-		args = append(args, "-g")
-	}
-	args = append(args, "--skill")
-	args = append(args, payload.Skills...)
-	args = append(args, "--agent", "*", "-y")
+	args := skillsRemoveArgs(target, payload.Skills)
 	return c.startOperation(payload, []skillsOperationRun{{
 		target:  target,
 		args:    args,
@@ -506,6 +500,18 @@ func skillsAddArgs(target skillsCommandTarget, source string, skills []string) [
 	if target.scope == "project" {
 		args = append(args, "--copy")
 	}
+	return append(args, "-y")
+}
+
+func skillsRemoveArgs(target skillsCommandTarget, skills []string) []string {
+	args := []string{"remove"}
+	if target.scope == "hub" {
+		args = append(args, "-g")
+	}
+	args = append(args, "--skill")
+	args = append(args, skills...)
+	args = append(args, "--agent")
+	args = append(args, fixedSkillAgents...)
 	return append(args, "-y")
 }
 
