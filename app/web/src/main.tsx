@@ -8945,11 +8945,13 @@ function App() {
     const groups = groupSkillsByCategory(skills);
     const disabled = options.disabled === true;
     const actionDisabled = disabled || options.operationRunning === true || !!skillsPendingKey;
+    const skillCount = skills.length;
     return (
       <section className="settings-skills-scope">
         <div className="settings-skills-scope-header">
           <div className="settings-skills-scope-title-wrap">
-            <span className="settings-skills-scope-title">{title}</span>
+            <span className="settings-skills-scope-title" title={title}>{title}</span>
+            <span className="settings-skills-count">{skillCount}</span>
             {disabled ? <span className="agent-package-status status-not_published">Offline</span> : null}
           </div>
           <div className="settings-skills-scope-actions">
@@ -8971,44 +8973,49 @@ function App() {
           <div className="settings-metadata-error">{options.error}</div>
         ) : null}
         {renderSkillInstallPanel({hubId, scope: options.scope, projectName: options.projectName})}
-        {groups.length === 0 && !options.error ? (
-          <div className="settings-skills-empty">No skills installed.</div>
-        ) : null}
-        {groups.map(group => (
-          <div key={`${hubId}:${title}:${group.categoryKey}`} className="settings-skill-category-block">
-            <div className="settings-skill-category">{group.category}</div>
-            {group.skills.map(skill => {
-              const pendingKey = skillActionPendingKey({
-                hubId,
-                scope: options.scope,
-                projectName: options.projectName,
-                skillName: skill.name,
-                action: 'skillUninstall',
-              });
-              const pending = skillsPendingKey === pendingKey;
-              return (
-                <div key={`${hubId}:${title}:${skill.name}`} className="settings-skill-row">
-                  <div className="settings-skill-row-main">
-                    <span className="settings-skill-name" title={skill.path || skill.name}>{skill.name}</span>
+        <div className="settings-skills-scope-body">
+          {groups.length === 0 && !options.error ? (
+            <div className="settings-skills-empty">No skills installed.</div>
+          ) : null}
+          {groups.map(group => (
+            <div key={`${hubId}:${title}:${group.categoryKey}`} className="settings-skill-category-block">
+              <div className="settings-skill-category">
+                <span>{group.category}</span>
+                <span>{group.skills.length}</span>
+              </div>
+              {group.skills.map(skill => {
+                const pendingKey = skillActionPendingKey({
+                  hubId,
+                  scope: options.scope,
+                  projectName: options.projectName,
+                  skillName: skill.name,
+                  action: 'skillUninstall',
+                });
+                const pending = skillsPendingKey === pendingKey;
+                return (
+                  <div key={`${hubId}:${title}:${skill.name}`} className="settings-skill-row">
+                    <div className="settings-skill-row-main">
+                      <span className="settings-skill-name" title={skill.path || skill.name}>{skill.name}</span>
+                    </div>
+                    {renderSkillIconButton({
+                      label: pending ? 'Removing skill' : 'Uninstall skill',
+                      icon: 'codicon-trash',
+                      danger: true,
+                      pending,
+                      disabled: actionDisabled,
+                      onClick: () => requestSkillUninstall({
+                        hubId,
+                        scope: options.scope,
+                        projectName: options.projectName,
+                        skillName: skill.name,
+                      }),
+                    })}
                   </div>
-                  {renderSkillIconButton({
-                    label: pending ? 'Removing skill' : 'Uninstall skill',
-                    icon: 'codicon-trash',
-                    danger: true,
-                    pending,
-                    disabled: actionDisabled,
-                    onClick: () => requestSkillUninstall({
-                      hubId,
-                      scope: options.scope,
-                      projectName: options.projectName,
-                      skillName: skill.name,
-                    }),
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        ))}
+                );
+              })}
+            </div>
+          ))}
+        </div>
       </section>
     );
   };
@@ -9031,13 +9038,21 @@ function App() {
             const data = hub.data;
             const operation = data?.operation ?? null;
             const operationRunning = operation?.running === true;
+            const projects = sortSkillProjects(data?.projects ?? []);
+            const hubSkillCount = data?.hubSkills?.skills.length ?? 0;
+            const projectSkillCount = projects.reduce((total, project) => total + project.skills.length, 0);
             return (
               <section className="settings-skills-hub" key={`skills-hub:${hub.hubId}`}>
                 <div className="settings-skills-hub-header">
-                  <span className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', hub.hubId)}`}>
-                    <span className="wide-project-hub-dot" aria-hidden="true" />
-                    <span className="wide-project-hub-label">Hub: {hub.hubId}</span>
-                  </span>
+                  <div className="settings-skills-hub-title">
+                    <span className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', hub.hubId)}`}>
+                      <span className="wide-project-hub-dot" aria-hidden="true" />
+                      <span className="wide-project-hub-label">Hub: {hub.hubId}</span>
+                    </span>
+                    <span className="settings-skills-hub-meta">
+                      {hubSkillCount} hub skills / {projects.length} projects / {projectSkillCount} project skills
+                    </span>
+                  </div>
                   <div className="settings-skills-scope-actions">
                     {hub.loading ? <span className="wide-session-agent-tag">Scanning</span> : null}
                     {renderSkillIconButton({
@@ -9061,19 +9076,21 @@ function App() {
                     {operation.errorSummary ? <span>{operation.errorSummary}</span> : null}
                   </div>
                 ) : null}
-                {renderSkillScopeRows(hub.hubId, 'Hub Skills', data?.hubSkills?.skills ?? [], {scope: 'hub', operationRunning})}
-                {sortSkillProjects(data?.projects ?? []).map(project => (
-                  <div className="settings-skills-project" key={`${hub.hubId}:${project.projectName}`}>
-                    {renderSkillScopeRows(hub.hubId, project.projectName, project.skills, {
-                      scope: 'project',
-                      projectName: project.projectName,
-                      disabled: !project.online,
-                      error: project.error,
-                      allowUpdate: true,
-                      operationRunning,
-                    })}
-                  </div>
-                ))}
+                <div className="settings-skills-scope-grid">
+                  {renderSkillScopeRows(hub.hubId, 'Hub Skills', data?.hubSkills?.skills ?? [], {scope: 'hub', operationRunning})}
+                  {projects.map(project => (
+                    <div className="settings-skills-project" key={`${hub.hubId}:${project.projectName}`}>
+                      {renderSkillScopeRows(hub.hubId, project.projectName, project.skills, {
+                        scope: 'project',
+                        projectName: project.projectName,
+                        disabled: !project.online,
+                        error: project.error,
+                        allowUpdate: true,
+                        operationRunning,
+                      })}
+                    </div>
+                  ))}
+                </div>
               </section>
             );
           })}

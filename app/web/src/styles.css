@@ -1001,8 +1001,8 @@ body,
 
 .settings-skill-icon-btn {
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
   border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 9%, var(--panel));
@@ -1029,21 +1029,21 @@ body,
 }
 
 .settings-skill-icon-btn .codicon {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .settings-skills-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .settings-skills-hub {
   display: grid;
-  gap: 9px;
+  gap: 7px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: var(--panel);
-  padding: 9px;
+  background: color-mix(in srgb, var(--panel) 82%, var(--panel-2));
+  padding: 7px;
 }
 
 .settings-skills-hub-header,
@@ -1058,29 +1058,81 @@ body,
   min-width: 0;
 }
 
+.settings-skills-hub-header {
+  align-items: flex-start;
+  padding-bottom: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+}
+
+.settings-skills-hub-title {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.settings-skills-hub-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.2;
+}
+
+.settings-skills-scope-grid {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+}
+
+.settings-skills-scope-grid > .settings-skills-scope:first-child {
+  grid-column: 1 / -1;
+}
+
 .settings-skills-scope,
 .settings-skills-project,
 .settings-skills-install-panel,
 .settings-skills-candidates {
   display: grid;
   min-width: 0;
-  gap: 6px;
+  gap: 5px;
 }
 
 .settings-skills-candidates {
   gap: 2px;
+  max-height: min(34vh, 260px);
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 6px;
+  padding: 3px 6px;
+  background: color-mix(in srgb, var(--panel) 72%, var(--panel-3));
 }
 
 .settings-skills-scope {
-  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  padding-top: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  padding: 5px 0 4px 8px;
+}
+
+.settings-skills-project .settings-skills-scope {
+  border-left-color: color-mix(in srgb, var(--border) 78%, transparent);
+}
+
+.settings-skills-scope-body {
+  display: grid;
+  min-width: 0;
+  gap: 0;
+  max-height: min(32vh, 320px);
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .settings-skills-install-panel {
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
   border-radius: 7px;
   background: color-mix(in srgb, var(--panel) 90%, var(--accent));
-  padding: 9px;
+  padding: 7px;
 }
 
 .settings-skills-scope-title-wrap,
@@ -1101,10 +1153,22 @@ body,
   font-weight: 700;
 }
 
+.settings-skills-count {
+  flex: 0 0 auto;
+  min-width: 22px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+}
+
 .settings-skills-source-input {
   flex: 1 1 auto;
   min-width: 0;
-  height: 30px;
+  height: 28px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel-3);
@@ -1127,23 +1191,40 @@ body,
 }
 
 .settings-skill-category {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   color: var(--muted);
   font-size: 10.5px;
   font-weight: 800;
   line-height: 1.2;
-  padding: 6px 0 4px;
+  padding: 5px 0 3px;
   text-transform: uppercase;
+  background: color-mix(in srgb, var(--panel) 82%, var(--panel-2));
+}
+
+.settings-skill-category span:last-child {
+  color: color-mix(in srgb, var(--muted) 74%, var(--text));
+  font-weight: 700;
 }
 
 .settings-skills-candidates .settings-skill-category {
+  position: static;
   font-size: 10px;
-  padding: 4px 0 1px;
+  padding: 5px 0 2px;
+  background: transparent;
 }
 
 .settings-skill-row {
-  min-height: 36px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 30px;
   border-top: 1px solid color-mix(in srgb, var(--border) 64%, transparent);
-  padding: 6px 0;
+  padding: 3px 0;
 }
 
 .settings-skills-candidates .settings-skill-row {
@@ -1152,7 +1233,8 @@ body,
 }
 
 .settings-skill-candidate-row {
-  justify-content: flex-start;
+  grid-template-columns: 16px minmax(0, 1fr);
+  justify-content: initial;
   gap: 8px;
 }
 
@@ -1160,6 +1242,10 @@ body,
   min-height: 28px;
   border-top: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 64%, transparent);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--panel) 72%, var(--panel-3));
 }
 
 .settings-skill-candidate-row input {
@@ -1173,6 +1259,7 @@ body,
   min-width: 0;
   display: flex;
   align-items: center;
+  overflow: hidden;
 }
 
 .settings-skill-name {
