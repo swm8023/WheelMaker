@@ -73,5 +73,7 @@ describe('skill management settings UI source structure', () => {
     expect(stylesCss).toContain('.settings-skill-category');
     expect(stylesCss).toContain('.settings-skill-icon-btn');
     expect(stylesCss).toContain('.settings-skill-select-all-row');
+    expect(stylesCss).toContain('.settings-skills-candidates .settings-skill-row');
+    expect(stylesCss).toContain('min-height: 26px;');
   });
 });
