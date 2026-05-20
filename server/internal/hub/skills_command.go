@@ -1,0 +1,785 @@
+package hub
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+
+	rp "github.com/swm8023/wheelmaker/internal/protocol"
+)
+
+var (
+	skillSourceRepoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	skillSourceSlugPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+	skillNamePattern       = regexp.MustCompile(`^[@A-Za-z0-9][@A-Za-z0-9_.:-]*$`)
+	ansiEscapePattern      = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+)
+
+type skillsCommandCall struct {
+	Dir  string
+	Name string
+	Args []string
+}
+
+type skillsCommandResult struct {
+	Stdout   string
+	Stderr   string
+	ExitCode int
+	Err      error
+}
+
+type skillsCommandRunner interface {
+	Run(ctx context.Context, dir string, name string, args ...string) skillsCommandResult
+}
+
+type execSkillsCommandRunner struct{}
+
+func (execSkillsCommandRunner) Run(ctx context.Context, dir string, name string, args ...string) skillsCommandResult {
+	cmd := exec.CommandContext(ctx, name, args...)
+	if strings.TrimSpace(dir) != "" {
+		cmd.Dir = dir
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	exitCode := 0
+	if err != nil {
+		exitCode = -1
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+	return skillsCommandResult{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		ExitCode: exitCode,
+		Err:      err,
+	}
+}
+
+type skillsCommandConfig struct {
+	HubID          string
+	Projects       []ProjectInfo
+	GlobalLockPath string
+}
+
+type SkillsCommand struct {
+	runner         skillsCommandRunner
+	now            func() time.Time
+	hubID          string
+	globalLockPath string
+
+	mu       sync.RWMutex
+	projects []ProjectInfo
+}
+
+func NewSkillsCommand(config skillsCommandConfig) *SkillsCommand {
+	return newSkillsCommandWithRunner(execSkillsCommandRunner{}, config)
+}
+
+func newSkillsCommandWithRunner(runner skillsCommandRunner, config skillsCommandConfig) *SkillsCommand {
+	if runner == nil {
+		runner = execSkillsCommandRunner{}
+	}
+	cmd := &SkillsCommand{
+		runner:         runner,
+		hubID:          strings.TrimSpace(config.HubID),
+		globalLockPath: strings.TrimSpace(config.GlobalLockPath),
+		now: func() time.Time {
+			return time.Now().UTC()
+		},
+	}
+	cmd.SetProjects(config.Projects)
+	return cmd
+}
+
+func (c *SkillsCommand) SetProjects(projects []ProjectInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.projects = append([]ProjectInfo(nil), projects...)
+}
+
+type skillsCommandPayload struct {
+	Action      string   `json:"action"`
+	HubID       string   `json:"hubId"`
+	Scope       string   `json:"scope,omitempty"`
+	ProjectName string   `json:"projectName,omitempty"`
+	Source      string   `json:"source,omitempty"`
+	Skills      []string `json:"skills,omitempty"`
+}
+
+type skillsCommandResponse struct {
+	OK           bool                    `json:"ok"`
+	HubID        string                  `json:"hubId"`
+	UpdatedAt    string                  `json:"updatedAt,omitempty"`
+	Source       string                  `json:"source,omitempty"`
+	Scope        string                  `json:"scope,omitempty"`
+	ProjectName  string                  `json:"projectName,omitempty"`
+	HubSkills    skillsScopeSnapshot     `json:"hubSkills,omitempty"`
+	Projects     []skillsProjectSnapshot `json:"projects,omitempty"`
+	Skills       []skillsSkillSnapshot   `json:"skills,omitempty"`
+	Candidates   []skillsSourceCandidate `json:"candidates,omitempty"`
+	Message      string                  `json:"message,omitempty"`
+	ErrorSummary string                  `json:"errorSummary,omitempty"`
+}
+
+type skillsScopeSnapshot struct {
+	Scope  string                `json:"scope"`
+	Skills []skillsSkillSnapshot `json:"skills"`
+}
+
+type skillsProjectSnapshot struct {
+	ProjectName string                `json:"projectName"`
+	ProjectID   string                `json:"projectId"`
+	Online      bool                  `json:"online"`
+	Path        string                `json:"path"`
+	Skills      []skillsSkillSnapshot `json:"skills"`
+	Error       string                `json:"error,omitempty"`
+}
+
+type skillsSkillSnapshot struct {
+	Name        string   `json:"name"`
+	Path        string   `json:"path,omitempty"`
+	Category    string   `json:"category"`
+	CategoryKey string   `json:"categoryKey"`
+	Agents      []string `json:"agents,omitempty"`
+}
+
+type skillsSourceCandidate struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Category    string `json:"category"`
+	CategoryKey string `json:"categoryKey"`
+}
+
+type skillsCommandError struct {
+	Code    string
+	Message string
+}
+
+func (e *skillsCommandError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Code == "" {
+		return e.Message
+	}
+	return e.Code + ": " + e.Message
+}
+
+func (c *SkillsCommand) Handle(ctx context.Context, raw json.RawMessage) (any, *skillsCommandError) {
+	var payload skillsCommandPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "invalid cmd.skills payload"}
+	}
+	payload.Action = strings.TrimSpace(payload.Action)
+	payload.HubID = strings.TrimSpace(payload.HubID)
+	payload.Scope = strings.TrimSpace(payload.Scope)
+	payload.ProjectName = strings.TrimSpace(payload.ProjectName)
+	payload.Source = strings.TrimSpace(payload.Source)
+	payload.Skills = normalizeSkillNames(payload.Skills)
+	if payload.HubID == "" {
+		return nil, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "hubId is required"}
+	}
+	if c.hubID != "" && payload.HubID != c.hubID {
+		return nil, &skillsCommandError{Code: rp.CodeForbidden, Message: "hubId does not match this hub"}
+	}
+
+	switch payload.Action {
+	case "scan":
+		return c.scan(ctx, payload.HubID), nil
+	case "list":
+		return c.listSource(ctx, payload)
+	case "install":
+		return c.install(ctx, payload)
+	case "uninstall":
+		return c.uninstall(ctx, payload)
+	case "update":
+		return c.update(ctx, payload)
+	default:
+		return nil, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "unsupported cmd.skills action"}
+	}
+}
+
+func (c *SkillsCommand) scan(ctx context.Context, hubID string) skillsCommandResponse {
+	updatedAt := c.now().Format(time.RFC3339)
+	hubSkills, hubErr := c.scanHubSkills(ctx)
+	resp := skillsCommandResponse{
+		OK:        hubErr == "",
+		HubID:     hubID,
+		UpdatedAt: updatedAt,
+		HubSkills: skillsScopeSnapshot{
+			Scope:  "hub",
+			Skills: hubSkills,
+		},
+		Projects: []skillsProjectSnapshot{},
+	}
+	if hubErr != "" {
+		resp.ErrorSummary = hubErr
+	}
+
+	for _, project := range c.projectSnapshot() {
+		projectName := strings.TrimSpace(project.Name)
+		snapshot := skillsProjectSnapshot{
+			ProjectName: projectName,
+			ProjectID:   rp.ProjectID(hubID, projectName),
+			Online:      project.Online,
+			Path:        strings.TrimSpace(project.Path),
+			Skills:      []skillsSkillSnapshot{},
+		}
+		if snapshot.Path == "" {
+			snapshot.Error = "project path is empty"
+			resp.Projects = append(resp.Projects, snapshot)
+			continue
+		}
+		skills, errSummary := c.scanProjectSkills(ctx, project)
+		snapshot.Skills = skills
+		snapshot.Error = errSummary
+		resp.Projects = append(resp.Projects, snapshot)
+	}
+	return resp
+}
+
+func (c *SkillsCommand) listSource(ctx context.Context, payload skillsCommandPayload) (skillsCommandResponse, *skillsCommandError) {
+	if err := validateRemoteSkillSource(payload.Source); err != nil {
+		return skillsCommandResponse{}, err
+	}
+	result := c.runSkills(ctx, "", "add", payload.Source, "--list")
+	if skillsCommandFailed(result) {
+		return skillsCommandResponse{
+			OK:           false,
+			HubID:        payload.HubID,
+			UpdatedAt:    c.now().Format(time.RFC3339),
+			Source:       payload.Source,
+			ErrorSummary: skillsResultSummary(result),
+		}, nil
+	}
+	candidates := parseSkillsSourceCandidates(result.Stdout)
+	if len(candidates) == 0 {
+		return skillsCommandResponse{
+			OK:           false,
+			HubID:        payload.HubID,
+			UpdatedAt:    c.now().Format(time.RFC3339),
+			Source:       payload.Source,
+			ErrorSummary: "skills list output did not include any installable skills",
+		}, nil
+	}
+	return skillsCommandResponse{
+		OK:         true,
+		HubID:      payload.HubID,
+		UpdatedAt:  c.now().Format(time.RFC3339),
+		Source:     payload.Source,
+		Candidates: candidates,
+	}, nil
+}
+
+func (c *SkillsCommand) install(ctx context.Context, payload skillsCommandPayload) (any, *skillsCommandError) {
+	if err := validateRemoteSkillSource(payload.Source); err != nil {
+		return nil, err
+	}
+	if len(payload.Skills) == 0 {
+		return nil, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "skills are required"}
+	}
+	if err := validateSkillNames(payload.Skills); err != nil {
+		return nil, err
+	}
+	target, cmdErr := c.resolveTarget(payload)
+	if cmdErr != nil {
+		return nil, cmdErr
+	}
+	args := []string{"add", payload.Source}
+	if target.scope == "hub" {
+		args = append(args, "-g")
+	}
+	args = append(args, "--agent", "codex", "claude-code", "opencode", "github-copilot", "--skill")
+	args = append(args, payload.Skills...)
+	args = append(args, "-y")
+	result := c.runSkills(ctx, target.dir, args...)
+	if skillsCommandFailed(result) {
+		return c.writeFailureResponse(payload, target, result), nil
+	}
+	return c.writeSuccessResponse(ctx, payload, target, "Installed skills."), nil
+}
+
+func (c *SkillsCommand) uninstall(ctx context.Context, payload skillsCommandPayload) (any, *skillsCommandError) {
+	if len(payload.Skills) == 0 {
+		return nil, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "skills are required"}
+	}
+	if err := validateSkillNames(payload.Skills); err != nil {
+		return nil, err
+	}
+	target, cmdErr := c.resolveTarget(payload)
+	if cmdErr != nil {
+		return nil, cmdErr
+	}
+	args := []string{"remove"}
+	if target.scope == "hub" {
+		args = append(args, "-g")
+	}
+	args = append(args, "--skill")
+	args = append(args, payload.Skills...)
+	args = append(args, "--agent", "*", "-y")
+	result := c.runSkills(ctx, target.dir, args...)
+	if skillsCommandFailed(result) {
+		return c.writeFailureResponse(payload, target, result), nil
+	}
+	return c.writeSuccessResponse(ctx, payload, target, "Uninstalled skills."), nil
+}
+
+func (c *SkillsCommand) update(ctx context.Context, payload skillsCommandPayload) (any, *skillsCommandError) {
+	target, cmdErr := c.resolveTarget(payload)
+	if cmdErr != nil {
+		return nil, cmdErr
+	}
+	args := []string{"update"}
+	if target.scope == "hub" {
+		args = append(args, "-g")
+	} else {
+		args = append(args, "-p")
+	}
+	args = append(args, "-y")
+	result := c.runSkills(ctx, target.dir, args...)
+	if skillsCommandFailed(result) {
+		return c.writeFailureResponse(payload, target, result), nil
+	}
+	return c.writeSuccessResponse(ctx, payload, target, "Updated skills."), nil
+}
+
+type skillsCommandTarget struct {
+	scope       string
+	projectName string
+	project     ProjectInfo
+	dir         string
+}
+
+func (c *SkillsCommand) resolveTarget(payload skillsCommandPayload) (skillsCommandTarget, *skillsCommandError) {
+	scope := strings.TrimSpace(payload.Scope)
+	if scope != "hub" && scope != "project" {
+		return skillsCommandTarget{}, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "scope must be hub or project"}
+	}
+	if scope == "hub" {
+		return skillsCommandTarget{scope: "hub"}, nil
+	}
+	if payload.ProjectName == "" {
+		return skillsCommandTarget{}, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "projectName is required"}
+	}
+	project, ok := c.findProject(payload.HubID, payload.ProjectName)
+	if !ok {
+		return skillsCommandTarget{}, &skillsCommandError{Code: rp.CodeNotFound, Message: "project not found"}
+	}
+	dir := strings.TrimSpace(project.Path)
+	if dir == "" {
+		return skillsCommandTarget{}, &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "project path is empty"}
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return skillsCommandTarget{}, &skillsCommandError{Code: rp.CodeInternal, Message: err.Error()}
+	}
+	return skillsCommandTarget{scope: "project", projectName: strings.TrimSpace(project.Name), project: project, dir: abs}, nil
+}
+
+func (c *SkillsCommand) writeFailureResponse(payload skillsCommandPayload, target skillsCommandTarget, result skillsCommandResult) skillsCommandResponse {
+	return skillsCommandResponse{
+		OK:           false,
+		HubID:        payload.HubID,
+		UpdatedAt:    c.now().Format(time.RFC3339),
+		Source:       payload.Source,
+		Scope:        target.scope,
+		ProjectName:  target.projectName,
+		ErrorSummary: skillsResultSummary(result),
+	}
+}
+
+func (c *SkillsCommand) writeSuccessResponse(ctx context.Context, payload skillsCommandPayload, target skillsCommandTarget, message string) skillsCommandResponse {
+	skills, errSummary := c.scanTargetSkills(ctx, target)
+	return skillsCommandResponse{
+		OK:           errSummary == "",
+		HubID:        payload.HubID,
+		UpdatedAt:    c.now().Format(time.RFC3339),
+		Source:       payload.Source,
+		Scope:        target.scope,
+		ProjectName:  target.projectName,
+		Skills:       skills,
+		Message:      message,
+		ErrorSummary: errSummary,
+	}
+}
+
+func (c *SkillsCommand) scanTargetSkills(ctx context.Context, target skillsCommandTarget) ([]skillsSkillSnapshot, string) {
+	if target.scope == "hub" {
+		return c.scanHubSkills(ctx)
+	}
+	return c.scanProjectSkills(ctx, target.project)
+}
+
+func (c *SkillsCommand) scanHubSkills(ctx context.Context) ([]skillsSkillSnapshot, string) {
+	pluginNames := readSkillsLockPluginNames(c.globalLockFile())
+	result := c.runSkills(ctx, "", "list", "-g", "--json")
+	if skillsCommandFailed(result) {
+		return []skillsSkillSnapshot{}, skillsResultSummary(result)
+	}
+	skills, err := parseSkillsListJSON(result.Stdout, pluginNames)
+	if err != nil {
+		return []skillsSkillSnapshot{}, err.Error()
+	}
+	return skills, ""
+}
+
+func (c *SkillsCommand) scanProjectSkills(ctx context.Context, project ProjectInfo) ([]skillsSkillSnapshot, string) {
+	dir := strings.TrimSpace(project.Path)
+	if dir == "" {
+		return []skillsSkillSnapshot{}, "project path is empty"
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return []skillsSkillSnapshot{}, err.Error()
+	}
+	pluginNames := readSkillsLockPluginNames(filepath.Join(abs, "skills-lock.json"))
+	result := c.runSkills(ctx, abs, "list", "--json")
+	if skillsCommandFailed(result) {
+		return []skillsSkillSnapshot{}, skillsResultSummary(result)
+	}
+	skills, err := parseSkillsListJSON(result.Stdout, pluginNames)
+	if err != nil {
+		return []skillsSkillSnapshot{}, err.Error()
+	}
+	return skills, ""
+}
+
+func (c *SkillsCommand) runSkills(ctx context.Context, dir string, args ...string) skillsCommandResult {
+	result := c.runner.Run(ctx, dir, "skills", args...)
+	if !skillsCommandUnavailable(result) {
+		return result
+	}
+	npxArgs := append([]string{"--yes", "skills"}, args...)
+	return c.runner.Run(ctx, dir, "npx", npxArgs...)
+}
+
+func (c *SkillsCommand) projectSnapshot() []ProjectInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return append([]ProjectInfo(nil), c.projects...)
+}
+
+func (c *SkillsCommand) findProject(hubID string, nameOrID string) (ProjectInfo, bool) {
+	nameOrID = strings.TrimSpace(nameOrID)
+	for _, project := range c.projectSnapshot() {
+		projectName := strings.TrimSpace(project.Name)
+		if projectName == nameOrID || rp.ProjectID(hubID, projectName) == nameOrID {
+			return project, true
+		}
+	}
+	return ProjectInfo{}, false
+}
+
+func (c *SkillsCommand) globalLockFile() string {
+	if strings.TrimSpace(c.globalLockPath) != "" {
+		return c.globalLockPath
+	}
+	if stateHome := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); stateHome != "" {
+		return filepath.Join(stateHome, "skills", ".skill-lock.json")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".agents", ".skill-lock.json")
+	}
+	return ""
+}
+
+func parseSkillsListJSON(raw string, pluginNames map[string]string) ([]skillsSkillSnapshot, error) {
+	var items []struct {
+		Name       string   `json:"name"`
+		Path       string   `json:"path"`
+		Scope      string   `json:"scope"`
+		Agents     []string `json:"agents"`
+		PluginName string   `json:"pluginName"`
+	}
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		var wrapped struct {
+			Skills []struct {
+				Name       string   `json:"name"`
+				Path       string   `json:"path"`
+				Scope      string   `json:"scope"`
+				Agents     []string `json:"agents"`
+				PluginName string   `json:"pluginName"`
+			} `json:"skills"`
+		}
+		if wrappedErr := json.Unmarshal([]byte(raw), &wrapped); wrappedErr != nil {
+			return nil, fmt.Errorf("invalid skills list json: %w", err)
+		}
+		for _, item := range wrapped.Skills {
+			items = append(items, struct {
+				Name       string   `json:"name"`
+				Path       string   `json:"path"`
+				Scope      string   `json:"scope"`
+				Agents     []string `json:"agents"`
+				PluginName string   `json:"pluginName"`
+			}(item))
+		}
+	}
+	out := make([]skillsSkillSnapshot, 0, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		pluginName := strings.TrimSpace(item.PluginName)
+		if pluginName == "" {
+			pluginName = pluginNames[name]
+		}
+		categoryKey, category := skillCategory(pluginName)
+		out = append(out, skillsSkillSnapshot{
+			Name:        name,
+			Path:        strings.TrimSpace(item.Path),
+			Category:    category,
+			CategoryKey: categoryKey,
+			Agents:      append([]string(nil), item.Agents...),
+		})
+	}
+	return out, nil
+}
+
+func readSkillsLockPluginNames(path string) map[string]string {
+	out := map[string]string{}
+	if strings.TrimSpace(path) == "" {
+		return out
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return out
+	}
+	var body struct {
+		Skills map[string]struct {
+			PluginName string `json:"pluginName"`
+		} `json:"skills"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return out
+	}
+	for name, skill := range body.Skills {
+		pluginName := strings.TrimSpace(skill.PluginName)
+		if strings.TrimSpace(name) != "" && pluginName != "" {
+			out[strings.TrimSpace(name)] = pluginName
+		}
+	}
+	return out
+}
+
+func parseSkillsSourceCandidates(raw string) []skillsSourceCandidate {
+	currentCategoryKey, currentCategory := skillCategory("")
+	var candidates []skillsSourceCandidate
+	var current *skillsSourceCandidate
+	for _, rawLine := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {
+		line := cleanSkillsOutputLine(rawLine)
+		if line == "" {
+			current = nil
+			continue
+		}
+		if shouldSkipSkillsOutputLine(line) {
+			continue
+		}
+		if name, desc, ok := parseSkillsCandidateLine(line); ok {
+			categoryKey := currentCategoryKey
+			category := currentCategory
+			candidates = append(candidates, skillsSourceCandidate{
+				Name:        name,
+				Description: desc,
+				Category:    category,
+				CategoryKey: categoryKey,
+			})
+			current = &candidates[len(candidates)-1]
+			continue
+		}
+		if current != nil {
+			if current.Description == "" {
+				current.Description = line
+			} else {
+				current.Description += " " + line
+			}
+			continue
+		}
+		currentCategoryKey = categoryKeyFromTitle(line)
+		currentCategory = line
+	}
+	return candidates
+}
+
+func cleanSkillsOutputLine(line string) string {
+	line = ansiEscapePattern.ReplaceAllString(line, "")
+	line = strings.TrimSpace(strings.ReplaceAll(line, "\r", ""))
+	for index, r := range line {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '@' || r == '_' || r == '-' || r == '.' || r == ':' {
+			return strings.TrimSpace(line[index:])
+		}
+	}
+	return ""
+}
+
+func shouldSkipSkillsOutputLine(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	if lower == "" {
+		return true
+	}
+	switch lower {
+	case "available skills", "global skills", "project skills", "skills":
+		return true
+	}
+	return strings.HasPrefix(lower, "source:") ||
+		strings.HasPrefix(lower, "fetching ") ||
+		strings.HasPrefix(lower, "cloning ") ||
+		strings.HasPrefix(lower, "found ") ||
+		strings.HasPrefix(lower, "use --skill") ||
+		strings.HasPrefix(lower, "run ")
+}
+
+func parseSkillsCandidateLine(line string) (string, string, bool) {
+	for _, separator := range []string{" - ", ": "} {
+		index := strings.Index(line, separator)
+		if index <= 0 {
+			continue
+		}
+		name := strings.TrimSpace(line[:index])
+		if skillNamePattern.MatchString(name) {
+			return name, strings.TrimSpace(line[index+len(separator):]), true
+		}
+	}
+	if skillNamePattern.MatchString(line) {
+		return line, "", true
+	}
+	return "", "", false
+}
+
+func skillCategory(pluginName string) (string, string) {
+	key := strings.TrimSpace(pluginName)
+	if key == "" {
+		return "general", "General"
+	}
+	return key, categoryTitleFromKey(key)
+}
+
+func categoryKeyFromTitle(title string) string {
+	parts := strings.Fields(strings.ToLower(strings.TrimSpace(title)))
+	if len(parts) == 0 {
+		return "general"
+	}
+	for i, part := range parts {
+		parts[i] = strings.Trim(part, "_-")
+	}
+	return strings.Join(parts, "-")
+}
+
+func categoryTitleFromKey(key string) string {
+	parts := strings.FieldsFunc(strings.TrimSpace(key), func(r rune) bool {
+		return r == '-' || r == '_' || unicode.IsSpace(r)
+	})
+	if len(parts) == 0 {
+		return "General"
+	}
+	for i, part := range parts {
+		part = strings.ToLower(part)
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+func validateRemoteSkillSource(source string) *skillsCommandError {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "source is required"}
+	}
+	lower := strings.ToLower(source)
+	if strings.Contains(source, `\`) || strings.Contains(source, "..") ||
+		strings.HasPrefix(source, "/") || regexp.MustCompile(`^[A-Za-z]:`).MatchString(source) ||
+		strings.HasPrefix(lower, "git@") || strings.HasPrefix(lower, "ssh://") || strings.HasPrefix(lower, "file://") {
+		return &skillsCommandError{Code: rp.CodeForbidden, Message: "source is not an allowed remote skill source"}
+	}
+	if skillSourceRepoPattern.MatchString(source) {
+		parts := strings.Split(source, "/")
+		if skillSourceSlugPattern.MatchString(parts[0]) && skillSourceSlugPattern.MatchString(parts[1]) {
+			return nil
+		}
+	}
+	parsed, err := url.Parse(source)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return &skillsCommandError{Code: rp.CodeForbidden, Message: "source is not an allowed remote skill source"}
+	}
+	host := strings.ToLower(parsed.Host)
+	if host == "github.com" || host == "www.github.com" {
+		path := strings.Trim(strings.TrimSuffix(parsed.EscapedPath(), ".git"), "/")
+		parts := strings.Split(path, "/")
+		if len(parts) == 2 && skillSourceSlugPattern.MatchString(parts[0]) && skillSourceSlugPattern.MatchString(parts[1]) {
+			return nil
+		}
+	}
+	if strings.Contains(parsed.EscapedPath(), "/.well-known/agent-skills") || strings.Contains(parsed.EscapedPath(), "/.well-known/skills") {
+		return nil
+	}
+	return &skillsCommandError{Code: rp.CodeForbidden, Message: "source is not an allowed remote skill source"}
+}
+
+func normalizeSkillNames(skills []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		name := strings.TrimSpace(skill)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+func validateSkillNames(skills []string) *skillsCommandError {
+	for _, skill := range skills {
+		if !skillNamePattern.MatchString(skill) {
+			return &skillsCommandError{Code: rp.CodeInvalidArgument, Message: "skill name is invalid"}
+		}
+	}
+	return nil
+}
+
+func skillsCommandFailed(result skillsCommandResult) bool {
+	return result.Err != nil || result.ExitCode != 0
+}
+
+func skillsCommandUnavailable(result skillsCommandResult) bool {
+	if result.Err == nil {
+		return false
+	}
+	if errors.Is(result.Err, exec.ErrNotFound) {
+		return true
+	}
+	lower := strings.ToLower(result.Err.Error())
+	return strings.Contains(lower, "executable file not found") ||
+		strings.Contains(lower, "file not found") ||
+		strings.Contains(lower, "not found in %path%")
+}
+
+func skillsResultSummary(result skillsCommandResult) string {
+	segment := lastNonEmptySegment(result.Stderr)
+	if segment == "" {
+		segment = lastNonEmptySegment(result.Stdout)
+	}
+	if segment == "" {
+		return fmt.Sprintf("skills command failed with exit code %d", result.ExitCode)
+	}
+	return fmt.Sprintf("exit code %d: %s", result.ExitCode, truncateRunes(segment, 500))
+}

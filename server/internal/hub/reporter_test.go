@@ -446,6 +446,112 @@ func TestReporterRespondsToCmdUpdateRequests(t *testing.T) {
 	}
 }
 
+func TestReporterRespondsToCmdSkillsRequests(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	respSeen := make(chan testEnvelope, 1)
+	errSeen := make(chan error, 1)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			errSeen <- err
+			return
+		}
+		defer ws.Close()
+
+		initReq := mustReadEnvelope(t, ws)
+		if initReq.Method != "connect.init" {
+			errSeen <- fmt.Errorf("init method=%q", initReq.Method)
+			return
+		}
+		mustWriteJSON(t, ws, testEnvelope{
+			RequestID: initReq.RequestID,
+			Type:      "response",
+			Method:    "connect.init",
+			Payload: map[string]any{
+				"ok": true,
+				"principal": map[string]any{
+					"role":            "hub",
+					"hubId":           "hub-cmd-skills",
+					"connectionEpoch": 1,
+				},
+				"serverInfo": map[string]any{
+					"serverVersion":   "test",
+					"protocolVersion": rp.DefaultProtocolVersion,
+				},
+				"features":       map[string]any{},
+				"hashAlgorithms": []string{"sha256"},
+			},
+		})
+
+		reportReq := mustReadEnvelope(t, ws)
+		if reportReq.Method != "registry.reportProjects" {
+			errSeen <- fmt.Errorf("report method=%q", reportReq.Method)
+			return
+		}
+		mustWriteJSON(t, ws, testEnvelope{
+			RequestID: reportReq.RequestID,
+			Type:      "response",
+			Method:    "registry.reportProjects",
+			Payload: map[string]any{
+				"ok": true,
+			},
+		})
+
+		mustWriteJSON(t, ws, testEnvelope{
+			RequestID: 100,
+			Type:      "request",
+			Method:    "cmd.skills",
+			Payload: map[string]any{
+				"action": "scan",
+				"hubId":  "hub-cmd-skills",
+			},
+		})
+		_ = ws.SetReadDeadline(time.Now().Add(1500 * time.Millisecond))
+		respSeen <- mustReadEnvelope(t, ws)
+	}))
+
+	t.Cleanup(ts.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner := newFakeSkillsRunner()
+	runner.set("", "skills", []string{"list", "-g", "--json"}, skillsCommandResult{
+		Stdout:   `[{"name":"tdd","path":"C:/skills/tdd","scope":"global","agents":["Codex"]}]`,
+		ExitCode: 0,
+	})
+	reporter := NewReporter(ReporterConfig{
+		Server:            strings.TrimPrefix(ts.URL, "http://"),
+		HubID:             "hub-cmd-skills",
+		ReconnectInterval: 50 * time.Millisecond,
+	}, nil)
+	reporter.skillsCommand = newSkillsCommandWithRunner(runner, skillsCommandConfig{HubID: "hub-cmd-skills"})
+
+	done := make(chan error, 1)
+	go func() { done <- reporter.Run(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("reporter did not stop")
+		}
+	}()
+
+	select {
+	case err := <-errSeen:
+		t.Fatalf("fake registry error: %v", err)
+	case resp := <-respSeen:
+		if resp.Type != "response" || resp.Method != "cmd.skills" {
+			t.Fatalf("unexpected cmd.skills response: %#v", resp)
+		}
+		if resp.Payload["ok"] != true {
+			t.Fatalf("payload=%#v, want ok=true", resp.Payload)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive cmd.skills response from reporter")
+	}
+}
+
 func TestReporterRespondsToSessionSetConfigRequests(t *testing.T) {
 	reqSeen := make(chan testEnvelope, 1)
 	respSeen := make(chan testEnvelope, 1)

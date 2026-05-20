@@ -79,6 +79,7 @@ type Reporter struct {
 	monitorCore     *MonitorCore
 	npmCommand      *NPMCommand
 	updateCommand   *UpdateCommand
+	skillsCommand   *SkillsCommand
 }
 
 // NewReporter creates a Reporter.
@@ -126,6 +127,7 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		monitorCore:   NewMonitorCore(monitorBase),
 		npmCommand:    NewNPMCommand(),
 		updateCommand: NewUpdateCommand(monitorBase),
+		skillsCommand: NewSkillsCommand(skillsCommandConfig{HubID: cfg.HubID, Projects: cp}),
 	}
 	r.requestSeq.Store(2)
 	return r
@@ -328,6 +330,8 @@ func (r *Reporter) handleRegistryRequest(conn *websocket.Conn, in envelope) {
 		r.replyCmdNPM(conn, in)
 	case "cmd.update":
 		r.replyCmdUpdate(conn, in)
+	case "cmd.skills":
+		r.replyCmdSkills(conn, in)
 	case "fs.list":
 		r.replyFSList(conn, in)
 	case "fs.info":
@@ -673,6 +677,26 @@ func (r *Reporter) replyCmdUpdate(conn *websocket.Conn, req envelope) {
 		handler = NewUpdateCommand(r.cfg.MonitorBaseDir)
 		r.updateCommand = handler
 	}
+	payload, cmdErr := handler.Handle(context.Background(), req.Payload)
+	if cmdErr != nil {
+		_ = r.writeError(conn, req.RequestID, cmdErr.Code, cmdErr.Message)
+		return
+	}
+	_ = r.writeJSON(conn, "->", envelope{
+		RequestID: req.RequestID,
+		Type:      "response",
+		Method:    req.Method,
+		Payload:   rp.MustRaw(payload),
+	})
+}
+
+func (r *Reporter) replyCmdSkills(conn *websocket.Conn, req envelope) {
+	handler := r.skillsCommand
+	if handler == nil {
+		handler = NewSkillsCommand(skillsCommandConfig{HubID: r.cfg.HubID, Projects: r.projectsSnapshot()})
+		r.skillsCommand = handler
+	}
+	handler.SetProjects(r.projectsSnapshot())
 	payload, cmdErr := handler.Handle(context.Background(), req.Payload)
 	if cmdErr != nil {
 		_ = r.writeError(conn, req.RequestID, cmdErr.Code, cmdErr.Message)
@@ -1521,6 +1545,12 @@ func (r *Reporter) projectRoot(projectID string) (string, error) {
 		return "", fmt.Errorf("resolve project path: %w", err)
 	}
 	return abs, nil
+}
+
+func (r *Reporter) projectsSnapshot() []ProjectInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return append([]ProjectInfo(nil), r.projects...)
 }
 
 func (r *Reporter) setProjectLocked(project ProjectInfo) {
