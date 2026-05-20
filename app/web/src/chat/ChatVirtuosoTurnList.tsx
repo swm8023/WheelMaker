@@ -276,9 +276,6 @@ export const ChatVirtuosoTurnList = React.forwardRef<
       cancelTailLockSettle();
       tailLockSettleFrameRef.current = window.requestAnimationFrame(() => {
         tailLockSettleFrameRef.current = null;
-        if (!shouldAutoscrollNow()) {
-          return;
-        }
         if (options.includeVirtuosoAutoscroll) {
           virtuosoRef.current?.autoscrollToBottom();
         }
@@ -286,15 +283,12 @@ export const ChatVirtuosoTurnList = React.forwardRef<
         settleScrollParentToBottom(behavior);
         tailLockSettleFollowupFrameRef.current = window.requestAnimationFrame(() => {
           tailLockSettleFollowupFrameRef.current = null;
-          if (!shouldAutoscrollNow()) {
-            return;
-          }
           scrollToLastDisplayItem('auto');
           settleScrollParentToBottom('auto');
         });
       });
     },
-    [cancelTailLockSettle, scrollToLastDisplayItem, settleScrollParentToBottom, shouldAutoscrollNow],
+    [cancelTailLockSettle, scrollToLastDisplayItem, settleScrollParentToBottom],
   );
 
   const handleTotalListHeightChanged = React.useCallback(() => {

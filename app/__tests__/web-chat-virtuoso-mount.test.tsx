@@ -417,4 +417,55 @@ describe('chat virtuoso mount fallback', () => {
       animationFrames.restore();
     }
   });
+
+  test('does not cancel a scheduled tail-lock settle when streaming growth flips bottom state', async () => {
+    const animationFrames = installAnimationFrameQueue();
+    const scrollTo = jest.fn();
+    const scrollParent = createScrollParent({
+      clientHeight: 420,
+      scrollHeight: 900,
+      scrollTo,
+    });
+    let allowAutoscroll = true;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    try {
+      await ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(
+          <ChatVirtuosoTurnList
+            scrollRef={{current: scrollParent}}
+            displayIndex={{items: [turnItem(1), turnItem(2)]}}
+            runtimeKey="project-a/session-a"
+            shouldAutoscroll={() => allowAutoscroll}
+            renderItem={item => (
+              <span>{item.key}</span>
+            )}
+          />,
+        );
+      });
+
+      const props = mockVirtuosoProps[mockVirtuosoProps.length - 1];
+      await ReactTestRenderer.act(() => {
+        props.totalListHeightChanged(920);
+      });
+      allowAutoscroll = false;
+
+      await flushAnimationFrames(animationFrames.frameCallbacks);
+
+      expect(mockAutoscrollToBottomCalls).toHaveLength(1);
+      expect(mockScrollToIndexCalls).toHaveLength(2);
+      expect(scrollTo).toHaveBeenCalledTimes(2);
+      expect(scrollTo).toHaveBeenLastCalledWith({
+        top: 480,
+        behavior: 'auto',
+      });
+    } finally {
+      if (renderer) {
+        await ReactTestRenderer.act(() => {
+          renderer!.unmount();
+        });
+      }
+      animationFrames.restore();
+    }
+  });
 });
