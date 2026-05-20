@@ -1090,11 +1090,10 @@ body,
 
 .settings-skills-hub {
   display: grid;
-  gap: 6px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--panel) 82%, var(--panel-2));
-  padding: 7px;
+  gap: 7px;
+  border: 0;
+  background: transparent;
+  padding: 0;
 }
 
 .settings-skills-scope-header,
