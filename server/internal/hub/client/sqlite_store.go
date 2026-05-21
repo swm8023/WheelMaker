@@ -47,9 +47,15 @@ CREATE TABLE IF NOT EXISTS agent_preferences (
 	preference_json TEXT NOT NULL DEFAULT '{}',
 	PRIMARY KEY (project_name, agent_type)
 );
+CREATE TABLE IF NOT EXISTS store_migrations (
+	name TEXT PRIMARY KEY,
+	applied_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_route_bindings_project ON route_bindings(project_name);
 CREATE INDEX IF NOT EXISTS idx_sessions_project_updated_at ON sessions(project_name, updated_at DESC);
 `
+
+const storeMigrationCodexAgentIdentityRename = "2026-05-21-codex-agent-identity-rename"
 
 type PreferenceState struct {
 	ConfigOptions []PreferenceConfigOption `json:"configOptions,omitempty"`
@@ -124,7 +130,20 @@ func NewStore(dbPath string) (Store, error) {
 			_ = db.Close()
 			return nil, err
 		}
+		if err := markStoreMigrationDB(db, storeMigrationCodexAgentIdentityRename); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 	} else {
+		if err := migrateStoreSchema(db, dbPath, existingTables); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		existingTables, err = sqliteUserTables(db)
+		if err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("list sqlite tables after migration: %w", err)
+		}
 		if err := validateStoreSchema(db, dbPath, existingTables); err != nil {
 			_ = db.Close()
 			return nil, err
@@ -138,6 +157,7 @@ var expectedStoreSchemaColumns = map[string][]string{
 	"route_bindings":    {"project_name", "route_key", "session_id", "created_at", "updated_at"},
 	"sessions":          {"id", "project_name", "status", "agent_type", "agent_json", "session_sync_json", "title", "created_at", "updated_at"},
 	"agent_preferences": {"project_name", "agent_type", "preference_json"},
+	"store_migrations":  {"name", "applied_at"},
 }
 
 type StoreSchemaMismatchError struct {
@@ -176,12 +196,23 @@ func checkStoreSchemaDB(db *sql.DB, dbPath string) error {
 }
 
 func validateStoreSchema(db *sql.DB, dbPath string, existingTables map[string]struct{}) error {
+	return validateStoreSchemaWithOptions(db, dbPath, existingTables, false)
+}
+
+func validateStoreSchemaForMigration(db *sql.DB, dbPath string, existingTables map[string]struct{}) error {
+	return validateStoreSchemaWithOptions(db, dbPath, existingTables, true)
+}
+
+func validateStoreSchemaWithOptions(db *sql.DB, dbPath string, existingTables map[string]struct{}, allowMissingStoreMigrations bool) error {
 	if len(existingTables) == 0 {
 		return nil
 	}
 
 	issues := make([]string, 0)
 	for tableName := range expectedStoreSchemaColumns {
+		if allowMissingStoreMigrations && tableName == "store_migrations" {
+			continue
+		}
 		if _, ok := existingTables[tableName]; !ok {
 			issues = append(issues, fmt.Sprintf("missing table %q", tableName))
 		}
@@ -208,6 +239,156 @@ func validateStoreSchema(db *sql.DB, dbPath string, existingTables map[string]st
 	if len(issues) > 0 {
 		sort.Strings(issues)
 		return &StoreSchemaMismatchError{Path: dbPath, Issues: issues}
+	}
+	return nil
+}
+
+func migrateStoreSchema(db *sql.DB, dbPath string, existingTables map[string]struct{}) error {
+	if err := validateStoreSchemaForMigration(db, dbPath, existingTables); err != nil {
+		return err
+	}
+	if _, ok := existingTables["store_migrations"]; !ok {
+		if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS store_migrations (
+	name TEXT PRIMARY KEY,
+	applied_at TEXT NOT NULL
+)`); err != nil {
+			return fmt.Errorf("create store_migrations for %q: %w", dbPath, err)
+		}
+	}
+	applied, err := storeMigrationAppliedDB(db, storeMigrationCodexAgentIdentityRename)
+	if err != nil {
+		return err
+	}
+	if applied {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin store migration: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := migrateCodexAgentIdentities(tx); err != nil {
+		return err
+	}
+	if err := markStoreMigrationTx(tx, storeMigrationCodexAgentIdentityRename); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit store migration: %w", err)
+	}
+	tx = nil
+	return nil
+}
+
+func storeMigrationAppliedDB(db *sql.DB, name string) (bool, error) {
+	row := db.QueryRow(`SELECT 1 FROM store_migrations WHERE name = ?`, name)
+	var exists int
+	if err := row.Scan(&exists); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("read store migration %q: %w", name, err)
+	}
+	return true, nil
+}
+
+func markStoreMigrationDB(db *sql.DB, name string) error {
+	_, err := db.Exec(`
+		INSERT INTO store_migrations (name, applied_at)
+		VALUES (?, ?)
+		ON CONFLICT(name) DO NOTHING
+	`, name, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("mark store migration %q: %w", name, err)
+	}
+	return nil
+}
+
+func markStoreMigrationTx(tx *sql.Tx, name string) error {
+	_, err := tx.Exec(`
+		INSERT INTO store_migrations (name, applied_at)
+		VALUES (?, ?)
+		ON CONFLICT(name) DO NOTHING
+	`, name, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("mark store migration %q: %w", name, err)
+	}
+	return nil
+}
+
+func migrateCodexAgentIdentities(tx *sql.Tx) error {
+	if _, err := tx.Exec(`
+		UPDATE sessions
+		SET agent_type = CASE agent_type
+			WHEN 'codexapp' THEN 'codex'
+			WHEN 'codex' THEN 'codexacp'
+			ELSE agent_type
+		END
+		WHERE agent_type IN ('codex', 'codexapp')
+	`); err != nil {
+		return fmt.Errorf("migrate session agent types: %w", err)
+	}
+	if _, err := tx.Exec(`
+		UPDATE projects
+		SET default_agent_type = CASE default_agent_type
+			WHEN 'codexapp' THEN 'codex'
+			WHEN 'codex' THEN 'codexacp'
+			ELSE default_agent_type
+		END
+		WHERE default_agent_type IN ('codex', 'codexapp')
+	`); err != nil {
+		return fmt.Errorf("migrate project default agents: %w", err)
+	}
+	if _, err := tx.Exec(`
+		CREATE TEMP TABLE wm_agent_identity_preference_migration (
+			project_name TEXT NOT NULL,
+			old_agent_type TEXT NOT NULL,
+			new_agent_type TEXT NOT NULL,
+			preference_json TEXT NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("create agent preference migration table: %w", err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO wm_agent_identity_preference_migration (project_name, old_agent_type, new_agent_type, preference_json)
+		SELECT project_name,
+			agent_type,
+			CASE agent_type
+				WHEN 'codexapp' THEN 'codex'
+				WHEN 'codex' THEN 'codexacp'
+				ELSE agent_type
+			END,
+			preference_json
+		FROM agent_preferences
+		WHERE agent_type IN ('codex', 'codexapp')
+	`); err != nil {
+		return fmt.Errorf("stage agent preference migration: %w", err)
+	}
+	if _, err := tx.Exec(`
+		DELETE FROM agent_preferences
+		WHERE EXISTS (
+			SELECT 1
+			FROM wm_agent_identity_preference_migration staged
+			WHERE staged.project_name = agent_preferences.project_name
+				AND staged.old_agent_type = agent_preferences.agent_type
+		)
+	`); err != nil {
+		return fmt.Errorf("delete old agent preferences: %w", err)
+	}
+	if _, err := tx.Exec(`
+		INSERT OR REPLACE INTO agent_preferences (project_name, agent_type, preference_json)
+		SELECT project_name, new_agent_type, preference_json
+		FROM wm_agent_identity_preference_migration
+	`); err != nil {
+		return fmt.Errorf("insert migrated agent preferences: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE wm_agent_identity_preference_migration`); err != nil {
+		return fmt.Errorf("drop agent preference migration table: %w", err)
 	}
 	return nil
 }

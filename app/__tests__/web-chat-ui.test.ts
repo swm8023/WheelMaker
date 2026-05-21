@@ -1184,4 +1184,15 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const reloaded = await service.reloadProjectSession(targetProjectId, importedSessionId);');
     expect(mainTsx).toContain('wideProjectActionMenuRef.current?.contains(target)');
   });
+
+  test('filters codexacp from project new and resume agent pickers', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    expect(mainTsx).toContain('const isProjectActionAgentVisible = (agentType: string): boolean =>');
+    expect(mainTsx).toContain("return normalized !== 'codexacp';");
+    expect(mainTsx).toContain('if (!isProjectActionAgentVisible(normalized)) return;');
+    expect(mainTsx).toContain('const sheetAgents = getWideProjectAgents(sheetProject, sheetProjectSessions);');
+    expect(mainTsx).toContain('const agents = getWideProjectAgents(projectItem, projectSessions);');
+  });
 });

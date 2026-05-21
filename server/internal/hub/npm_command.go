@@ -158,10 +158,10 @@ type npmPackagePolicy struct {
 }
 
 var runtimeNPMPackages = []npmPackagePolicy{
-	{PackageName: "@zed-industries/codex-acp", DisplayName: "Codex ACP", AgentTypes: []string{"codex"}, Kind: "runtime"},
+	{PackageName: "@zed-industries/codex-acp", DisplayName: "Codex ACP", AgentTypes: []string{"codexacp"}, Kind: "runtime"},
 	{PackageName: "@agentclientprotocol/claude-agent-acp", DisplayName: "Claude ACP", AgentTypes: []string{"claude"}, Kind: "runtime"},
 	{PackageName: "@anthropic-ai/claude-code", DisplayName: "Claude CLI", AgentTypes: []string{"claude"}, Kind: "runtime"},
-	{PackageName: "@openai/codex", DisplayName: "Codex CLI", AgentTypes: []string{"codexapp"}, Kind: "runtime"},
+	{PackageName: "@openai/codex", DisplayName: "Codex CLI", AgentTypes: []string{"codex"}, Kind: "runtime"},
 	{PackageName: "@github/copilot", DisplayName: "Copilot CLI", AgentTypes: []string{"copilot"}, Kind: "runtime"},
 	{PackageName: "opencode-ai", DisplayName: "OpenCode CLI", AgentTypes: []string{"opencode"}, Kind: "runtime"},
 }

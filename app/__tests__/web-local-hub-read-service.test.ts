@@ -14,6 +14,35 @@ function makeCandidate(overrides: Partial<RegistryLocalReadCandidate> = {}): Reg
 }
 
 describe('local hub read service routing', () => {
+  test('initializes registry connections with protocol 2.3', async () => {
+    const calls: Array<{method: string; payload?: unknown}> = [];
+    const fakeClient = {
+      connect: jest.fn(async () => {
+        calls.push({method: 'connect'});
+      }),
+      connectInit: jest.fn(async (payload: unknown) => {
+        calls.push({method: 'connect.init', payload});
+      }),
+    };
+    const repository = new RegistryRepository(fakeClient as never);
+
+    await repository.initialize('ws://registry.example/ws', 'secret-token');
+
+    expect(calls).toEqual([
+      {method: 'connect'},
+      {
+        method: 'connect.init',
+        payload: {
+          clientName: 'wheelmaker-web',
+          clientVersion: '0.1.0',
+          protocolVersion: '2.3',
+          role: 'client',
+          token: 'secret-token',
+        },
+      },
+    ]);
+  });
+
   test('normalizes local read candidate metadata from project.list hubs', async () => {
     const fakeClient = {
       request: jest.fn(async () => ({
@@ -84,6 +113,7 @@ describe('local hub read service routing', () => {
     expect(calls[2].payload).toMatchObject({
       role: 'local_read',
       hubId: 'hub-a',
+      protocolVersion: '2.3',
       token: 'secret-token',
     });
   });

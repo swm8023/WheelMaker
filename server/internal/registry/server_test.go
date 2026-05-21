@@ -33,7 +33,7 @@ func TestConnectInit(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "client",
 			"token":           "",
 		},
@@ -48,6 +48,37 @@ func TestConnectInit(t *testing.T) {
 	}
 	if resp.Payload["serverInfo"] == nil {
 		t.Fatalf("missing serverInfo: %#v", resp.Payload)
+	}
+}
+
+func TestConnectInitRejectsLegacyProtocolVersion22(t *testing.T) {
+	s := New(Config{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	ws := dialWS(t, ts.URL+"/ws")
+	defer ws.Close()
+
+	mustWriteJSON(t, ws, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-web",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.2",
+			"role":            "client",
+			"token":           "",
+		},
+	})
+
+	resp := mustReadEnvelope(t, ws)
+	if resp.Type != "error" || resp.Method != "connect.init" {
+		t.Fatalf("response=%#v, want connect.init error", resp)
+	}
+	message, _ := resp.Payload["message"].(string)
+	if resp.Payload["code"] != "INVALID_ARGUMENT" || !strings.Contains(message, "unsupported protocolVersion") {
+		t.Fatalf("error payload=%#v, want unsupported protocolVersion", resp.Payload)
 	}
 }
 
@@ -66,7 +97,7 @@ func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "hub",
 			"hubId":           "hub-a",
 			"token":           "",
@@ -104,7 +135,7 @@ func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "client",
 			"token":           "",
 		},
@@ -180,7 +211,7 @@ func TestProjectListIncludesLocalReadCandidate(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "hub",
 			"hubId":           "hub-local-read",
 			"token":           "",
@@ -222,7 +253,7 @@ func TestProjectListIncludesLocalReadCandidate(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "client",
 			"token":           "",
 		},
@@ -273,7 +304,7 @@ func TestRegistryReportProjectsRejectsStaleConnectionEpoch(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub-old",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "hub",
 			"hubId":           "hub-a",
 		},
@@ -291,7 +322,7 @@ func TestRegistryReportProjectsRejectsStaleConnectionEpoch(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub-new",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "hub",
 			"hubId":           "hub-a",
 		},
@@ -350,7 +381,7 @@ func TestConnectInitAuthRequired(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "client",
 			"token":           "wrong",
 		},
@@ -380,7 +411,7 @@ func TestInvalidRequestIDReturnsErrorAndKeepsConnection(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "client",
 			"token":           "",
 		},
@@ -427,7 +458,7 @@ func TestBatchForwardsProjectRequests(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "hub",
 			"hubId":           "hub-a",
 		},
@@ -458,7 +489,7 @@ func TestBatchForwardsProjectRequests(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "client",
 		},
 	})
@@ -551,7 +582,7 @@ func TestRegistryUpdateProjectBroadcastsEvents(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "hub",
 			"hubId":           "hub-a",
 		},
@@ -582,7 +613,7 @@ func TestRegistryUpdateProjectBroadcastsEvents(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "client",
 		},
 	})
@@ -641,7 +672,7 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "hub",
 			"hubId":           "hub-a",
 		},
@@ -672,7 +703,7 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "client",
 		},
 	})
@@ -824,7 +855,7 @@ func TestConnectInitMonitorRole(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-monitor",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "monitor",
 			"token":           "",
 		},
@@ -853,7 +884,7 @@ func TestMonitorListHubAndMonitorStatusForwarding(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "hub",
 			"hubId":           "hub-a",
 		},
@@ -884,7 +915,7 @@ func TestMonitorListHubAndMonitorStatusForwarding(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-monitor",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "monitor",
 		},
 	})
@@ -926,7 +957,7 @@ func TestCmdNPMForwardsByHubIDWithoutProjectID(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "hub",
 			"hubId":           "hub-npm",
 		},
@@ -955,7 +986,7 @@ func TestCmdNPMForwardsByHubIDWithoutProjectID(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "client",
 		},
 	})
@@ -1013,7 +1044,7 @@ func TestCmdUpdateForwardsByHubIDWithoutProjectID(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wheelmaker-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "hub",
 			"hubId":           "hub-update",
 		},
@@ -1042,7 +1073,7 @@ func TestCmdUpdateForwardsByHubIDWithoutProjectID(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "client",
 		},
 	})
@@ -1101,7 +1132,7 @@ func TestCmdSkillsForwardsByHubIDWithoutProjectID(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wheelmaker-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "hub",
 			"hubId":           "hub-skills",
 		},
@@ -1130,7 +1161,7 @@ func TestCmdSkillsForwardsByHubIDWithoutProjectID(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "client",
 		},
 	})
@@ -1189,7 +1220,7 @@ func TestCmdPrefixIsNotAllowedByWildcard(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "client",
 		},
 	})
@@ -1230,7 +1261,7 @@ func TestCmdNPMBatchRequiresClientRole(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-monitor",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.2",
+			"protocolVersion": "2.3",
 			"role":            "monitor",
 		},
 	})

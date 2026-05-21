@@ -330,6 +330,9 @@ func (c *Client) CreateSession(ctx context.Context, agentType, title string) (*S
 	if agentType == "" {
 		return nil, fmt.Errorf("agent type is required")
 	}
+	if err := validateNewSessionAgentType(agentType); err != nil {
+		return nil, err
+	}
 	created, err := c.createSessionState(ctx, agentType, title)
 	if err != nil {
 		return nil, err
@@ -1171,11 +1174,18 @@ func (c *Client) preferredAgentForAutoCreate() string {
 		agentType, err := c.store.LoadProjectDefaultAgent(context.Background(), c.projectName)
 		if err != nil {
 			hubLogger(c.projectName).Warn("load project default agent failed err=%v", err)
-		} else if agentType != "" && c.registry != nil && c.registry.CreatorByName(agentType) != nil {
+		} else if agentType != "" && validateNewSessionAgentType(agentType) == nil && c.registry != nil && c.registry.CreatorByName(agentType) != nil {
 			return agentType
 		}
 	}
 	return c.preferredAvailableAgent()
+}
+
+func validateNewSessionAgentType(agentType string) error {
+	if strings.EqualFold(strings.TrimSpace(agentType), string(acp.ACPProviderCodexACP)) {
+		return fmt.Errorf("codexacp is not supported for new sessions")
+	}
+	return nil
 }
 
 func (c *Client) persistBoundSession(routeKey string, sess *Session) error {
@@ -1206,6 +1216,9 @@ func (c *Client) clientNewSessionWithOptions(routeKey, agentType string, persist
 	agentType = strings.TrimSpace(agentType)
 	if agentType == "" {
 		return nil, fmt.Errorf("agent type is required")
+	}
+	if err := validateNewSessionAgentType(agentType); err != nil {
+		return nil, err
 	}
 	c.mu.Lock()
 	oldSessID := c.routeMap[routeKey]

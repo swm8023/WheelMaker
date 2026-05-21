@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -130,7 +131,7 @@ func TestFormatACPLogLine_NotifySessionUpdateFilter(t *testing.T) {
 }
 
 func TestCodexACPProvider_UsesGlobalBinaryByDefault(t *testing.T) {
-	p := NewCodexProvider()
+	p := NewCodexACPProvider()
 	p.resolveBinary = func(name string, configuredPath string) (string, error) {
 		if name != "codex-acp" {
 			t.Fatalf("resolveBinary name=%q, want codex-acp", name)
@@ -269,28 +270,45 @@ func TestCodeBuddyACPProvider_LaunchArgs(t *testing.T) {
 	}
 }
 
-func TestParseACPProviderCodexApp(t *testing.T) {
-	provider, ok := protocol.ParseACPProvider("codexapp")
+func TestParseACPProviderCodexIdentityRename(t *testing.T) {
+	provider, ok := protocol.ParseACPProvider("codex")
 	if !ok {
-		t.Fatal("ParseACPProvider returned ok=false")
+		t.Fatal("ParseACPProvider(codex) returned ok=false")
 	}
-	if provider != protocol.ACPProviderCodexApp {
-		t.Fatalf("provider=%q, want %q", provider, protocol.ACPProviderCodexApp)
+	if provider != protocol.ACPProviderCodex {
+		t.Fatalf("provider=%q, want %q", provider, protocol.ACPProviderCodex)
+	}
+	provider, ok = protocol.ParseACPProvider("codexacp")
+	if !ok {
+		t.Fatal("ParseACPProvider(codexacp) returned ok=false")
+	}
+	if provider != protocol.ACPProviderCodexACP {
+		t.Fatalf("provider=%q, want %q", provider, protocol.ACPProviderCodexACP)
+	}
+	if _, ok := protocol.ParseACPProvider("codexapp"); ok {
+		t.Fatal("ParseACPProvider accepted removed codexapp provider")
 	}
 	if _, ok := protocol.ParseACPProvider("codex-app"); ok {
 		t.Fatal("ParseACPProvider accepted legacy codex-app alias")
 	}
 
+	seen := map[string]bool{}
 	for _, name := range protocol.ACPProviderNames() {
-		if name == string(protocol.ACPProviderCodexApp) {
-			return
-		}
+		seen[name] = true
 	}
-	t.Fatalf("ACPProviderNames missing %q: %v", protocol.ACPProviderCodexApp, protocol.ACPProviderNames())
+	if !seen[string(protocol.ACPProviderCodex)] || !seen[string(protocol.ACPProviderCodexACP)] {
+		t.Fatalf("ACPProviderNames missing codex identities: %v", protocol.ACPProviderNames())
+	}
+	if seen["codexapp"] {
+		t.Fatalf("ACPProviderNames contains removed codexapp: %v", protocol.ACPProviderNames())
+	}
 }
 
 func TestCodexAppProviderLaunchUsesAppServerStdio(t *testing.T) {
 	p := NewCodexAppProvider()
+	if p.Name() != string(protocol.ACPProviderCodex) {
+		t.Fatalf("Name=%q, want %q", p.Name(), protocol.ACPProviderCodex)
+	}
 	p.lookPath = func(bin string) (string, error) {
 		if bin != "codex" {
 			t.Fatalf("lookPath bin=%q, want codex", bin)
@@ -310,6 +328,25 @@ func TestCodexAppProviderLaunchUsesAppServerStdio(t *testing.T) {
 	}
 	if len(env) != 0 {
 		t.Fatalf("env=%v, want empty", env)
+	}
+}
+
+func TestACPFactoryPreferredNameSkipsCodexACP(t *testing.T) {
+	creator := func(context.Context, string) (Instance, error) {
+		return nil, errors.New("not used")
+	}
+	f := &ACPFactory{}
+	f.Register(protocol.ACPProviderCodexACP, creator)
+	if got := f.PreferredName(); got != "" {
+		t.Fatalf("PreferredName with only codexacp = %q, want empty", got)
+	}
+	f.Register(protocol.ACPProviderClaude, creator)
+	if got := f.PreferredName(); got != string(protocol.ACPProviderClaude) {
+		t.Fatalf("PreferredName with claude and codexacp = %q, want claude", got)
+	}
+	f.Register(protocol.ACPProviderCodex, creator)
+	if got := f.PreferredName(); got != string(protocol.ACPProviderCodex) {
+		t.Fatalf("PreferredName with codex = %q, want codex", got)
 	}
 }
 
@@ -1942,7 +1979,7 @@ func TestCodexAppCleanupSessionArtifactsRemovesImageDirectory(t *testing.T) {
 		t.Fatalf("image artifact not written: %v", err)
 	}
 
-	if err := CleanupSessionArtifacts("Proj:Name", string(protocol.ACPProviderCodexApp), "thread-1"); err != nil {
+	if err := CleanupSessionArtifacts("Proj:Name", string(protocol.ACPProviderCodex), "thread-1"); err != nil {
 		t.Fatalf("CleanupSessionArtifacts: %v", err)
 	}
 	if _, err := os.Stat(imageDir); !os.IsNotExist(err) {
@@ -2033,7 +2070,7 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	}
 
 	conn := newCodexappConnWithRuntime(rt, t.TempDir())
-	inst := NewInstance("codexapp", conn)
+	inst := NewInstance(string(protocol.ACPProviderCodex), conn)
 	updates := make(chan protocol.SessionUpdateParams, 4)
 	inst.SetCallbacks(&fakeCodexappCallbacks{updates: updates})
 
@@ -2041,7 +2078,7 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
-	if initRes.AgentInfo == nil || initRes.AgentInfo.Name != "codexapp" {
+	if initRes.AgentInfo == nil || initRes.AgentInfo.Name != string(protocol.ACPProviderCodex) {
 		t.Fatalf("agent info=%#v", initRes.AgentInfo)
 	}
 	if initRes.AgentCapabilities.PromptCapabilities == nil || !initRes.AgentCapabilities.PromptCapabilities.Image {
