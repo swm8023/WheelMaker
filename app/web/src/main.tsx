@@ -473,6 +473,7 @@ const CHAT_PENDING_CONFIRM_TIMEOUT_MS = 5000;
 const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
 const CHAT_CONFIG_INLINE_LIMIT = 3;
+const fileMemoryCacheKey = (activeProjectId: string, path: string) => `${activeProjectId}\n${path}`;
 const WIDE_PROJECT_SESSION_LIMIT = 5;
 const PROJECT_PIN_LONG_PRESS_MS = 450;
 const PROJECT_SESSION_LONG_PRESS_MS = 450;
@@ -5361,6 +5362,8 @@ function App() {
 
   const readSelectedFile = async (path: string, options?: {restoreScroll?: boolean; silent?: boolean}) => {
     if (!path) return;
+    const targetProjectId = projectIdRef.current || projectId;
+    if (!targetProjectId) return;
     const requestSeq = fileReadSeqRef.current + 1;
     fileReadSeqRef.current = requestSeq;
     const silentRead = options?.silent === true;
@@ -5369,19 +5372,24 @@ function App() {
     }
     const shouldRestoreScroll = options?.restoreScroll === true;
     try {
-      const info = await service.getFileInfo(path);
-      if (requestSeq !== fileReadSeqRef.current) return;
+      const info = await service.getProjectFileInfo(targetProjectId, path);
+      if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;
       setFileInfo(info);
-      const persistedFile = projectId
-        ? workspaceStore.getCachedFile(projectId, path)
-        : null;
-      if (persistedFile?.content && !fileCacheRef.current[path]) {
-        fileCacheRef.current[path] = persistedFile.content;
+      const cacheKey = fileMemoryCacheKey(targetProjectId, path);
+      const persistedFile = workspaceStore.getCachedFile(targetProjectId, path);
+      if (
+        typeof persistedFile?.content === 'string' &&
+        fileCacheRef.current[cacheKey] === undefined
+      ) {
+        fileCacheRef.current[cacheKey] = persistedFile.content;
       }
-      if (persistedFile?.hash && !fileHashRef.current[path]) {
-        fileHashRef.current[path] = persistedFile.hash;
+      if (persistedFile?.hash && !fileHashRef.current[cacheKey]) {
+        fileHashRef.current[cacheKey] = persistedFile.hash;
       }
-      const knownHash = fileHashRef.current[path] || persistedFile?.hash || '';
+      const cachedContent = fileCacheRef.current[cacheKey] ?? persistedFile?.content;
+      const knownHash = typeof cachedContent === 'string'
+        ? fileHashRef.current[cacheKey] || persistedFile?.hash || ''
+        : '';
       const isFirstLoad = !knownHash;
       if ((info.size ?? 0) > LARGE_FILE_CONFIRM_BYTES && isFirstLoad) {
         const sizeMB = ((info.size ?? 0) / (1024 * 1024)).toFixed(1);
@@ -5393,20 +5401,31 @@ function App() {
           return;
         }
       }
-      const result = await service.readFile(path, {
+      const result = await service.readProjectFile(path, targetProjectId, {
         knownHash: knownHash || undefined,
       });
-      if (requestSeq !== fileReadSeqRef.current) return;
+      if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;
       if (result.notModified) {
-        const cachedContent =
-          fileCacheRef.current[path] ?? persistedFile?.content ?? '';
-        setFileContent(typeof cachedContent === 'string' ? cachedContent : '');
+        if (typeof cachedContent !== 'string') {
+          const freshResult = await service.readProjectFile(path, targetProjectId);
+          if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;
+          setFileContent(freshResult.content);
+          fileCacheRef.current[cacheKey] = freshResult.content;
+          const freshHash = freshResult.hash || knownHash;
+          if (freshHash) {
+            fileHashRef.current[cacheKey] = freshHash;
+          }
+          workspaceStore.cacheFile(targetProjectId, path, freshHash, freshResult.content);
+          if (shouldRestoreScroll) {
+            scheduleRestoreSelectedFileScroll(path);
+          }
+          return;
+        }
+        setFileContent(cachedContent);
         const nextHash = result.hash || knownHash;
         if (nextHash) {
-          fileHashRef.current[path] = nextHash;
-          if (projectId && typeof cachedContent === 'string') {
-            workspaceStore.cacheFile(projectId, path, nextHash, cachedContent);
-          }
+          fileHashRef.current[cacheKey] = nextHash;
+          workspaceStore.cacheFile(targetProjectId, path, nextHash, cachedContent);
         }
         if (shouldRestoreScroll) {
           scheduleRestoreSelectedFileScroll(path);
@@ -5414,26 +5433,28 @@ function App() {
         return;
       }
       setFileContent(result.content);
-      fileCacheRef.current[path] = result.content;
+      fileCacheRef.current[cacheKey] = result.content;
       const nextHash = result.hash || knownHash;
       if (nextHash) {
-        fileHashRef.current[path] = nextHash;
+        fileHashRef.current[cacheKey] = nextHash;
       }
-      if (projectId) {
-        workspaceStore.cacheFile(projectId, path, nextHash, result.content);
-      }
+      workspaceStore.cacheFile(targetProjectId, path, nextHash, result.content);
       if (shouldRestoreScroll) {
         scheduleRestoreSelectedFileScroll(path);
       }
     } catch (err) {
-      if (requestSeq !== fileReadSeqRef.current) return;
+      if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;
       if (!silentRead) {
         setFileInfo(null);
         setFileContent('');
       }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (requestSeq === fileReadSeqRef.current && !silentRead) {
+      if (
+        requestSeq === fileReadSeqRef.current &&
+        projectIdRef.current === targetProjectId &&
+        !silentRead
+      ) {
         setFileLoading(false);
       }
     }

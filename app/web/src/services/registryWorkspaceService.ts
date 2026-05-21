@@ -193,7 +193,14 @@ export class RegistryWorkspaceService {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');
     }
-    return this.readRepositoryForProject(this.session.selectedProjectId).getFileInfo(this.session.selectedProjectId, path);
+    return this.getProjectFileInfo(this.session.selectedProjectId, path);
+  }
+
+  async getProjectFileInfo(projectId: string, path: string): Promise<RegistryFsInfo> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.readRepositoryForProject(projectId).getFileInfo(projectId, path);
   }
 
   async readFile(path: string, options?: {knownHash?: string}): Promise<{
@@ -206,8 +213,21 @@ export class RegistryWorkspaceService {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');
     }
-    const repository = this.readRepositoryForProject(this.session.selectedProjectId);
-    const result = await repository.readFile(this.session.selectedProjectId, path, options);
+    return this.readProjectFile(path, this.session.selectedProjectId, options);
+  }
+
+  async readProjectFile(path: string, projectId: string, options?: {knownHash?: string}): Promise<{
+    content: string;
+    hash?: string;
+    notModified: boolean;
+    total?: number;
+    isBinary?: boolean;
+  }> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    const repository = this.readRepositoryForProject(projectId);
+    const result = await repository.readFile(projectId, path, options);
     return {
       content: typeof result.content === 'string' ? result.content : '',
       hash: result.hash,

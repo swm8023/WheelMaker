@@ -9,7 +9,7 @@ describe('web file open race guard', () => {
     expect(mainTsx).toContain('const fileReadSeqRef = useRef(0);');
     expect(mainTsx).toContain('const requestSeq = fileReadSeqRef.current + 1;');
     expect(mainTsx).toContain('fileReadSeqRef.current = requestSeq;');
-    expect(mainTsx).toContain('if (requestSeq !== fileReadSeqRef.current) return;');
+    expect(mainTsx).toContain('if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;');
     expect(mainTsx).toContain('fileReadSeqRef.current += 1;');
     expect(mainTsx).toContain('}, [projectId, selectedFile]);');
   });
