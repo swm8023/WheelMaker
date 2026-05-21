@@ -4311,16 +4311,42 @@ body,
   min-height: 28px;
   display: flex;
   align-items: center;
+  gap: 8px;
   padding: 0 8px;
   border-radius: 6px;
   font-size: 12px;
 }
 
 .chat-hub-row-name {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-hub-read-tag {
+  flex: 0 0 auto;
+  min-width: 48px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.chat-hub-read-tag.local {
+  background: color-mix(in srgb, #2f9e44 18%, transparent);
+  color: color-mix(in srgb, #2f9e44 86%, var(--text));
+}
+
+.chat-hub-read-tag.remote {
+  background: color-mix(in srgb, var(--muted) 16%, transparent);
+  color: var(--muted);
 }
 
 .chat-hub-empty {

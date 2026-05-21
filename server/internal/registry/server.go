@@ -451,6 +451,7 @@ func (s *Server) handleHubReportProjects(peer *peerConn, state *connectionState,
 		ConnectionEpoch: payload.ConnectionEpoch,
 		Projects:        payload.Projects,
 		UpdatedAt:       time.Now().UTC().Format(time.RFC3339),
+		LocalRead:       sanitizeLocalReadCandidate(payload.LocalRead),
 	}
 	s.mu.Unlock()
 	s.emitProjectSnapshotEvents(payload.HubID, previous.Projects, payload.Projects)
@@ -517,6 +518,9 @@ func (s *Server) handleHubUpdateProject(peer *peerConn, state *connectionState, 
 		s.mu.Unlock()
 		_ = s.writeError(peer, in.RequestID, in.Method, codeConflict, "connectionEpoch mismatch", nil)
 		return
+	}
+	if payload.LocalRead != nil {
+		hub.LocalRead = sanitizeLocalReadCandidate(payload.LocalRead)
 	}
 
 	var previous *rp.ProjectInfo
@@ -918,12 +922,32 @@ func (s *Server) snapshotProjectListHubs(scopeHubID string) []rp.HubListItem {
 		if scopeHubID != "" && hubID != scopeHubID {
 			continue
 		}
-		items = append(items, rp.HubListItem{HubID: hubID})
+		hub := s.hubs[hubID]
+		items = append(items, rp.HubListItem{HubID: hubID, LocalRead: hub.LocalRead})
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].HubID < items[j].HubID
 	})
 	return items
+}
+
+func sanitizeLocalReadCandidate(candidate *rp.LocalReadCandidate) *rp.LocalReadCandidate {
+	if candidate == nil {
+		return nil
+	}
+	endpointID := strings.TrimSpace(candidate.EndpointID)
+	url := strings.TrimSpace(candidate.URL)
+	proofPublicKey := strings.TrimSpace(candidate.ProofPublicKey)
+	proofFingerprint := strings.TrimSpace(candidate.ProofFingerprint)
+	if endpointID == "" || url == "" || proofPublicKey == "" || proofFingerprint == "" {
+		return nil
+	}
+	return &rp.LocalReadCandidate{
+		EndpointID:       endpointID,
+		URL:              url,
+		ProofPublicKey:   proofPublicKey,
+		ProofFingerprint: proofFingerprint,
+	}
 }
 
 func (s *Server) projectSyncCheckEnvelope(state *connectionState, in envelope) envelope {

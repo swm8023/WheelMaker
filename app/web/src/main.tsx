@@ -2348,6 +2348,11 @@ function App() {
       ? persistedGlobal.registryDebug
       : false,
   );
+  const [localHubReadEnabled, setLocalHubReadEnabled] = useState(
+    typeof persistedGlobal.localHubReadEnabled === 'boolean'
+      ? persistedGlobal.localHubReadEnabled
+      : true,
+  );
   const [registryDebugPanelOpen, setRegistryDebugPanelOpen] = useState(
     typeof persistedGlobal.registryDebug === 'boolean'
       ? persistedGlobal.registryDebug
@@ -2539,6 +2544,7 @@ function App() {
 
   const [projects, setProjects] = useState<RegistryProject[]>([]);
   const [registryHubs, setRegistryHubs] = useState<RegistryHub[]>([]);
+  const [localHubReadStatuses, setLocalHubReadStatuses] = useState<Record<string, 'Local' | 'Remote'>>({});
   const [projectId, setProjectId] = useState('');
   const projectIdRef = useRef('');
   const projectsRef = useRef<RegistryProject[]>([]);
@@ -3935,6 +3941,12 @@ function App() {
   }, [registryDebug]);
 
   useEffect(() => {
+    service.setLocalHubReadEnabled(localHubReadEnabled);
+    setLocalHubReadStatuses(service.getLocalHubReadStatuses(registryHubs));
+    workspaceStore.patchGlobalState({ localHubReadEnabled });
+  }, [localHubReadEnabled, registryHubs]);
+
+  useEffect(() => {
     workspaceStore.rememberGlobalState({
       address,
       token,
@@ -3949,6 +3961,7 @@ function App() {
       showLineNumbers,
       hideToolCalls,
       registryDebug,
+      localHubReadEnabled,
       gestureNavigation,
       useLatestPromptTitle,
       tab,
@@ -3972,6 +3985,7 @@ function App() {
     showLineNumbers,
     hideToolCalls,
     registryDebug,
+    localHubReadEnabled,
     gestureNavigation,
     useLatestPromptTitle,
     tab,
@@ -4105,11 +4119,17 @@ function App() {
         {chatHubMenuOpen ? (
           <div className="chat-hub-popover" role="menu">
             {registryHubs.length > 0 ? (
-              registryHubs.map(hub => (
-                <div key={hub.hubId} className="chat-hub-row" role="menuitem">
-                  <span className="chat-hub-row-name">{hub.hubId}</span>
-                </div>
-              ))
+              registryHubs.map(hub => {
+                const readStatus = localHubReadStatuses[hub.hubId] ?? 'Remote';
+                return (
+                  <div key={hub.hubId} className="chat-hub-row" role="menuitem">
+                    <span className="chat-hub-row-name">{hub.hubId}</span>
+                    <span className={`chat-hub-read-tag ${readStatus.toLowerCase()}`}>
+                      {readStatus}
+                    </span>
+                  </div>
+                );
+              })
             ) : (
               <div className="chat-hub-empty">No hubs</div>
             )}
@@ -4117,7 +4137,7 @@ function App() {
         ) : null}
       </div>
     );
-  }, [chatHubMenuOpen, registryHubs, setChatConfigOverflowOpen]);
+  }, [chatHubMenuOpen, localHubReadStatuses, registryHubs, setChatConfigOverflowOpen]);
   const floatingBounds = useMemo(() => {
     if (isWide) {
       return { minTop: 0, maxTop: 0 };
@@ -6744,6 +6764,7 @@ function App() {
       const preferredSelectedChatId = preferredSelectedChatKey?.sessionId ?? '';
       setProjects(result.projects);
       setRegistryHubs(result.hubs);
+      setLocalHubReadStatuses(service.getLocalHubReadStatuses(result.hubs));
       setHasPendingProjectUpdates(false);
       captureSelectedFileScrollPosition();
       dirHashRef.current = {};
@@ -7021,6 +7042,7 @@ function App() {
       setProjects(snapshot.projects);
     }
     setRegistryHubs(snapshot.hubs);
+    setLocalHubReadStatuses(service.getLocalHubReadStatuses(snapshot.hubs));
     return deriveRegistryHubIds(snapshot.hubs);
   }, []);
 
@@ -7307,6 +7329,7 @@ function App() {
         setProjects(snapshot.projects);
       }
       setRegistryHubs(snapshot.hubs);
+      setLocalHubReadStatuses(service.getLocalHubReadStatuses(snapshot.hubs));
       const hubIds = deriveSkillHubIds(snapshot.hubs);
       if (hubIds.length === 0) {
         setSkillHubs({});
@@ -7722,6 +7745,7 @@ function App() {
       projectsRef.current = result.projects;
       setProjects(result.projects);
       setRegistryHubs(result.hubs);
+      setLocalHubReadStatuses(service.getLocalHubReadStatuses(result.hubs));
       setHasPendingProjectUpdates(false);
       workspaceStore.rememberGlobalState({
         selectedProjectId: nextProjectId,
@@ -9714,6 +9738,14 @@ function App() {
             type="checkbox"
             checked={hideToolCalls}
             onChange={e => setHideToolCalls(e.target.checked)}
+          />
+        </label>
+        <label className="settings-row sidebar-setting-row">
+          <span>Local Hub Read</span>
+          <input
+            type="checkbox"
+            checked={localHubReadEnabled}
+            onChange={event => setLocalHubReadEnabled(event.target.checked)}
           />
         </label>
         <label className="settings-row sidebar-setting-row">

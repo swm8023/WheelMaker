@@ -67,6 +67,7 @@ export type PersistedGlobalState = {
   showLineNumbers: boolean;
   hideToolCalls: boolean;
   registryDebug: boolean;
+  localHubReadEnabled: boolean;
   gestureNavigation: boolean;
   useLatestPromptTitle: boolean;
   tab: PersistedTab;
@@ -137,6 +138,7 @@ const GLOBAL_KEYS = {
   showLineNumbers: 'showLineNumbers',
   hideToolCalls: 'hideToolCalls',
   registryDebug: 'registryDebug',
+  localHubReadEnabled: 'localHubReadEnabled',
   gestureNavigation: 'gestureNavigation',
   useLatestPromptTitle: 'useLatestPromptTitle',
   tab: 'tab',
@@ -166,6 +168,7 @@ function defaultGlobalState(): PersistedGlobalState {
     showLineNumbers: true,
     hideToolCalls: false,
     registryDebug: false,
+    localHubReadEnabled: true,
     gestureNavigation: false,
     useLatestPromptTitle: false,
     tab: 'file',
@@ -372,6 +375,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     showLineNumbers: typeof input.showLineNumbers === 'boolean' ? input.showLineNumbers : base.showLineNumbers,
     hideToolCalls: typeof input.hideToolCalls === 'boolean' ? input.hideToolCalls : base.hideToolCalls,
     registryDebug: typeof input.registryDebug === 'boolean' ? input.registryDebug : base.registryDebug,
+    localHubReadEnabled: typeof input.localHubReadEnabled === 'boolean' ? input.localHubReadEnabled : base.localHubReadEnabled,
     gestureNavigation: typeof input.gestureNavigation === 'boolean' ? input.gestureNavigation : base.gestureNavigation,
     useLatestPromptTitle: typeof input.useLatestPromptTitle === 'boolean' ? input.useLatestPromptTitle : base.useLatestPromptTitle,
     tab: input.tab === 'chat' || input.tab === 'git' ? input.tab : 'file',
@@ -836,6 +840,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.showLineNumbers, v: serialize(this.state.global.showLineNumbers), updatedAt: now},
       {k: GLOBAL_KEYS.hideToolCalls, v: serialize(this.state.global.hideToolCalls), updatedAt: now},
       {k: GLOBAL_KEYS.registryDebug, v: serialize(this.state.global.registryDebug), updatedAt: now},
+      {k: GLOBAL_KEYS.localHubReadEnabled, v: serialize(this.state.global.localHubReadEnabled), updatedAt: now},
       {k: GLOBAL_KEYS.gestureNavigation, v: serialize(this.state.global.gestureNavigation), updatedAt: now},
       {k: GLOBAL_KEYS.useLatestPromptTitle, v: serialize(this.state.global.useLatestPromptTitle), updatedAt: now},
       {k: GLOBAL_KEYS.tab, v: serialize(this.state.global.tab), updatedAt: now},
@@ -1180,6 +1185,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.showLineNumbers, v: serialize(next.showLineNumbers), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.hideToolCalls, v: serialize(next.hideToolCalls), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.registryDebug, v: serialize(next.registryDebug), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.localHubReadEnabled, v: serialize(next.localHubReadEnabled), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.gestureNavigation, v: serialize(next.gestureNavigation), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.useLatestPromptTitle, v: serialize(next.useLatestPromptTitle), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.tab, v: serialize(next.tab), updatedAt: now});

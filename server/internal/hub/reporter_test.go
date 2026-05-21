@@ -2,6 +2,8 @@ package hub
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -1008,6 +1010,123 @@ func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
 	diffText, _ := diffResp.Payload["diff"].(string)
 	if !strings.Contains(diffText, "+gamma") {
 		t.Fatalf("unexpected working tree diff: %q", diffText)
+	}
+}
+
+func TestLocalReadEndpointRequiresToken(t *testing.T) {
+	r := NewReporter(ReporterConfig{HubID: "hub-local-read-empty-token"}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := r.StartLocalReadEndpoint(ctx); err != nil {
+		t.Fatalf("StartLocalReadEndpoint() err = %v", err)
+	}
+	if candidate := r.LocalReadCandidate(); candidate != nil {
+		t.Fatalf("LocalReadCandidate()=%#v, want nil without shared token", candidate)
+	}
+}
+
+func TestLocalReadEndpointProofReadAndRejectsSession(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hello local read"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	r := NewReporter(ReporterConfig{
+		HubID: "hub-local-read",
+		Token: "local-token",
+	}, []ProjectInfo{{Name: "proj1", Path: root, Online: true, ProjectRev: "p1", Git: rp.ProjectGitState{GitRev: "g1", WorktreeRev: "w1"}}})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := r.StartLocalReadEndpoint(ctx); err != nil {
+		t.Fatalf("StartLocalReadEndpoint() err = %v", err)
+	}
+	candidate := r.LocalReadCandidate()
+	if candidate == nil {
+		t.Fatal("LocalReadCandidate() nil, want endpoint metadata")
+	}
+	if !strings.HasPrefix(candidate.URL, "ws://127.0.0.1:") {
+		t.Fatalf("candidate URL=%q, want loopback websocket", candidate.URL)
+	}
+
+	ws, _, err := websocket.DefaultDialer.Dial(candidate.URL, nil)
+	if err != nil {
+		t.Fatalf("dial local read: %v", err)
+	}
+	defer ws.Close()
+
+	mustWriteJSON(t, ws, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "local_read.proof",
+		Payload: map[string]any{
+			"endpointId": candidate.EndpointID,
+			"nonce":      "nonce-1",
+		},
+	})
+	proofResp := mustReadEnvelope(t, ws)
+	if proofResp.Type != "response" || proofResp.Method != "local_read.proof" {
+		t.Fatalf("proof response=%#v", proofResp)
+	}
+	signatureText, _ := proofResp.Payload["signature"].(string)
+	signature, err := base64.StdEncoding.DecodeString(signatureText)
+	if err != nil {
+		t.Fatalf("decode signature: %v", err)
+	}
+	publicKey, err := base64.StdEncoding.DecodeString(candidate.ProofPublicKey)
+	if err != nil {
+		t.Fatalf("decode public key: %v", err)
+	}
+	if !ed25519.Verify(ed25519.PublicKey(publicKey), []byte(candidate.EndpointID+"\nnonce-1"), signature) {
+		t.Fatal("proof signature did not verify")
+	}
+
+	mustWriteJSON(t, ws, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wheelmaker-web",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": rp.DefaultProtocolVersion,
+			"role":            "local_read",
+			"hubId":           "hub-local-read",
+			"token":           "local-token",
+		},
+	})
+	initResp := mustReadEnvelope(t, ws)
+	if initResp.Type != "response" || initResp.Method != "connect.init" {
+		t.Fatalf("connect.init response=%#v", initResp)
+	}
+
+	mustWriteJSON(t, ws, testEnvelope{
+		RequestID: 3,
+		Type:      "request",
+		Method:    "fs.read",
+		ProjectID: rp.ProjectID("hub-local-read", "proj1"),
+		Payload:   map[string]any{"path": "hello.txt"},
+	})
+	readResp := mustReadEnvelope(t, ws)
+	if readResp.Type != "response" || readResp.Method != "fs.read" {
+		t.Fatalf("fs.read response=%#v", readResp)
+	}
+	if readResp.Payload["content"] != "hello local read" {
+		t.Fatalf("content=%v, want hello local read", readResp.Payload["content"])
+	}
+
+	mustWriteJSON(t, ws, testEnvelope{
+		RequestID: 4,
+		Type:      "request",
+		Method:    "session.list",
+		ProjectID: rp.ProjectID("hub-local-read", "proj1"),
+		Payload:   map[string]any{},
+	})
+	sessionResp := mustReadEnvelope(t, ws)
+	if sessionResp.Type != "error" || sessionResp.Method != "session.list" {
+		t.Fatalf("session.list response=%#v, want error", sessionResp)
+	}
+	if sessionResp.Payload["code"] != rp.CodeForbidden {
+		t.Fatalf("session.list code=%v, want FORBIDDEN", sessionResp.Payload["code"])
 	}
 }
 

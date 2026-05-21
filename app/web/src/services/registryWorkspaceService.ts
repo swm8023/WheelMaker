@@ -1,6 +1,7 @@
 import {createRegistryRepository, type RegistryRepository} from './registryRepository';
 import {RegistryRequestError} from './registryClient';
 import type {RegistryDebugSink} from './registryClient';
+import {LocalHubReadManager, type LocalHubReadStatus} from './localHubReadManager';
 import type {
   RegistryEnvelope,
   RegistryFsInfo,
@@ -35,26 +36,43 @@ export type WorkspaceSession = {
   fileEntries: RegistryFsEntry[];
 };
 
+export type RegistryWorkspaceServiceOptions = {
+  createRepository?: (debugSink?: RegistryDebugSink) => RegistryRepository;
+  localHubReadManager?: LocalHubReadManager;
+};
+
 export class RegistryWorkspaceService {
   private repository: RegistryRepository | null = null;
   private session: WorkspaceSession | null = null;
+  private token = '';
   private eventListeners = new Set<(event: RegistryEnvelope) => void>();
   private closeListeners = new Set<() => void>();
   private unsubscribeRepositoryEvent: (() => void) | null = null;
   private unsubscribeRepositoryClose: (() => void) | null = null;
+  private readonly createRepository: (debugSink?: RegistryDebugSink) => RegistryRepository;
+  private readonly localHubReadManager: LocalHubReadManager;
 
-  constructor(private readonly debugSink?: RegistryDebugSink) {}
+  constructor(private readonly debugSink?: RegistryDebugSink, options: RegistryWorkspaceServiceOptions = {}) {
+    this.createRepository = options.createRepository ?? createRegistryRepository;
+    this.localHubReadManager = options.localHubReadManager ?? new LocalHubReadManager({
+      createRepository: () => this.createRepository(this.debugSink),
+      debugSink,
+    });
+  }
 
   async connect(wsUrl: string, token: string): Promise<WorkspaceSession> {
-    const repository = createRegistryRepository(this.debugSink);
+    const repository = this.createRepository(this.debugSink);
+    const normalizedToken = token.trim();
     try {
-      await repository.initialize(wsUrl, token);
+      await repository.initialize(wsUrl, normalizedToken);
       const previousRepository = this.repository;
       this.bindRepository(repository);
       const snapshot = await this.listProjectSnapshotWithRetry(repository);
       if (snapshot.projects.length === 0) {
         throw new Error('No projects available. Please ensure at least one project is online and retry.');
       }
+      this.token = normalizedToken;
+      await this.localHubReadManager.refresh(snapshot, normalizedToken);
       const {selectedProjectId, fileEntries} = await this.selectFirstReachableProject(repository, snapshot.projects);
       previousRepository?.close();
       this.repository = repository;
@@ -106,7 +124,8 @@ export class RegistryWorkspaceService {
     for (const project of projects) {
       if (!project.projectId) continue;
       try {
-        const fileList = await repository.listFiles(project.projectId, '.');
+        const readRepository = this.localHubReadManager.readRepositoryForProject(project.projectId, repository);
+        const fileList = await readRepository.listFiles(project.projectId, '.');
         return {selectedProjectId: project.projectId, fileEntries: fileList.entries ?? []};
       } catch (error) {
         lastError = error;
@@ -128,6 +147,7 @@ export class RegistryWorkspaceService {
     this.repository?.close();
     this.repository = null;
     this.session = null;
+    this.localHubReadManager.closeAll();
   }
 
   getSession(): WorkspaceSession | null {
@@ -138,7 +158,8 @@ export class RegistryWorkspaceService {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');
     }
-    const fileEntries = (await this.repository.listFiles(projectId, '.')).entries ?? [];
+    const repository = this.readRepositoryForProject(projectId);
+    const fileEntries = (await repository.listFiles(projectId, '.')).entries ?? [];
     this.session = {...this.session, selectedProjectId: projectId, fileEntries};
     return this.session;
   }
@@ -158,7 +179,8 @@ export class RegistryWorkspaceService {
     if (!this.session || !this.repository) {
       return {entries: [], hash: '', notModified: false};
     }
-    const result = await this.repository.listFiles(this.session.selectedProjectId, path || '.', knownHash);
+    const repository = this.readRepositoryForProject(this.session.selectedProjectId);
+    const result = await repository.listFiles(this.session.selectedProjectId, path || '.', knownHash);
     return {
       entries: result.entries ?? [],
       hash: result.hash,
@@ -170,7 +192,7 @@ export class RegistryWorkspaceService {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');
     }
-    return this.repository.getFileInfo(this.session.selectedProjectId, path);
+    return this.readRepositoryForProject(this.session.selectedProjectId).getFileInfo(this.session.selectedProjectId, path);
   }
 
   async readFile(path: string, options?: {knownHash?: string}): Promise<{
@@ -183,7 +205,8 @@ export class RegistryWorkspaceService {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');
     }
-    const result = await this.repository.readFile(this.session.selectedProjectId, path, options);
+    const repository = this.readRepositoryForProject(this.session.selectedProjectId);
+    const result = await repository.readFile(this.session.selectedProjectId, path, options);
     return {
       content: typeof result.content === 'string' ? result.content : '',
       hash: result.hash,
@@ -195,33 +218,33 @@ export class RegistryWorkspaceService {
 
   async listGitCommits(ref = 'HEAD', refs: string[] = []): Promise<RegistryGitCommit[]> {
     if (!this.session || !this.repository) return [];
-    return this.repository.gitLog(this.session.selectedProjectId, ref, '', 50, refs);
+    return this.readRepositoryForProject(this.session.selectedProjectId).gitLog(this.session.selectedProjectId, ref, '', 50, refs);
   }
 
   async listGitBranches(): Promise<{current: string; branches: string[]; remoteBranches: string[]}> {
     if (!this.session || !this.repository) {
       return {current: '', branches: [], remoteBranches: []};
     }
-    return this.repository.gitBranches(this.session.selectedProjectId);
+    return this.readRepositoryForProject(this.session.selectedProjectId).gitBranches(this.session.selectedProjectId);
   }
 
   async listGitCommitFiles(sha: string): Promise<RegistryGitCommitFile[]> {
     if (!this.session || !this.repository) return [];
-    return this.repository.gitCommitFiles(this.session.selectedProjectId, sha);
+    return this.readRepositoryForProject(this.session.selectedProjectId).gitCommitFiles(this.session.selectedProjectId, sha);
   }
 
   async readGitFileDiff(sha: string, path: string): Promise<RegistryGitFileDiff> {
     if (!this.session || !this.repository) {
       return {sha, path, isBinary: false, diff: '', truncated: false};
     }
-    return this.repository.gitCommitFileDiff(this.session.selectedProjectId, sha, path, 3);
+    return this.readRepositoryForProject(this.session.selectedProjectId).gitCommitFileDiff(this.session.selectedProjectId, sha, path, 3);
   }
 
   async getGitStatus(): Promise<RegistryGitStatus> {
     if (!this.session || !this.repository) {
       return {dirty: false, worktreeRev: '', staged: [], unstaged: [], untracked: []};
     }
-    return this.repository.gitStatus(this.session.selectedProjectId);
+    return this.readRepositoryForProject(this.session.selectedProjectId).gitStatus(this.session.selectedProjectId);
   }
 
   async readWorkingTreeFileDiff(
@@ -231,14 +254,14 @@ export class RegistryWorkspaceService {
     if (!this.session || !this.repository) {
       return {path, scope, isBinary: false, diff: '', truncated: false};
     }
-    return this.repository.gitWorkingTreeFileDiff(this.session.selectedProjectId, path, scope, 3);
+    return this.readRepositoryForProject(this.session.selectedProjectId).gitWorkingTreeFileDiff(this.session.selectedProjectId, path, scope, 3);
   }
 
   async syncCheck(payload: RegistrySyncCheckPayload): Promise<RegistrySyncCheckResponse> {
     if (!this.session || !this.repository) {
       return {projectRev: '', gitRev: '', worktreeRev: '', staleDomains: []};
     }
-    return this.repository.syncCheck(this.session.selectedProjectId, payload);
+    return this.readRepositoryForProject(this.session.selectedProjectId).syncCheck(this.session.selectedProjectId, payload);
   }
 
   async listProjects(): Promise<RegistryProject[]> {
@@ -250,10 +273,29 @@ export class RegistryWorkspaceService {
       return {projects: this.session?.projects ?? [], hubs: this.session?.hubs ?? []};
     }
     const snapshot = await this.repository.listProjectSnapshot();
+    await this.localHubReadManager.refresh(snapshot, this.token);
     if (this.session) {
       this.session = {...this.session, projects: snapshot.projects, hubs: snapshot.hubs};
     }
     return snapshot;
+  }
+
+  setLocalHubReadEnabled(enabled: boolean): void {
+    this.localHubReadManager.setEnabled(enabled);
+    if (enabled && this.session) {
+      void this.localHubReadManager.refresh(this.session, this.token);
+    }
+  }
+
+  getLocalHubReadStatuses(hubs: RegistryHub[] = this.session?.hubs ?? []): Record<string, LocalHubReadStatus> {
+    return this.localHubReadManager.getHubStatuses(hubs);
+  }
+
+  private readRepositoryForProject(projectId: string): RegistryRepository {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.localHubReadManager.readRepositoryForProject(projectId, this.repository);
   }
 
   async listSessions(): Promise<RegistrySessionSummary[]> {

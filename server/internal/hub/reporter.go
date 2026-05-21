@@ -3,6 +3,8 @@ package hub
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -10,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -30,6 +33,8 @@ import (
 const (
 	defaultProtocolVersion = rp.DefaultProtocolVersion
 	codeInvalidArgument    = rp.CodeInvalidArgument
+	codeUnauthorized       = rp.CodeUnauthorized
+	codeForbidden          = rp.CodeForbidden
 	codeNotFound           = rp.CodeNotFound
 	codeInternal           = rp.CodeInternal
 )
@@ -46,6 +51,10 @@ type ChatHandler interface {
 
 type SessionHandler interface {
 	HandleSessionRequest(ctx context.Context, method string, projectID string, payload json.RawMessage) (any, error)
+}
+
+var localReadUpgrader = websocket.Upgrader{
+	CheckOrigin: func(_ *http.Request) bool { return true },
 }
 
 // ReporterConfig controls hub->registry connection behavior.
@@ -80,6 +89,13 @@ type Reporter struct {
 	npmCommand      *NPMCommand
 	updateCommand   *UpdateCommand
 	skillsCommand   *SkillsCommand
+
+	localReadMu         sync.RWMutex
+	localReadServer     *http.Server
+	localReadCandidate  *rp.LocalReadCandidate
+	localReadPrivateKey ed25519.PrivateKey
+	localReadPublicKey  ed25519.PublicKey
+	localReadEndpointID string
 }
 
 // NewReporter creates a Reporter.
@@ -152,6 +168,93 @@ func (r *Reporter) SetDebugLogger(w io.Writer) {
 	r.debugLog = w
 }
 
+// LocalReadCandidate returns the current same-machine read endpoint metadata.
+func (r *Reporter) LocalReadCandidate() *rp.LocalReadCandidate {
+	r.localReadMu.RLock()
+	defer r.localReadMu.RUnlock()
+	if r.localReadCandidate == nil {
+		return nil
+	}
+	return &rp.LocalReadCandidate{
+		EndpointID:       r.localReadCandidate.EndpointID,
+		URL:              r.localReadCandidate.URL,
+		ProofPublicKey:   r.localReadCandidate.ProofPublicKey,
+		ProofFingerprint: r.localReadCandidate.ProofFingerprint,
+	}
+}
+
+// StartLocalReadEndpoint starts the Hub-owned loopback read endpoint when a shared token exists.
+func (r *Reporter) StartLocalReadEndpoint(ctx context.Context) error {
+	if strings.TrimSpace(r.cfg.Token) == "" {
+		return nil
+	}
+
+	r.localReadMu.Lock()
+	if r.localReadServer != nil && r.localReadCandidate != nil {
+		r.localReadMu.Unlock()
+		return nil
+	}
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		r.localReadMu.Unlock()
+		return fmt.Errorf("generate local read proof key: %w", err)
+	}
+	endpointID, err := newLocalReadEndpointID(r.cfg.HubID)
+	if err != nil {
+		r.localReadMu.Unlock()
+		return err
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		r.localReadMu.Unlock()
+		return fmt.Errorf("listen local read endpoint: %w", err)
+	}
+	tcpAddr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = ln.Close()
+		r.localReadMu.Unlock()
+		return fmt.Errorf("local read endpoint did not bind tcp address")
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", r.handleLocalReadWS)
+	server := &http.Server{Handler: mux}
+	candidate := &rp.LocalReadCandidate{
+		EndpointID:       endpointID,
+		URL:              fmt.Sprintf("ws://127.0.0.1:%d/ws", tcpAddr.Port),
+		ProofPublicKey:   base64.StdEncoding.EncodeToString(publicKey),
+		ProofFingerprint: hashBytes(publicKey),
+	}
+	r.localReadServer = server
+	r.localReadCandidate = candidate
+	r.localReadPrivateKey = privateKey
+	r.localReadPublicKey = publicKey
+	r.localReadEndpointID = endpointID
+	r.localReadMu.Unlock()
+
+	go func() {
+		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
+			registryLogger("").Warn("local read endpoint stopped: %v", err)
+		}
+	}()
+	go func() {
+		<-ctx.Done()
+		_ = server.Shutdown(context.Background())
+		r.localReadMu.Lock()
+		if r.localReadServer == server {
+			r.localReadServer = nil
+			r.localReadCandidate = nil
+			r.localReadPrivateKey = nil
+			r.localReadPublicKey = nil
+			r.localReadEndpointID = ""
+		}
+		r.localReadMu.Unlock()
+	}()
+	registryLogger("").Info("local read endpoint listening on %s", candidate.URL)
+	return nil
+}
+
 func (r *Reporter) SetMonitorResetSessionPromptState(reset func()) {
 	if r == nil || r.monitorCore == nil {
 		return
@@ -214,6 +317,18 @@ func (r *Reporter) UpdateProject(project ProjectInfo) error {
 		return nil
 	}
 
+	updatePayload := map[string]any{
+		"hubId":           r.cfg.HubID,
+		"connectionEpoch": connectionEpoch,
+		"seq":             seq,
+		"project":         project,
+		"changedDomains":  changedDomains,
+		"updatedAt":       now,
+	}
+	if candidate := r.LocalReadCandidate(); candidate != nil {
+		updatePayload["localRead"] = candidate
+	}
+
 	requestID := r.requestSeq.Add(1)
 	waitCh := make(chan envelope, 1)
 	r.mu.Lock()
@@ -224,14 +339,7 @@ func (r *Reporter) UpdateProject(project ProjectInfo) error {
 		RequestID: requestID,
 		Type:      "request",
 		Method:    "registry.updateProject",
-		Payload: rp.MustRaw(map[string]any{
-			"hubId":           r.cfg.HubID,
-			"connectionEpoch": connectionEpoch,
-			"seq":             seq,
-			"project":         project,
-			"changedDomains":  changedDomains,
-			"updatedAt":       now,
-		}),
+		Payload:   rp.MustRaw(updatePayload),
 	}); err != nil {
 		r.mu.Lock()
 		delete(r.pending, requestID)
@@ -286,6 +394,9 @@ func (r *Reporter) runSession(ctx context.Context) error {
 	}()
 	defer close(stop)
 
+	if err := r.StartLocalReadEndpoint(ctx); err != nil {
+		registryLogger("").Warn("local read endpoint unavailable: %v", err)
+	}
 	if err := r.handshake(conn); err != nil {
 		return err
 	}
@@ -465,15 +576,20 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 	r.mu.Unlock()
 	registryLogger("").Info("connect.init ok epoch=%d", initResp.Principal.ConnectionEpoch)
 
+	reportPayload := map[string]any{
+		"hubId":           r.cfg.HubID,
+		"connectionEpoch": initResp.Principal.ConnectionEpoch,
+		"projects":        projects,
+	}
+	if candidate := r.LocalReadCandidate(); candidate != nil {
+		reportPayload["localRead"] = candidate
+	}
+
 	if err := r.writeJSON(conn, "->", envelope{
 		RequestID: 2,
 		Type:      "request",
 		Method:    "registry.reportProjects",
-		Payload: rp.MustRaw(map[string]any{
-			"hubId":           r.cfg.HubID,
-			"connectionEpoch": initResp.Principal.ConnectionEpoch,
-			"projects":        projects,
-		}),
+		Payload:   rp.MustRaw(reportPayload),
 	}); err != nil {
 		return err
 	}
@@ -539,6 +655,305 @@ func (r *Reporter) PublishProjectEvent(projectID string, method string, payload 
 		r.mu.Unlock()
 		return fmt.Errorf("registry event publish timeout")
 	}
+}
+
+type localReadConnectionState struct {
+	proved         bool
+	initialized    bool
+	seenRequestIDs map[int64]struct{}
+}
+
+type localReadProofPayload struct {
+	EndpointID string `json:"endpointId"`
+	Nonce      string `json:"nonce"`
+}
+
+func (r *Reporter) handleLocalReadWS(w http.ResponseWriter, req *http.Request) {
+	conn, err := localReadUpgrader.Upgrade(w, req, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	state := &localReadConnectionState{seenRequestIDs: map[int64]struct{}{}}
+	for {
+		var in envelope
+		if err := r.readJSON(conn, "<-", &in); err != nil {
+			return
+		}
+		if in.Type != "request" {
+			_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeInvalidArgument, "type must be request", nil)
+			continue
+		}
+		if in.RequestID < 1 {
+			_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeInvalidArgument, "requestId must be >= 1", nil)
+			continue
+		}
+		if _, exists := state.seenRequestIDs[in.RequestID]; exists {
+			_ = r.writeLocalReadError(conn, in.RequestID, in.Method, rp.CodeConflict, "duplicate requestId", nil)
+			continue
+		}
+		state.seenRequestIDs[in.RequestID] = struct{}{}
+
+		if !state.initialized {
+			switch in.Method {
+			case "local_read.proof":
+				r.handleLocalReadProof(conn, state, in)
+			case "connect.init":
+				r.handleLocalReadConnectInit(conn, state, in)
+			default:
+				_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeUnauthorized, "local_read.proof required", nil)
+			}
+			continue
+		}
+
+		if !localReadMethodAllowed(in.Method) {
+			_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeForbidden, "method not allowed for local read", map[string]any{"method": in.Method})
+			continue
+		}
+		r.handleLocalReadRequest(conn, in)
+	}
+}
+
+func (r *Reporter) handleLocalReadProof(conn *websocket.Conn, state *localReadConnectionState, in envelope) {
+	var payload localReadProofPayload
+	if err := decodePayload(in.Payload, &payload); err != nil {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeInvalidArgument, "invalid local_read.proof payload", nil)
+		return
+	}
+	endpointID := strings.TrimSpace(payload.EndpointID)
+	nonce := strings.TrimSpace(payload.Nonce)
+	if endpointID == "" || nonce == "" {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeInvalidArgument, "endpointId and nonce are required", nil)
+		return
+	}
+
+	r.localReadMu.RLock()
+	expectedEndpointID := r.localReadEndpointID
+	privateKey := append(ed25519.PrivateKey(nil), r.localReadPrivateKey...)
+	publicKey := append(ed25519.PublicKey(nil), r.localReadPublicKey...)
+	fingerprint := ""
+	if r.localReadCandidate != nil {
+		fingerprint = r.localReadCandidate.ProofFingerprint
+	}
+	r.localReadMu.RUnlock()
+	if expectedEndpointID == "" || endpointID != expectedEndpointID || len(privateKey) == 0 || len(publicKey) == 0 {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeInvalidArgument, "endpointId mismatch", nil)
+		return
+	}
+
+	signature := ed25519.Sign(privateKey, []byte(endpointID+"\n"+nonce))
+	state.proved = true
+	_ = r.writeJSON(conn, "->", envelope{
+		RequestID: in.RequestID,
+		Type:      "response",
+		Method:    in.Method,
+		Payload: rp.MustRaw(map[string]any{
+			"endpointId":       endpointID,
+			"nonce":            nonce,
+			"signature":        base64.StdEncoding.EncodeToString(signature),
+			"proofPublicKey":   base64.StdEncoding.EncodeToString(publicKey),
+			"proofFingerprint": fingerprint,
+		}),
+	})
+}
+
+func (r *Reporter) handleLocalReadConnectInit(conn *websocket.Conn, state *localReadConnectionState, in envelope) {
+	if !state.proved {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeUnauthorized, "local_read.proof required", nil)
+		return
+	}
+	var payload rp.ConnectInitPayload
+	if err := decodePayload(in.Payload, &payload); err != nil {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeInvalidArgument, "invalid connect.init payload", nil)
+		return
+	}
+	if strings.TrimSpace(payload.Role) != "local_read" {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeInvalidArgument, "role must be local_read", nil)
+		return
+	}
+	if hubID := strings.TrimSpace(payload.HubID); hubID != "" && hubID != r.cfg.HubID {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeForbidden, "hubId mismatch", nil)
+		return
+	}
+	if strings.TrimSpace(payload.Token) != r.cfg.Token {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeUnauthorized, "invalid token", nil)
+		return
+	}
+	if strings.TrimSpace(payload.ProtocolVersion) != defaultProtocolVersion {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeInvalidArgument, "unsupported protocolVersion", map[string]any{"protocolVersion": payload.ProtocolVersion, "supported": defaultProtocolVersion})
+		return
+	}
+
+	state.initialized = true
+	_ = r.writeJSON(conn, "->", envelope{
+		RequestID: in.RequestID,
+		Type:      "response",
+		Method:    in.Method,
+		Payload: rp.MustRaw(rp.ConnectInitResponsePayload{
+			OK: true,
+			Principal: rp.ConnectPrincipal{
+				Role:  "local_read",
+				HubID: r.cfg.HubID,
+			},
+			ServerInfo: rp.ConnectServerInfo{
+				ServerVersion:   "0.1.0",
+				ProtocolVersion: defaultProtocolVersion,
+			},
+			Features: rp.ConnectFeatures{
+				SupportsHashNegotiation: true,
+			},
+			HashAlgorithms: []string{"sha256"},
+		}),
+	})
+}
+
+func (r *Reporter) handleLocalReadRequest(conn *websocket.Conn, in envelope) {
+	switch in.Method {
+	case "project.list":
+		_ = r.writeJSON(conn, "->", envelope{
+			RequestID: in.RequestID,
+			Type:      "response",
+			Method:    in.Method,
+			Payload:   rp.MustRaw(r.localReadProjectListPayload()),
+		})
+	case "project.syncCheck":
+		r.replyLocalReadProjectSyncCheck(conn, in)
+	case "fs.list":
+		r.replyFSList(conn, in)
+	case "fs.info":
+		r.replyFSInfo(conn, in)
+	case "fs.read":
+		r.replyFSRead(conn, in)
+	case "fs.search":
+		r.replyFSSearch(conn, in)
+	case "fs.grep":
+		r.replyFSGrep(conn, in)
+	case "git.refs":
+		r.replyGitRefs(conn, in)
+	case "git.log":
+		r.replyGitLog(conn, in)
+	case "git.commit.files":
+		r.replyGitCommitFiles(conn, in)
+	case "git.commit.fileDiff":
+		r.replyGitCommitFileDiff(conn, in)
+	case "git.diff":
+		r.replyGitDiff(conn, in)
+	case "git.diff.fileDiff":
+		r.replyGitDiffFileDiff(conn, in)
+	case "git.status":
+		r.replyGitStatus(conn, in)
+	case "git.workingTree.fileDiff":
+		r.replyGitWorkingTreeFileDiff(conn, in)
+	default:
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeInvalidArgument, "unsupported method on local read endpoint", map[string]any{"method": in.Method})
+	}
+}
+
+func (r *Reporter) localReadProjectListPayload() map[string]any {
+	projects := r.projectsSnapshot()
+	items := make([]rp.ProjectListItem, 0, len(projects))
+	for _, project := range projects {
+		name := strings.TrimSpace(project.Name)
+		if name == "" {
+			continue
+		}
+		items = append(items, rp.ProjectListItem{
+			ProjectID:     rp.ProjectID(r.cfg.HubID, name),
+			Name:          name,
+			Path:          strings.TrimSpace(project.Path),
+			Online:        project.Online,
+			Agent:         project.Agent,
+			Agents:        append([]string(nil), project.Agents...),
+			AgentProfiles: append([]rp.ProjectAgentProfile(nil), project.AgentProfiles...),
+			IMType:        project.IMType,
+			ProjectRev:    project.ProjectRev,
+			Git:           project.Git,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].ProjectID < items[j].ProjectID
+	})
+	return map[string]any{
+		"projects": items,
+		"hubs": []rp.HubListItem{{
+			HubID:     r.cfg.HubID,
+			LocalRead: r.LocalReadCandidate(),
+		}},
+	}
+}
+
+func (r *Reporter) replyLocalReadProjectSyncCheck(conn *websocket.Conn, in envelope) {
+	var payload rp.SyncCheckPayload
+	if err := decodePayload(in.Payload, &payload); err != nil {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeInvalidArgument, "invalid project.syncCheck payload", nil)
+		return
+	}
+	projectID := strings.TrimSpace(in.ProjectID)
+	if projectID == "" {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeInvalidArgument, "projectId is required", nil)
+		return
+	}
+	if !strings.HasPrefix(projectID, r.cfg.HubID+":") {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeForbidden, "project out of hub scope", map[string]any{"projectId": projectID})
+		return
+	}
+
+	r.mu.RLock()
+	project, ok := r.projectsByID[projectID]
+	r.mu.RUnlock()
+	if !ok {
+		_ = r.writeLocalReadError(conn, in.RequestID, in.Method, codeNotFound, "project not found", map[string]any{"projectId": projectID})
+		return
+	}
+
+	stale := make([]string, 0, 3)
+	if payload.KnownProjectRev != project.ProjectRev {
+		stale = append(stale, "project")
+	}
+	if payload.KnownGitRev != project.Git.GitRev {
+		stale = append(stale, "git")
+	}
+	if payload.KnownWorktreeRev != project.Git.WorktreeRev {
+		stale = append(stale, "worktree")
+	}
+	_ = r.writeJSON(conn, "->", envelope{
+		RequestID: in.RequestID,
+		Type:      "response",
+		Method:    in.Method,
+		ProjectID: projectID,
+		Payload: rp.MustRaw(rp.SyncCheckResponsePayload{
+			ProjectRev:   project.ProjectRev,
+			GitRev:       project.Git.GitRev,
+			WorktreeRev:  project.Git.WorktreeRev,
+			StaleDomains: stale,
+		}),
+	})
+}
+
+func localReadMethodAllowed(method string) bool {
+	switch method {
+	case "project.list", "project.syncCheck",
+		"fs.list", "fs.info", "fs.read", "fs.search", "fs.grep",
+		"git.refs", "git.log", "git.commit.files", "git.commit.fileDiff",
+		"git.diff", "git.diff.fileDiff", "git.status", "git.workingTree.fileDiff":
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *Reporter) writeLocalReadError(conn *websocket.Conn, requestID int64, method, code, message string, details map[string]any) error {
+	return r.writeJSON(conn, "->", envelope{
+		RequestID: requestID,
+		Type:      "error",
+		Method:    method,
+		Payload: rp.MustRaw(errorPayload{
+			Code:    code,
+			Message: message,
+			Details: details,
+		}),
+	})
 }
 
 func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
@@ -1966,6 +2381,18 @@ func buildWSURL(server string, port int) (string, error) {
 		host = fmt.Sprintf("%s:%d", base, port)
 	}
 	return "ws://" + host + "/ws", nil
+}
+
+func newLocalReadEndpointID(hubID string) (string, error) {
+	random := make([]byte, 16)
+	if _, err := rand.Read(random); err != nil {
+		return "", fmt.Errorf("generate local read endpoint id: %w", err)
+	}
+	normalizedHubID := strings.TrimSpace(hubID)
+	if normalizedHubID == "" {
+		normalizedHubID = "hub"
+	}
+	return "local-read:" + normalizedHubID + ":" + hex.EncodeToString(random), nil
 }
 
 func runGit(root string, args ...string) (string, error) {

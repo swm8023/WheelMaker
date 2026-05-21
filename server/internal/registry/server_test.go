@@ -165,6 +165,100 @@ func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 	}
 }
 
+func TestProjectListIncludesLocalReadCandidate(t *testing.T) {
+	s := New(Config{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	hub := dialWS(t, ts.URL+"/ws")
+	defer hub.Close()
+
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-hub",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.2",
+			"role":            "hub",
+			"hubId":           "hub-local-read",
+			"token":           "",
+		},
+	})
+	initResp := mustReadEnvelope(t, hub)
+	principal, _ := initResp.Payload["principal"].(map[string]any)
+	connectionEpoch, _ := principal["connectionEpoch"].(float64)
+
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "registry.reportProjects",
+		Payload: map[string]any{
+			"hubId":           "hub-local-read",
+			"connectionEpoch": int64(connectionEpoch),
+			"localRead": map[string]any{
+				"endpointId":       "local-hub-1",
+				"url":              "ws://127.0.0.1:53123/ws",
+				"proofPublicKey":   "base64-public-key",
+				"proofFingerprint": "sha256:fingerprint",
+			},
+			"projects": []map[string]any{
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "", "git": map[string]any{}},
+			},
+		},
+	})
+	reportResp := mustReadEnvelope(t, hub)
+	if reportResp.Type != "response" || reportResp.Method != "registry.reportProjects" {
+		t.Fatalf("unexpected report response: %#v", reportResp)
+	}
+
+	client := dialWS(t, ts.URL+"/ws")
+	defer client.Close()
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-web",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.2",
+			"role":            "client",
+			"token":           "",
+		},
+	})
+	_ = mustReadEnvelope(t, client)
+
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "project.list",
+		Payload:   map[string]any{},
+	})
+	listResp := mustReadEnvelope(t, client)
+	hubs, ok := listResp.Payload["hubs"].([]any)
+	if !ok || len(hubs) != 1 {
+		t.Fatalf("hubs=%v, want one hub", listResp.Payload["hubs"])
+	}
+	firstHub, _ := hubs[0].(map[string]any)
+	localRead, _ := firstHub["localRead"].(map[string]any)
+	if localRead["endpointId"] != "local-hub-1" {
+		t.Fatalf("localRead=%#v, want candidate endpointId", localRead)
+	}
+	if localRead["url"] != "ws://127.0.0.1:53123/ws" {
+		t.Fatalf("localRead url=%v", localRead["url"])
+	}
+
+	projects, ok := listResp.Payload["projects"].([]any)
+	if !ok || len(projects) != 1 {
+		t.Fatalf("projects=%v, want one project", listResp.Payload["projects"])
+	}
+	project, _ := projects[0].(map[string]any)
+	if _, exists := project["localRead"]; exists {
+		t.Fatalf("project should not expose localRead: %#v", project)
+	}
+}
+
 func TestRegistryReportProjectsRejectsStaleConnectionEpoch(t *testing.T) {
 	s := New(Config{})
 	ts := httptest.NewServer(s.Handler())
