@@ -508,6 +508,9 @@ describe('web chat integration', () => {
     const chatMainBlock = mainTsx.slice(chatMainStart, chatMainEnd);
     expect(chatMainBlock).not.toContain('renderChatHubSummary()');
     expect(stylesCss).toContain('.mobile-chat-title-row {');
+    const mobileChatTitleRowBlock = stylesCss.match(/\.mobile-chat-title-row \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileChatTitleRowBlock).toContain('flex-direction: row;');
+    expect(mobileChatTitleRowBlock).not.toContain('flex-direction: column;');
     expect(stylesCss).toContain('.sidebar-title-row .chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary-button {');
@@ -1069,6 +1072,12 @@ describe('web chat integration', () => {
       /\.wide-project-action-popover \{[\s\S]*position: fixed;[\s\S]*overflow-y: auto;[\s\S]*overscroll-behavior: contain;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(/\.wide-project-row \{[^}]*min-height: 32px;[^}]*\}/);
+    const wideProjectSectionBlock = stylesCss.match(/\.wide-project-section \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(wideProjectSectionBlock).toContain('margin-bottom: 4px;');
+    const mobileProjectSectionBlock = stylesCss.match(/\.mobile-project-section \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileProjectSectionBlock).toContain('margin-bottom: 4px;');
+    expect(stylesCss).toContain('.wide-project-section.active > .wide-project-row::before {');
+    expect(stylesCss).not.toContain('.wide-project-section.pinned > .wide-project-row::before {');
     expect(stylesCss).toMatch(/\.wide-project-toggle \{[^}]*height: 30px;[^}]*\}/);
     expect(stylesCss).toMatch(/\.wide-session-row \{[^}]*min-height: 26px;[^}]*\}/);
     const wideSessionRowBlock = stylesCss.match(/\.wide-session-row \{[\s\S]*?\n\}/)?.[0] ?? '';
@@ -1089,8 +1098,11 @@ describe('web chat integration', () => {
       /\.wide-project-folder-icon\.codicon-folder-opened \{[\s\S]*color: color-mix\(in srgb, var\(--hub-accent\) 82%, var\(--text\)\);[\s\S]*\}/,
     );
     const selectedSessionRowBlock = stylesCss.match(/\.wide-session-row\.selected \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(selectedSessionRowBlock).toContain('background: color-mix(in srgb, var(--accent) 18%, var(--panel-2));');
-    expect(selectedSessionRowBlock).not.toContain('box-shadow: inset 3px 0 0 var(--accent);');
+    expect(selectedSessionRowBlock).toContain('background: linear-gradient(');
+    expect(selectedSessionRowBlock).toContain('to right,');
+    expect(selectedSessionRowBlock).toContain('color-mix(in srgb, var(--accent) 5%, transparent) 0,');
+    expect(selectedSessionRowBlock).toContain('color-mix(in srgb, var(--accent) 16%, var(--panel-2)) 28px,');
+    expect(selectedSessionRowBlock).not.toContain('box-shadow: inset');
     expect(stylesCss).not.toContain('.wide-session-row::after');
     expect(stylesCss).not.toContain('.project-session-row-wrap.actions-open .wide-session-row {');
     expect(stylesCss).toMatch(
