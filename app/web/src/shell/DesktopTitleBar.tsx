@@ -16,7 +16,7 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
     return null;
   }
 
-  const handleDragPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+  const handleDragMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
       return;
     }
@@ -47,7 +47,7 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
         className="desktop-titlebar-drag-region"
         data-desktop-titlebar-drag-region={true}
         onDoubleClick={handleDragDoubleClick}
-        onPointerDown={handleDragPointerDown}
+        onMouseDown={handleDragMouseDown}
       >
         <img className="desktop-titlebar-icon" src="/icons/icon.svg" alt="" draggable={false} />
         <span className="desktop-titlebar-title">{title}</span>

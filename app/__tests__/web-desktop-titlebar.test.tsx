@@ -46,9 +46,11 @@ describe('desktop title bar', () => {
     expect(root.findByType('img').props.src).toBe('/icons/icon.svg');
 
     const dragRegion = root.findByProps({'data-desktop-titlebar-drag-region': true});
+    expect(dragRegion.props.onPointerDown).toBeUndefined();
     const preventDefault = jest.fn();
-    dragRegion.props.onPointerDown({
+    dragRegion.props.onMouseDown({
       button: 0,
+      detail: 1,
       target: { closest: () => null },
       preventDefault,
     });
@@ -57,7 +59,7 @@ describe('desktop title bar', () => {
     dragRegion.props.onDoubleClick();
     expect(toggleMaximize).toHaveBeenCalledTimes(1);
     const doubleClickPreventDefault = jest.fn();
-    dragRegion.props.onPointerDown({
+    dragRegion.props.onMouseDown({
       button: 0,
       detail: 2,
       target: { closest: () => null },
