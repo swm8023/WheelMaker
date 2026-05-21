@@ -25,10 +25,8 @@ function Assert-NotContains {
 }
 
 Assert-Contains "publish_desktop.ps1" $script "WHEELMAKER_WEB_TARGET"
-Assert-Contains "publish_desktop.ps1" $script "app\web\public\icons\icon.svg"
+Assert-Contains "publish_desktop.ps1" $script "server\cmd\wheelmaker-desktop\winres\icon.png"
 Assert-Contains "publish_desktop.ps1" $script "Restore-DesktopWebRootPlaceholder"
-Assert-Contains "publish_desktop.ps1" $script "Convert-DesktopIconSvgToPng"
-Assert-Contains "publish_desktop.ps1" $script "app\scripts\render_svg_icon.js"
 Assert-Contains "publish_desktop.ps1" $script "go-winres@v0.3.3"
 Assert-Contains "publish_desktop.ps1" $script "--icon"
 Assert-Contains "publish_desktop.ps1" $script "desktop_windows.syso"
@@ -40,10 +38,16 @@ Assert-Contains "publish_desktop.ps1" $script '$shortcut.IconLocation = $script:
 Assert-Contains "publish_desktop.ps1" $script "desktop-release.json"
 Assert-Contains "publish_desktop.ps1" $script "CreateShortcut"
 Assert-Contains "publish_desktop.ps1" $script "Desktop"
+Assert-NotContains "publish_desktop.ps1" $script "Convert-DesktopIconSvgToPng"
+Assert-NotContains "publish_desktop.ps1" $script "app\scripts\render_svg_icon.js"
+Assert-NotContains "publish_desktop.ps1" $script "app\web\public\icons\icon.svg"
 Assert-NotContains "publish_desktop.ps1" $script "Get-EdgeExecutable"
-Assert-NotContains "publish_desktop.ps1" $script "app\web\public\icons\icon.png"
 Assert-NotContains "publish_desktop.ps1" $script "Restart-Services"
 Assert-NotContains "publish_desktop.ps1" $script "update-now.signal"
 Assert-Contains "publish-desktop.bat" $bat "scripts\publish_desktop.ps1"
+
+$desktopIconPath = Join-Path $repoRoot "server\cmd\wheelmaker-desktop\winres\icon.png"
+if (-not (Test-Path -LiteralPath $desktopIconPath)) { throw "desktop pre-rendered icon is missing" }
+if ((Get-Item -LiteralPath $desktopIconPath).Length -le 0) { throw "desktop pre-rendered icon is empty" }
 
 Write-Host "desktop publish script checks passed"
