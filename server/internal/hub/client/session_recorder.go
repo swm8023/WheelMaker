@@ -53,10 +53,23 @@ type sessionTitleFacts struct {
 }
 
 type sessionSyncProjection struct {
-	LatestPersistedTurnIndex int64 `json:"latestPersistedTurnIndex"`
-	LastDoneTurnIndex        int64 `json:"lastDoneTurnIndex,omitempty"`
-	LastDoneSuccess          *bool `json:"lastDoneSuccess,omitempty"`
-	LastReadTurnIndex        int64 `json:"lastReadTurnIndex,omitempty"`
+	LatestPersistedTurnIndex int64                      `json:"latestPersistedTurnIndex"`
+	LastDoneTurnIndex        int64                      `json:"lastDoneTurnIndex,omitempty"`
+	LastDoneSuccess          *bool                      `json:"lastDoneSuccess,omitempty"`
+	LastReadTurnIndex        int64                      `json:"lastReadTurnIndex,omitempty"`
+	ActivePrompt             *sessionSyncPromptSnapshot `json:"activePrompt,omitempty"`
+}
+
+type sessionSyncPromptSnapshot struct {
+	NextTurnIndex int64                     `json:"nextTurnIndex,omitempty"`
+	UpdatedAt     string                    `json:"updatedAt,omitempty"`
+	Turns         []sessionSyncTurnSnapshot `json:"turns,omitempty"`
+}
+
+type sessionSyncTurnSnapshot struct {
+	TurnIndex int64  `json:"turnIndex"`
+	Content   string `json:"content"`
+	Finished  bool   `json:"finished"`
 }
 
 type sessionTurnMessage struct {
@@ -433,7 +446,8 @@ func (r *SessionRecorder) ReadSessionTurns(ctx context.Context, sessionID string
 	}
 	latestTurnIndex := persistedLatest
 	r.writeMu.Lock()
-	if state := r.promptState[sessionID]; state != nil {
+	state := r.promptState[sessionID]
+	if state != nil {
 		for _, turn := range sortedSessionTurns(state.turns) {
 			if turn.turnIndex > latestTurnIndex {
 				latestTurnIndex = turn.turnIndex
@@ -449,6 +463,11 @@ func (r *SessionRecorder) ReadSessionTurns(ctx context.Context, sessionID string
 		}
 	}
 	r.writeMu.Unlock()
+	if state == nil {
+		snapshotLatest, snapshotTurns := sessionSyncActivePromptTurns(sessionSyncProjectionFromJSON(rec.SessionSyncJSON), afterTurnIndex, persistedLatest)
+		latestTurnIndex = maxInt64(latestTurnIndex, snapshotLatest)
+		turns = append(turns, snapshotTurns...)
+	}
 	sort.Slice(turns, func(i, j int) bool {
 		return turns[i].TurnIndex < turns[j].TurnIndex
 	})
@@ -506,7 +525,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event p
 	request.ModelName = modelName
 	request.CreatedAt = rawEvent.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	event.payload = request
-	if err := r.addMessageTurn(state, event); err != nil {
+	if err := r.addMessageTurn(ctx, state, event); err != nil {
 		return err
 	}
 	r.promptState[rawEvent.SessionID] = state
@@ -524,10 +543,10 @@ func (r *SessionRecorder) handleUpdateMessageLocked(ctx context.Context, event p
 	if state == nil {
 		return nil
 	}
-	return r.addMessageTurn(state, event)
+	return r.addMessageTurn(ctx, state, event)
 }
 
-func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsedSessionViewEvent) error {
+func (r *SessionRecorder) addMessageTurn(ctx context.Context, state *sessionPromptState, event parsedSessionViewEvent) error {
 	if state == nil {
 		return fmt.Errorf("prompt state is required")
 	}
@@ -571,6 +590,12 @@ func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsed
 	updateJSON := buildIMContentJSON(turn.method, turn.payload)
 	r.publishSessionTurn(turn, updateJSON)
 	state.updateTurn(turn, event.turnKey)
+	if err := r.persistFinishedPromptStatePrefixLocked(ctx, event.raw.SessionID, state, event.raw.UpdatedAt); err != nil {
+		return err
+	}
+	if err := r.persistActivePromptStateSnapshotLocked(ctx, event.raw.SessionID, state, event.raw.UpdatedAt); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -638,6 +663,9 @@ func (r *SessionRecorder) finishPromptStateLocked(ctx context.Context, sessionID
 	if err := r.persistSessionStateTurnsLocked(ctx, sessionID, state, updatedAt); err != nil {
 		return err
 	}
+	if err := r.clearActivePromptStateSnapshotLocked(ctx, sessionID, updatedAt); err != nil {
+		return err
+	}
 	summary, err := r.upsertSessionProjectionWithPublish(ctx, sessionID, "", "", updatedAt, true, false)
 	if err != nil {
 		return err
@@ -662,7 +690,11 @@ func (r *SessionRecorder) latestPromptFinishedWithoutLiveStateLocked(ctx context
 	if rec == nil {
 		return false, nil
 	}
-	return sessionSyncLatestPersistedTurnIndex(rec.SessionSyncJSON) > 0, nil
+	projection := sessionSyncProjectionFromJSON(rec.SessionSyncJSON)
+	if projection.ActivePrompt != nil && len(projection.ActivePrompt.Turns) > 0 {
+		return false, nil
+	}
+	return projection.LatestPersistedTurnIndex > 0, nil
 }
 
 func (r *SessionRecorder) publishSessionTurn(turn sessionTurnMessage, updateJSON string) {
@@ -739,6 +771,12 @@ func (r *SessionRecorder) sessionViewSummaryFromRecordLocked(rec SessionRecord) 
 			}
 		}
 		running = !sessionPromptStateTerminal(state)
+	} else if snapshot := projection.ActivePrompt; snapshot != nil {
+		for _, turn := range snapshot.Turns {
+			if turn.TurnIndex > latestTurnIndex {
+				latestTurnIndex = turn.TurnIndex
+			}
+		}
 	}
 	for _, turn := range r.finishedTurns[rec.ID] {
 		if turn.TurnIndex > latestTurnIndex {
@@ -856,6 +894,91 @@ func (r *SessionRecorder) persistSessionStateTurnsLocked(ctx context.Context, se
 	return nil
 }
 
+func (r *SessionRecorder) persistFinishedPromptStatePrefixLocked(ctx context.Context, sessionID string, state *sessionPromptState, updatedAt time.Time) error {
+	if state == nil || len(state.turns) == 0 {
+		return nil
+	}
+	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
+	if err != nil {
+		return err
+	}
+	if rec == nil {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	persistedLatest := sessionSyncLatestPersistedTurnIndex(rec.SessionSyncJSON)
+	nextTurnIndex := persistedLatest + 1
+	prefixTurns := make([]sessionTurnMessage, 0)
+	for _, turn := range sortedSessionTurns(state.turns) {
+		if turn.turnIndex <= persistedLatest {
+			continue
+		}
+		if turn.turnIndex != nextTurnIndex || !stablePromptTurnForIncrementalPersistence(turn) {
+			break
+		}
+		prefixTurns = append(prefixTurns, turn)
+		nextTurnIndex++
+	}
+	if len(prefixTurns) == 0 {
+		return nil
+	}
+	prefixState := newSessionPromptState(state.nextTurnIndex)
+	prefixState.turns = prefixTurns
+	return r.persistSessionStateTurnsLocked(ctx, sessionID, &prefixState, updatedAt)
+}
+
+func (r *SessionRecorder) persistActivePromptStateSnapshotLocked(ctx context.Context, sessionID string, state *sessionPromptState, updatedAt time.Time) error {
+	if state == nil {
+		return nil
+	}
+	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
+	if err != nil {
+		return err
+	}
+	if rec == nil {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	projection := sessionSyncProjectionFromJSON(rec.SessionSyncJSON)
+	turns := sortedSessionTurns(state.turns)
+	if len(turns) == 0 {
+		projection.ActivePrompt = nil
+	} else {
+		snapshotTurns := make([]sessionSyncTurnSnapshot, 0, len(turns))
+		for _, turn := range turns {
+			snapshotTurns = append(snapshotTurns, sessionSyncTurnSnapshot{
+				TurnIndex: turn.turnIndex,
+				Content:   buildIMContentJSON(turn.method, turn.payload),
+				Finished:  turn.finished,
+			})
+		}
+		projection.ActivePrompt = &sessionSyncPromptSnapshot{
+			NextTurnIndex: state.nextTurnIndex,
+			UpdatedAt:     updatedAt.UTC().Format(time.RFC3339Nano),
+			Turns:         snapshotTurns,
+		}
+	}
+	rec.SessionSyncJSON = sessionSyncProjectionJSON(projection)
+	rec.LastActiveAt = updatedAt
+	return r.store.SaveSession(ctx, rec)
+}
+
+func (r *SessionRecorder) clearActivePromptStateSnapshotLocked(ctx context.Context, sessionID string, updatedAt time.Time) error {
+	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
+	if err != nil {
+		return err
+	}
+	if rec == nil {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	projection := sessionSyncProjectionFromJSON(rec.SessionSyncJSON)
+	if projection.ActivePrompt == nil {
+		return nil
+	}
+	projection.ActivePrompt = nil
+	rec.SessionSyncJSON = sessionSyncProjectionJSON(projection)
+	rec.LastActiveAt = updatedAt
+	return r.store.SaveSession(ctx, rec)
+}
+
 func sessionSyncLatestPersistedTurnIndex(raw string) int64 {
 	return sessionSyncProjectionFromJSON(raw).LatestPersistedTurnIndex
 }
@@ -933,6 +1056,23 @@ func normalizeSessionSyncProjection(sync sessionSyncProjection) sessionSyncProje
 	if sync.LastReadTurnIndex < 0 {
 		sync.LastReadTurnIndex = 0
 	}
+	if sync.ActivePrompt != nil {
+		normalizedTurns := make([]sessionSyncTurnSnapshot, 0, len(sync.ActivePrompt.Turns))
+		nextTurnIndex := sync.ActivePrompt.NextTurnIndex
+		for _, turn := range sortedSessionSyncTurnSnapshots(sync.ActivePrompt.Turns) {
+			if turn.TurnIndex <= 0 || strings.TrimSpace(turn.Content) == "" {
+				continue
+			}
+			normalizedTurns = append(normalizedTurns, turn)
+			nextTurnIndex = maxInt64(nextTurnIndex, turn.TurnIndex+1)
+		}
+		if len(normalizedTurns) == 0 {
+			sync.ActivePrompt = nil
+		} else {
+			sync.ActivePrompt.Turns = normalizedTurns
+			sync.ActivePrompt.NextTurnIndex = maxInt64(1, nextTurnIndex)
+		}
+	}
 	return sync
 }
 
@@ -951,6 +1091,129 @@ func sessionDoneTurnSuccess(turn sessionTurnMessage) bool {
 		return true
 	}
 	return strings.TrimSpace(result.StopReason) != acp.StopReasonFailed
+}
+
+func stablePromptTurnForIncrementalPersistence(turn sessionTurnMessage) bool {
+	if !turn.finished {
+		return false
+	}
+	switch strings.TrimSpace(turn.method) {
+	case acp.IMMethodToolCall:
+		return false
+	default:
+		return true
+	}
+}
+
+func sessionSyncActivePromptTurns(sync sessionSyncProjection, afterTurnIndex, persistedLatest int64) (int64, []sessionViewTurn) {
+	if sync.ActivePrompt == nil {
+		return persistedLatest, nil
+	}
+	latestTurnIndex := persistedLatest
+	turns := make([]sessionViewTurn, 0, len(sync.ActivePrompt.Turns))
+	for _, turn := range sortedSessionSyncTurnSnapshots(sync.ActivePrompt.Turns) {
+		if turn.TurnIndex > latestTurnIndex {
+			latestTurnIndex = turn.TurnIndex
+		}
+		if turn.TurnIndex <= afterTurnIndex || turn.TurnIndex <= persistedLatest {
+			continue
+		}
+		turns = append(turns, sessionViewTurn{
+			TurnIndex: turn.TurnIndex,
+			Content:   turn.Content,
+			Finished:  turn.Finished,
+		})
+	}
+	return latestTurnIndex, turns
+}
+
+func sortedSessionSyncTurnSnapshots(turns []sessionSyncTurnSnapshot) []sessionSyncTurnSnapshot {
+	out := append([]sessionSyncTurnSnapshot(nil), turns...)
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].TurnIndex < out[j].TurnIndex
+	})
+	return out
+}
+
+func sessionPromptStateFromSyncSnapshot(sessionID string, snapshot *sessionSyncPromptSnapshot) (*sessionPromptState, bool) {
+	if snapshot == nil || len(snapshot.Turns) == 0 {
+		return nil, false
+	}
+	state := newSessionPromptState(snapshot.NextTurnIndex)
+	for _, snapshotTurn := range sortedSessionSyncTurnSnapshots(snapshot.Turns) {
+		turn, ok := sessionTurnMessageFromSyncSnapshot(sessionID, snapshotTurn)
+		if !ok {
+			continue
+		}
+		state.updateTurn(turn, "")
+	}
+	if len(state.turns) == 0 {
+		return nil, false
+	}
+	state.nextTurnIndex = maxInt64(state.nextTurnIndex, snapshot.NextTurnIndex)
+	return &state, true
+}
+
+func sessionTurnMessageFromSyncSnapshot(sessionID string, snapshotTurn sessionSyncTurnSnapshot) (sessionTurnMessage, bool) {
+	if snapshotTurn.TurnIndex <= 0 || strings.TrimSpace(snapshotTurn.Content) == "" {
+		return sessionTurnMessage{}, false
+	}
+	msg := acp.IMTurnMessage{}
+	if err := json.Unmarshal([]byte(snapshotTurn.Content), &msg); err != nil {
+		return sessionTurnMessage{}, false
+	}
+	method := strings.TrimSpace(msg.Method)
+	if method == "" {
+		return sessionTurnMessage{}, false
+	}
+	payload, ok := sessionTurnPayloadFromRaw(method, msg.Param)
+	if !ok {
+		return sessionTurnMessage{}, false
+	}
+	return sessionTurnMessage{
+		sessionID: sessionID,
+		method:    method,
+		payload:   payload,
+		turnIndex: snapshotTurn.TurnIndex,
+		finished:  snapshotTurn.Finished,
+	}, true
+}
+
+func sessionTurnPayloadFromRaw(method string, raw json.RawMessage) (any, bool) {
+	switch strings.TrimSpace(method) {
+	case acp.IMMethodPromptRequest:
+		var payload acp.IMPromptRequest
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, false
+		}
+		return payload, true
+	case acp.IMMethodPromptDone:
+		var payload acp.IMPromptResult
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, false
+		}
+		return payload, true
+	case acp.IMMethodSystem, acp.IMMethodAgentMessage, acp.IMMethodAgentThought, acp.SessionUpdateUserMessageChunk:
+		var payload acp.IMTextResult
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, false
+		}
+		return payload, true
+	case acp.IMMethodToolCall:
+		var payload acp.IMToolResult
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, false
+		}
+		return payload, true
+	case acp.IMMethodAgentPlan:
+		var payload []acp.IMPlanResult
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, false
+		}
+		return payload, true
+	default:
+		return nil, false
+	}
 }
 
 func boolPtr(value bool) *bool {
@@ -1086,7 +1349,24 @@ func (r *SessionRecorder) nextSessionTurnIndexLocked(ctx context.Context, sessio
 }
 
 func (r *SessionRecorder) currentPromptStateLocked(ctx context.Context, sessionID string) (*sessionPromptState, error) {
-	return r.cachedPromptStateLocked(ctx, sessionID)
+	state, err := r.cachedPromptStateLocked(ctx, sessionID)
+	if err != nil || state != nil {
+		return state, err
+	}
+	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if rec == nil {
+		return nil, nil
+	}
+	projection := sessionSyncProjectionFromJSON(rec.SessionSyncJSON)
+	state, ok := sessionPromptStateFromSyncSnapshot(sessionID, projection.ActivePrompt)
+	if !ok {
+		return nil, nil
+	}
+	r.promptState[sessionID] = state
+	return state, nil
 }
 
 func (r *SessionRecorder) cachedPromptStateLocked(ctx context.Context, sessionID string) (*sessionPromptState, error) {
