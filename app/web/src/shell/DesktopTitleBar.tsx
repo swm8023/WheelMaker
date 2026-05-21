@@ -24,6 +24,10 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
       return;
     }
     event.preventDefault();
+    if (event.detail >= 2) {
+      invokeDesktopAction(bridge.toggleMaximize);
+      return;
+    }
     invokeDesktopAction(bridge.startDrag);
   };
 
