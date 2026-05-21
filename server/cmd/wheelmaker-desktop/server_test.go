@@ -102,7 +102,7 @@ func TestStartDesktopAssetServerUsesLoopback(t *testing.T) {
 	if !strings.Contains(string(body), "loopback") {
 		t.Fatalf("body=%q should include embedded index", string(body))
 	}
-	if !strings.HasPrefix(srv.URL(), "http://127.0.0.1:") {
-		t.Fatalf("url=%q should use loopback", srv.URL())
+	if srv.URL() != "http://127.0.0.1:9632/" {
+		t.Fatalf("url=%q should use stable desktop storage origin", srv.URL())
 	}
 }

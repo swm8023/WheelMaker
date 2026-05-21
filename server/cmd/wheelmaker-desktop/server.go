@@ -12,6 +12,9 @@ import (
 	"time"
 )
 
+// Keep the desktop asset origin stable so Web storage survives app restarts.
+const desktopAssetListenAddr = "127.0.0.1:9632"
+
 type desktopAssetServer struct {
 	server *http.Server
 	ln     net.Listener
@@ -27,9 +30,9 @@ func (s *desktopAssetServer) Close() error {
 }
 
 func startDesktopAssetServer(assets fs.FS) (*desktopAssetServer, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", desktopAssetListenAddr)
 	if err != nil {
-		return nil, fmt.Errorf("listen desktop asset server: %w", err)
+		return nil, fmt.Errorf("listen desktop asset server on %s: %w", desktopAssetListenAddr, err)
 	}
 	handler := newDesktopAssetHandler(assets)
 	srv := &http.Server{

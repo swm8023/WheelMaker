@@ -20,7 +20,7 @@ func (r *recordingLauncher) Launch(url string, opts desktopWindowOptions) error 
 	return r.err
 }
 
-func TestRunDesktopAppStartsServerAndLaunchesLoopbackURL(t *testing.T) {
+func TestRunDesktopAppLaunchesStableLoopbackStorageOrigin(t *testing.T) {
 	launcher := &recordingLauncher{}
 	err := runDesktopApp(fstest.MapFS{
 		"index.html": {Data: []byte("<html>desktop</html>")},
@@ -29,8 +29,8 @@ func TestRunDesktopAppStartsServerAndLaunchesLoopbackURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runDesktopApp: %v", err)
 	}
-	if !strings.HasPrefix(launcher.url, "http://127.0.0.1:") {
-		t.Fatalf("url=%q should use loopback", launcher.url)
+	if launcher.url != "http://127.0.0.1:9632/" {
+		t.Fatalf("url=%q should use stable desktop storage origin", launcher.url)
 	}
 }
 
