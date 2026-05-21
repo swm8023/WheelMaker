@@ -627,7 +627,6 @@ const AGENT_TAG_VARIANT_INDEX: Record<string, number> = {
   claude: 2,
   opencode: 3,
   codebuddy: 4,
-  myflicker: 5,
 };
 
 function normalizeAgentTypeName(value?: string | null): string {

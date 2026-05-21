@@ -55,14 +55,6 @@ var (
 		SkillExtraDirsEnv:      "COPILOT_SKILLS_DIRS",
 		SkillPluginDirGlobs:    []string{"~/.copilot/installed-plugins/*/*/skills"},
 	}
-	MyflickerACPProviderPreset = ACPProviderPreset{
-		Name:                   "myflicker",
-		BinaryName:             "myflicker",
-		Args:                   []string{"acp"},
-		MissingPathErrTemplate: "myflicker: binary not found in PATH: %v",
-		SkillProjectDirs:       []string{".agents/skills"},
-		SkillUserDirs:          []string{"~/.agents/skills"},
-	}
 	OpenCodeACPProviderPreset = ACPProviderPreset{
 		Name:                   "opencode",
 		BinaryName:             "opencode",
@@ -108,10 +100,6 @@ func NewClaudeProvider() *acpProvider {
 
 func NewCopilotProvider() *acpProvider {
 	return NewACPProvider(CopilotACPProviderPreset)
-}
-
-func NewMyflickerProvider() *acpProvider {
-	return NewACPProvider(MyflickerACPProviderPreset)
 }
 
 func NewOpenCodeProvider() *acpProvider {

@@ -32,8 +32,6 @@ func providerPresetByName(name string) (ACPProviderPreset, bool) {
 		return ClaudeACPProviderPreset, true
 	case CopilotACPProviderPreset.Name:
 		return CopilotACPProviderPreset, true
-	case MyflickerACPProviderPreset.Name:
-		return MyflickerACPProviderPreset, true
 	case OpenCodeACPProviderPreset.Name:
 		return OpenCodeACPProviderPreset, true
 	case CodeBuddyACPProviderPreset.Name:
