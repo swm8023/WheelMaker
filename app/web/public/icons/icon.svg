@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1536" height="1536" viewBox="0 0 1536 1536" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="iconClip">
+      <rect x="38" y="38" width="1460" height="1460" rx="292"/>
+    </clipPath>
+
+    <radialGradient id="bgRadial" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(768 636) rotate(90) scale(910 910)">
+      <stop offset="0" stop-color="#061A3F"/>
+      <stop offset="0.58" stop-color="#021331"/>
+      <stop offset="1" stop-color="#000918"/>
+    </radialGradient>
+
+    <linearGradient id="bgEdge" x1="768" y1="38" x2="768" y2="1498" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#173E78" stop-opacity="0.55"/>
+      <stop offset="0.22" stop-color="#0A2C5E" stop-opacity="0.18"/>
+      <stop offset="0.72" stop-color="#020B1F" stop-opacity="0.0"/>
+      <stop offset="1" stop-color="#0A2D61" stop-opacity="0.32"/>
+    </linearGradient>
+
+    <linearGradient id="blueMark" x1="339" y1="448" x2="940" y2="1098" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#48C1FF"/>
+      <stop offset="0.48" stop-color="#29A8FF"/>
+      <stop offset="1" stop-color="#168FF0"/>
+    </linearGradient>
+
+    <linearGradient id="whiteMark" x1="848" y1="508" x2="1208" y2="1072" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.64" stop-color="#FAFAFA"/>
+      <stop offset="1" stop-color="#F1F2F6"/>
+    </linearGradient>
+
+    <filter id="softOuter" x="-80" y="-80" width="1696" height="1696" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="26" flood-color="#000000" flood-opacity="0.55"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="#1D5AA5" flood-opacity="0.35"/>
+    </filter>
+
+    <filter id="logoShadow" x="260" y="405" width="1010" height="735" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000814" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <rect width="1536" height="1536" fill="transparent"/>
+
+  <g filter="url(#softOuter)">
+    <rect x="38" y="38" width="1460" height="1460" rx="292" fill="url(#bgRadial)"/>
+  </g>
+
+  <g clip-path="url(#iconClip)">
+    <rect x="38" y="38" width="1460" height="1460" rx="292" fill="url(#bgEdge)"/>
+    <ellipse cx="770" cy="190" rx="520" ry="155" fill="#0C3471" opacity="0.10"/>
+    <ellipse cx="768" cy="1260" rx="600" ry="210" fill="#00184A" opacity="0.15"/>
+  </g>
+
+  <rect x="44" y="44" width="1448" height="1448" rx="286" stroke="#1A4D91" stroke-width="5" opacity="0.45"/>
+  <rect x="51" y="51" width="1434" height="1434" rx="280" stroke="#102A59" stroke-width="3" opacity="0.42"/>
+
+  <g filter="url(#logoShadow)">
+    <path d="M325 462 L456 607 L457 847 L644 650 L1026 1073 L853 1073 L637 843 L424 1073 L326 1073 Z" fill="url(#blueMark)"/>
+    <path d="M674 628 H871 L768 746 Z" fill="url(#blueMark)"/>
+    <path d="M1209 462 L974 729 L895 648 L787 768 L948 943 L1079 798 L1079 1071 L1209 1071 Z" fill="url(#whiteMark)"/>
+  </g>
+</svg>

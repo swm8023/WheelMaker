@@ -68,7 +68,7 @@ describe('web runtime setup', () => {
 
   test('uses the current WheelMaker brand icon for PWA and desktop publishing', () => {
     const projectRoot = path.join(__dirname, '..');
-    const iconPath = path.join(projectRoot, 'web', 'public', 'icons', 'icon.png');
+    const iconPath = path.join(projectRoot, 'web', 'public', 'icons', 'icon.svg');
     const manifest = JSON.parse(
       fs.readFileSync(path.join(projectRoot, 'web', 'public', 'manifest.webmanifest'), 'utf8'),
     );
@@ -83,18 +83,18 @@ describe('web runtime setup', () => {
     );
 
     expect(manifest.icons?.[0]).toMatchObject({
-      src: '/icons/icon.png',
-      sizes: '1254x1254',
-      type: 'image/png',
+      src: '/icons/icon.svg',
+      sizes: '1536x1536',
+      type: 'image/svg+xml',
       purpose: 'any maskable',
     });
-    expect(icon.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
-    expect(icon.readUInt32BE(16)).toBe(1254);
-    expect(icon.readUInt32BE(20)).toBe(1254);
-    expect(serviceWorker).toContain('/icons/icon.png');
-    expect(serviceWorker).not.toContain('/icons/icon.svg');
-    expect(indexHtml).toContain('href="/icons/icon.png"');
-    expect(indexHtml).not.toContain('href="/icons/icon.svg"');
+    const iconText = icon.toString('utf8');
+    expect(iconText).toContain('<svg');
+    expect(iconText).toContain('viewBox="0 0 1536 1536"');
+    expect(serviceWorker).toContain('/icons/icon.svg');
+    expect(serviceWorker).not.toContain('/icons/icon.png');
+    expect(indexHtml).toContain('href="/icons/icon.svg"');
+    expect(indexHtml).not.toContain('href="/icons/icon.png"');
   });
 
   test('webpack output path can be redirected for desktop staging', () => {

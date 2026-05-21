@@ -94,26 +94,36 @@ function Build-DesktopWeb {
   }
 }
 
-function Copy-DesktopIconPng {
-  $iconSource = Join-Path $script:RepoRoot "app\web\public\icons\icon.png"
+function Convert-DesktopIconSvgToPng {
+  $iconSource = Join-Path $script:RepoRoot "app\web\public\icons\icon.svg"
   if (-not (Test-Path -LiteralPath $iconSource)) {
     throw ("PWA icon source is missing: {0}" -f $iconSource)
   }
+  $renderer = Join-Path $script:RepoRoot "app\scripts\render_svg_icon.js"
+  if (-not (Test-Path -LiteralPath $renderer)) {
+    throw ("SVG icon renderer is missing: {0}" -f $renderer)
+  }
   if ($WhatIf) {
-    Write-Host ("[whatif] copy {0} -> {1}" -f $iconSource, $script:DesktopIconPng)
+    Write-Host ("[whatif] node {0} {1} {2} 1024" -f $renderer, $iconSource, $script:DesktopGeneratedIconPng)
     return
   }
 
-  New-Item -ItemType Directory -Path $script:DesktopWinresDir -Force | Out-Null
-  Copy-Item -LiteralPath $iconSource -Destination $script:DesktopIconPng -Force
+  New-Item -ItemType Directory -Path (Split-Path -Parent $script:DesktopGeneratedIconPng) -Force | Out-Null
+  Invoke-Checked -FilePath "node" -Arguments @(
+    $renderer,
+    $iconSource,
+    $script:DesktopGeneratedIconPng,
+    "1024"
+  ) -FailureMessage "desktop SVG icon rasterization failed"
 }
 
 function Build-DesktopResource {
+  Assert-Command -Name "node" -Hint "Install Node.js 22+."
   Assert-Command -Name "go" -Hint "Install Go 1.26+."
   Write-Step "generate desktop exe icon resource"
-  Copy-DesktopIconPng
+  Convert-DesktopIconSvgToPng
   if ($WhatIf) {
-    Write-Host ("[whatif] go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64 --out {0} --no-suffix --manifest gui --icon {1}" -f $script:DesktopSyso, $script:DesktopIconPng)
+    Write-Host ("[whatif] go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64 --out {0} --no-suffix --manifest gui --icon {1}" -f $script:DesktopSyso, $script:DesktopGeneratedIconPng)
     return
   }
   Push-Location (Join-Path $script:RepoRoot "server\cmd\wheelmaker-desktop")
@@ -130,7 +140,7 @@ function Build-DesktopResource {
       "--manifest",
       "gui",
       "--icon",
-      $script:DesktopIconPng,
+      $script:DesktopGeneratedIconPng,
       "--file-description",
       "WheelMaker Desktop",
       "--product-name",
@@ -191,10 +201,9 @@ $script:RepoRoot = if ([string]::IsNullOrWhiteSpace($RepoRoot)) { (Resolve-Path 
 $script:AppRoot = Join-Path $script:RepoRoot "app"
 $script:ServerRoot = Join-Path $script:RepoRoot "server"
 $script:DesktopWebRoot = Join-Path $script:RepoRoot "server\cmd\wheelmaker-desktop\webroot"
-$script:DesktopWinresDir = Join-Path $script:RepoRoot "server\cmd\wheelmaker-desktop\winres"
-$script:DesktopIconPng = Join-Path $script:DesktopWinresDir "icon.png"
 $script:DesktopSyso = Join-Path $script:RepoRoot "server\cmd\wheelmaker-desktop\desktop_windows.syso"
 $script:OutputDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
+$script:DesktopGeneratedIconPng = Join-Path $script:OutputDir "winres-icon.png"
 $script:DesktopExe = Join-Path $script:OutputDir "WheelMakerDesktop.exe"
 $script:ManifestPath = Join-Path $script:OutputDir "desktop-release.json"
 

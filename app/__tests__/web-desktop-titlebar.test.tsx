@@ -43,7 +43,7 @@ describe('desktop title bar', () => {
     const root = renderer!.root;
     expect(root.findByProps({'data-desktop-titlebar': true})).toBeDefined();
     expect(root.findByProps({className: 'desktop-titlebar-title'}).props.children).toBe('WheelMaker');
-    expect(root.findByType('img').props.src).toBe('/icons/icon.png');
+    expect(root.findByType('img').props.src).toBe('/icons/icon.svg');
 
     const dragRegion = root.findByProps({'data-desktop-titlebar-drag-region': true});
     const preventDefault = jest.fn();
