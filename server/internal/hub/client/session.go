@@ -90,7 +90,7 @@ func newSession(id, cwd, agentType string) (*Session, error) {
 	if id == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
-	agentType = strings.TrimSpace(agentType)
+	agentType = normalizeAgentType(agentType)
 	if agentType == "" {
 		return nil, fmt.Errorf("agent type is required")
 	}

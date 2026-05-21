@@ -129,31 +129,27 @@ func TestFormatACPLogLine_NotifySessionUpdateFilter(t *testing.T) {
 	}
 }
 
-func TestCodexACPProvider_UsesGlobalBinaryByDefault(t *testing.T) {
+func TestCodexProviderUsesAppServerStdio(t *testing.T) {
 	p := NewCodexProvider()
-	p.resolveBinary = func(name string, configuredPath string) (string, error) {
-		if name != "codex-acp" {
-			t.Fatalf("resolveBinary name=%q, want codex-acp", name)
-		}
-		if configuredPath != "" {
-			t.Fatalf("resolveBinary configuredPath=%q, want empty", configuredPath)
-		}
-		return "/usr/bin/codex-acp", nil
-	}
 	p.lookPath = func(bin string) (string, error) {
-		t.Fatalf("lookPath should not be called: bin=%q", bin)
-		return "", nil
+		if bin != "codex" {
+			t.Fatalf("lookPath bin=%q, want codex", bin)
+		}
+		return "/usr/bin/codex", nil
 	}
 
 	exe, args, env, err := p.Launch()
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	if exe != "/usr/bin/codex-acp" {
+	if p.Name() != "codex" {
+		t.Fatalf("Name()=%q, want codex", p.Name())
+	}
+	if exe != "/usr/bin/codex" {
 		t.Fatalf("exe=%q", exe)
 	}
-	if len(args) != 0 {
-		t.Fatalf("args=%v, want empty", args)
+	if !reflect.DeepEqual(args, []string{"app-server", "--listen", "stdio://"}) {
+		t.Fatalf("args=%v", args)
 	}
 	if len(env) != 0 {
 		t.Fatalf("env=%v, want empty", env)
@@ -269,24 +265,30 @@ func TestCodeBuddyACPProvider_LaunchArgs(t *testing.T) {
 	}
 }
 
-func TestParseACPProviderCodexApp(t *testing.T) {
-	provider, ok := protocol.ParseACPProvider("codexapp")
+func TestParseACPProviderCodexAliases(t *testing.T) {
+	provider, ok := protocol.ParseACPProvider("codex")
 	if !ok {
-		t.Fatal("ParseACPProvider returned ok=false")
+		t.Fatal("ParseACPProvider(codex) returned ok=false")
 	}
-	if provider != protocol.ACPProviderCodexApp {
-		t.Fatalf("provider=%q, want %q", provider, protocol.ACPProviderCodexApp)
+	if provider != protocol.ACPProviderCodex {
+		t.Fatalf("provider=%q, want %q", provider, protocol.ACPProviderCodex)
+	}
+	provider, ok = protocol.ParseACPProvider("codexapp")
+	if !ok {
+		t.Fatal("ParseACPProvider(codexapp) returned ok=false")
+	}
+	if provider != protocol.ACPProviderCodex {
+		t.Fatalf("codexapp alias provider=%q, want %q", provider, protocol.ACPProviderCodex)
 	}
 	if _, ok := protocol.ParseACPProvider("codex-app"); ok {
 		t.Fatal("ParseACPProvider accepted legacy codex-app alias")
 	}
 
 	for _, name := range protocol.ACPProviderNames() {
-		if name == string(protocol.ACPProviderCodexApp) {
-			return
+		if name == "codexapp" {
+			t.Fatalf("ACPProviderNames exposes codexapp alias: %v", protocol.ACPProviderNames())
 		}
 	}
-	t.Fatalf("ACPProviderNames missing %q: %v", protocol.ACPProviderCodexApp, protocol.ACPProviderNames())
 }
 
 func TestCodexAppProviderLaunchUsesAppServerStdio(t *testing.T) {
@@ -1942,7 +1944,7 @@ func TestCodexAppCleanupSessionArtifactsRemovesImageDirectory(t *testing.T) {
 		t.Fatalf("image artifact not written: %v", err)
 	}
 
-	if err := CleanupSessionArtifacts("Proj:Name", string(protocol.ACPProviderCodexApp), "thread-1"); err != nil {
+	if err := CleanupSessionArtifacts("Proj:Name", string(protocol.ACPProviderCodex), "thread-1"); err != nil {
 		t.Fatalf("CleanupSessionArtifacts: %v", err)
 	}
 	if _, err := os.Stat(imageDir); !os.IsNotExist(err) {
@@ -2033,7 +2035,7 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	}
 
 	conn := newCodexappConnWithRuntime(rt, t.TempDir())
-	inst := NewInstance("codexapp", conn)
+	inst := NewInstance("codex", conn)
 	updates := make(chan protocol.SessionUpdateParams, 4)
 	inst.SetCallbacks(&fakeCodexappCallbacks{updates: updates})
 
@@ -2041,7 +2043,7 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
-	if initRes.AgentInfo == nil || initRes.AgentInfo.Name != "codexapp" {
+	if initRes.AgentInfo == nil || initRes.AgentInfo.Name != "codex" {
 		t.Fatalf("agent info=%#v", initRes.AgentInfo)
 	}
 	if initRes.AgentCapabilities.PromptCapabilities == nil || !initRes.AgentCapabilities.PromptCapabilities.Image {
@@ -2748,14 +2750,14 @@ func TestInstanceListSkills_UnknownProvider(t *testing.T) {
 }
 func TestCodexPreset_IncludesAgentsUserSkillsDir(t *testing.T) {
 	found := false
-	for _, dir := range CodexACPProviderPreset.SkillUserDirs {
+	for _, dir := range CodexProviderPreset.SkillUserDirs {
 		if strings.EqualFold(strings.TrimSpace(dir), "~/.agents/skills") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("codex preset user dirs missing ~/.agents/skills: %v", CodexACPProviderPreset.SkillUserDirs)
+		t.Fatalf("codex preset user dirs missing ~/.agents/skills: %v", CodexProviderPreset.SkillUserDirs)
 	}
 }
 

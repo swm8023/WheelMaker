@@ -81,6 +81,14 @@ type AgentPreferenceRecord struct {
 	PreferenceJSON string
 }
 
+func normalizeAgentType(agentType string) string {
+	normalized := strings.TrimSpace(agentType)
+	if strings.EqualFold(normalized, "codexapp") {
+		return "codex"
+	}
+	return normalized
+}
+
 type Store interface {
 	LoadRouteBindings(ctx context.Context, projectName string) (map[string]string, error)
 	SaveRouteBinding(ctx context.Context, projectName, routeKey, sessionID string) error
@@ -364,12 +372,12 @@ func (s *sqliteStore) LoadProjectDefaultAgent(ctx context.Context, projectName s
 		}
 		return "", fmt.Errorf("load project default agent: %w", err)
 	}
-	return strings.TrimSpace(agentType), nil
+	return normalizeAgentType(agentType), nil
 }
 
 func (s *sqliteStore) SaveProjectDefaultAgent(ctx context.Context, projectName, agentType string) error {
 	projectName = strings.TrimSpace(projectName)
-	agentType = strings.TrimSpace(agentType)
+	agentType = normalizeAgentType(agentType)
 	if projectName == "" {
 		return fmt.Errorf("project name is required")
 	}
@@ -388,25 +396,42 @@ func (s *sqliteStore) SaveProjectDefaultAgent(ctx context.Context, projectName, 
 }
 
 func (s *sqliteStore) LoadAgentPreference(ctx context.Context, projectName, agentType string) (*AgentPreferenceRecord, error) {
+	projectName = strings.TrimSpace(projectName)
+	agentType = normalizeAgentType(agentType)
 	row := s.db.QueryRowContext(ctx, `
 		SELECT project_name, agent_type, preference_json
 		FROM agent_preferences
 		WHERE project_name = ? AND agent_type = ?
-	`, strings.TrimSpace(projectName), strings.TrimSpace(agentType))
+	`, projectName, agentType)
 
 	var rec AgentPreferenceRecord
 	if err := row.Scan(&rec.ProjectName, &rec.AgentType, &rec.PreferenceJSON); err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			if agentType != "codex" {
+				return nil, nil
+			}
+			row = s.db.QueryRowContext(ctx, `
+				SELECT project_name, agent_type, preference_json
+				FROM agent_preferences
+				WHERE project_name = ? AND agent_type = ?
+			`, projectName, "codexapp")
+			if err := row.Scan(&rec.ProjectName, &rec.AgentType, &rec.PreferenceJSON); err != nil {
+				if err == sql.ErrNoRows {
+					return nil, nil
+				}
+				return nil, fmt.Errorf("load agent preference: %w", err)
+			}
+		} else {
+			return nil, fmt.Errorf("load agent preference: %w", err)
 		}
-		return nil, fmt.Errorf("load agent preference: %w", err)
 	}
+	rec.AgentType = normalizeAgentType(rec.AgentType)
 	return &rec, nil
 }
 
 func (s *sqliteStore) SaveAgentPreference(ctx context.Context, rec AgentPreferenceRecord) error {
 	rec.ProjectName = strings.TrimSpace(rec.ProjectName)
-	rec.AgentType = strings.TrimSpace(rec.AgentType)
+	rec.AgentType = normalizeAgentType(rec.AgentType)
 	if rec.ProjectName == "" || rec.AgentType == "" {
 		return fmt.Errorf("project name and agent type are required")
 	}
@@ -454,6 +479,7 @@ func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID st
 
 	rec.ProjectName = strings.TrimSpace(projectName)
 	rec.Status = SessionStatus(status)
+	rec.AgentType = normalizeAgentType(rec.AgentType)
 	rec.SessionSyncJSON = firstNonEmpty(rec.SessionSyncJSON, "{}")
 	rec.CreatedAt = parseStoreTime(createdAt)
 	rec.LastActiveAt = parseStoreTime(lastActiveAt)
@@ -474,7 +500,7 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 	if rec.ProjectName == "" {
 		return fmt.Errorf("project name is required")
 	}
-	rec.AgentType = strings.TrimSpace(rec.AgentType)
+	rec.AgentType = normalizeAgentType(rec.AgentType)
 	if rec.AgentType == "" {
 		return fmt.Errorf("agent type is required")
 	}
@@ -552,12 +578,12 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 		}
 		entry.ProjectName = strings.TrimSpace(entryProjectName)
 		entry.Status = SessionStatus(status)
-		entry.AgentType = strings.TrimSpace(agentType)
+		entry.AgentType = normalizeAgentType(agentType)
 		entry.AgentJSON = firstNonEmpty(strings.TrimSpace(agentJSON), "{}")
 		entry.SessionSyncJSON = firstNonEmpty(sessionSyncJSON, "{}")
 		entry.CreatedAt = parseStoreTime(createdAt)
 		entry.LastActiveAt = parseStoreTime(lastActiveAt)
-		entry.Agent, entry.Title = inferSessionListMetadata(agentType, agentJSON)
+		entry.Agent, entry.Title = inferSessionListMetadata(entry.AgentType, agentJSON)
 		if strings.TrimSpace(storedTitle) != "" {
 			entry.Title = strings.TrimSpace(storedTitle)
 		}
@@ -697,7 +723,7 @@ func (s *sqliteStore) loadSessionByID(ctx context.Context, sessionID string) (*S
 	}
 	rec.ProjectName = strings.TrimSpace(entryProjectName)
 	rec.Status = SessionStatus(status)
-	rec.AgentType = strings.TrimSpace(rec.AgentType)
+	rec.AgentType = normalizeAgentType(rec.AgentType)
 	rec.AgentJSON = firstNonEmpty(strings.TrimSpace(rec.AgentJSON), "{}")
 	rec.SessionSyncJSON = firstNonEmpty(rec.SessionSyncJSON, "{}")
 	rec.CreatedAt = parseStoreTime(createdAt)
@@ -712,7 +738,7 @@ func inferSessionListMetadata(agentType, agentJSON string) (string, string) {
 
 	state := storedAgentState{}
 	if err := json.Unmarshal([]byte(firstNonEmpty(agentJSON, "{}")), &state); err != nil {
-		return strings.TrimSpace(agentType), ""
+		return normalizeAgentType(agentType), ""
 	}
-	return strings.TrimSpace(agentType), strings.TrimSpace(state.Title)
+	return normalizeAgentType(agentType), strings.TrimSpace(state.Title)
 }

@@ -742,7 +742,8 @@ func codexappWriteImageArtifact(projectName string, sessionID string, block prot
 
 // CleanupSessionArtifacts removes artifacts owned by an agent session.
 func CleanupSessionArtifacts(projectName, agentType, sessionID string) error {
-	if !strings.EqualFold(strings.TrimSpace(agentType), string(protocol.ACPProviderCodexApp)) {
+	normalizedAgentType := strings.ToLower(strings.TrimSpace(agentType))
+	if normalizedAgentType != string(protocol.ACPProviderCodex) && normalizedAgentType != "codexapp" {
 		return nil
 	}
 	return cleanupCodexappSessionArtifacts(projectName, sessionID)

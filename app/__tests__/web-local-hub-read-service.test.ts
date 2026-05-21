@@ -85,6 +85,7 @@ describe('local hub read service routing', () => {
       role: 'local_read',
       hubId: 'hub-a',
       token: 'secret-token',
+      protocolVersion: '2.3',
     });
   });
 

@@ -241,6 +241,7 @@ func sanitizePreferenceConfigOptions(options []PreferenceConfigOption) []Prefere
 }
 
 func (c *Client) createSessionState(ctx context.Context, agentType, title string) (*createdSessionState, error) {
+	agentType = normalizeAgentType(agentType)
 	creator := c.registry.CreatorByName(agentType)
 	if creator == nil {
 		fallback := ""
@@ -326,7 +327,7 @@ func (c *Client) createSessionState(ctx context.Context, agentType, title string
 }
 
 func (c *Client) CreateSession(ctx context.Context, agentType, title string) (*Session, error) {
-	agentType = strings.TrimSpace(agentType)
+	agentType = normalizeAgentType(agentType)
 	if agentType == "" {
 		return nil, fmt.Errorf("agent type is required")
 	}
@@ -1203,7 +1204,7 @@ func (c *Client) clientNewSessionWithOptions(routeKey, agentType string, persist
 	if err != nil {
 		return nil, err
 	}
-	agentType = strings.TrimSpace(agentType)
+	agentType = normalizeAgentType(agentType)
 	if agentType == "" {
 		return nil, fmt.Errorf("agent type is required")
 	}

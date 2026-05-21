@@ -26,8 +26,8 @@ func ListProviderSkills(ctx context.Context, providerName, cwd string) ([]SkillD
 
 func providerPresetByName(name string) (ACPProviderPreset, bool) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case CodexACPProviderPreset.Name:
-		return CodexACPProviderPreset, true
+	case CodexProviderPreset.Name, "codexapp":
+		return CodexProviderPreset, true
 	case ClaudeACPProviderPreset.Name:
 		return ClaudeACPProviderPreset, true
 	case CopilotACPProviderPreset.Name:
@@ -265,4 +265,3 @@ func skillNameFromRelativePath(root, skillFile string) string {
 	}
 	return out[len(out)-1]
 }
-

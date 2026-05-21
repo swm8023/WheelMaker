@@ -59,6 +59,17 @@ export type LocalReadInitOptions = {
   verifyProof?: LocalReadProofVerifier;
 };
 
+function normalizeAgentType(agentType: unknown): string | undefined {
+  if (typeof agentType !== 'string') {
+    return undefined;
+  }
+  const normalized = agentType.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized.toLowerCase() === 'codexapp' ? 'codex' : normalized;
+}
+
 function base64ToArrayBuffer(value: string): ArrayBuffer {
   const binary = globalThis.atob(value);
   const buffer = new ArrayBuffer(binary.length);
@@ -194,7 +205,7 @@ export class RegistryRepository {
       updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : '',
       messageCount: typeof input.messageCount === 'number' && Number.isFinite(input.messageCount) ? input.messageCount : 0,
       unreadCount: typeof input.unreadCount === 'number' && Number.isFinite(input.unreadCount) ? input.unreadCount : undefined,
-      agentType: typeof input.agentType === 'string' ? input.agentType : undefined,
+      agentType: normalizeAgentType(input.agentType),
       latestTurnIndex: typeof input.latestTurnIndex === 'number' && Number.isFinite(input.latestTurnIndex)
         ? Math.max(0, Math.trunc(input.latestTurnIndex))
         : undefined,
@@ -287,7 +298,7 @@ export class RegistryRepository {
     await this.client.connectInit({
       clientName: 'wheelmaker-web',
       clientVersion: '0.1.0',
-      protocolVersion: '2.2',
+      protocolVersion: '2.3',
       role: 'client',
       token: token?.trim() ?? '',
     });
@@ -319,7 +330,7 @@ export class RegistryRepository {
     await this.client.connectInit({
       clientName: 'wheelmaker-web',
       clientVersion: '0.1.0',
-      protocolVersion: '2.2',
+      protocolVersion: '2.3',
       role: 'local_read',
       hubId,
       token: token.trim(),
@@ -336,19 +347,17 @@ export class RegistryRepository {
       .filter(project => !!project.projectId)
       .map(project => ({
         ...project,
-        agent: typeof project.agent === 'string'
-          ? project.agent.trim()
-          : undefined,
+        agent: normalizeAgentType(project.agent),
         agents: Array.isArray(project.agents)
           ? project.agents
               .filter((item): item is string => typeof item === 'string')
-              .map(item => item.trim())
-              .filter(item => item.length > 0)
+              .map(item => normalizeAgentType(item))
+              .filter((item): item is string => !!item)
           : undefined,
         agentProfiles: Array.isArray(project.agentProfiles)
           ? project.agentProfiles
               .map((item): RegistryProjectAgentProfile | null => {
-                const name = typeof item?.name === 'string' ? item.name.trim() : '';
+                const name = normalizeAgentType(item?.name) ?? '';
                 if (!name) {
                   return null;
                 }
@@ -637,6 +646,7 @@ export class RegistryRepository {
   }
 
   async createSession(projectId: string, agentType: string, title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
+    agentType = normalizeAgentType(agentType) ?? agentType.trim();
     const resp = await this.client.request({
       method: 'session.new',
       projectId,
@@ -725,6 +735,7 @@ export class RegistryRepository {
   }
 
   async listResumableSessions(projectId: string, agentType: string): Promise<RegistryResumableSession[]> {
+    agentType = normalizeAgentType(agentType) ?? agentType.trim();
     const resp = await this.client.request({
       method: 'session.resume.list',
       projectId,
@@ -736,6 +747,7 @@ export class RegistryRepository {
   }
 
   async importResumedSession(projectId: string, agentType: string, sessionId: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
+    agentType = normalizeAgentType(agentType) ?? agentType.trim();
     const resp = await this.client.request({
       method: 'session.resume.import',
       projectId,

@@ -1356,6 +1356,91 @@ func TestNewSession_RequiresNonEmptyACPID(t *testing.T) {
 	}
 }
 
+func TestSQLiteStoreNormalizesCodexAppAgentIdentity(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	sqliteStore := store.(*sqliteStore)
+	if _, err := sqliteStore.db.ExecContext(ctx, `
+		INSERT INTO projects (project_name, default_agent_type, updated_at)
+		VALUES ('proj1', 'codexapp', '2026-05-20T00:00:00Z');
+		INSERT INTO sessions (id, project_name, status, agent_type, agent_json, session_sync_json, title, created_at, updated_at)
+		VALUES ('sess-old', 'proj1', 2, 'codexapp', '{}', '{}', 'old codexapp', '2026-05-20T00:00:00Z', '2026-05-20T00:00:00Z');
+		INSERT INTO agent_preferences (project_name, agent_type, preference_json)
+		VALUES ('proj1', 'codexapp', '{"configOptions":[{"id":"model","currentValue":"gpt-5"}]}');
+	`); err != nil {
+		t.Fatalf("seed codexapp rows: %v", err)
+	}
+
+	defaultAgent, err := store.LoadProjectDefaultAgent(ctx, "proj1")
+	if err != nil {
+		t.Fatalf("LoadProjectDefaultAgent: %v", err)
+	}
+	if defaultAgent != "codex" {
+		t.Fatalf("defaultAgent=%q, want codex", defaultAgent)
+	}
+
+	pref, err := store.LoadAgentPreference(ctx, "proj1", "codex")
+	if err != nil {
+		t.Fatalf("LoadAgentPreference: %v", err)
+	}
+	if pref == nil || pref.AgentType != "codex" {
+		t.Fatalf("pref=%+v, want codex preference", pref)
+	}
+
+	loaded, err := store.LoadSession(ctx, "proj1", "sess-old")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if loaded == nil || loaded.AgentType != "codex" {
+		t.Fatalf("loaded=%+v, want codex session", loaded)
+	}
+
+	entries, err := store.ListSessions(ctx, "proj1")
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(entries) != 1 || entries[0].AgentType != "codex" || entries[0].Agent != "codex" {
+		t.Fatalf("entries=%+v, want codex session list entry", entries)
+	}
+
+	if err := store.SaveProjectDefaultAgent(ctx, "proj2", "codexapp"); err != nil {
+		t.Fatalf("SaveProjectDefaultAgent codexapp: %v", err)
+	}
+	if err := store.SaveAgentPreference(ctx, AgentPreferenceRecord{ProjectName: "proj2", AgentType: "codexapp", PreferenceJSON: "{}"}); err != nil {
+		t.Fatalf("SaveAgentPreference codexapp: %v", err)
+	}
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-new",
+		ProjectName:  "proj2",
+		Status:       SessionActive,
+		AgentType:    "codexapp",
+		AgentJSON:    "{}",
+		CreatedAt:    time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC),
+		LastActiveAt: time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveSession codexapp: %v", err)
+	}
+
+	var rawDefault, rawPreference, rawSession string
+	if err := sqliteStore.db.QueryRowContext(ctx, `SELECT default_agent_type FROM projects WHERE project_name = 'proj2'`).Scan(&rawDefault); err != nil {
+		t.Fatalf("query raw default: %v", err)
+	}
+	if err := sqliteStore.db.QueryRowContext(ctx, `SELECT agent_type FROM agent_preferences WHERE project_name = 'proj2'`).Scan(&rawPreference); err != nil {
+		t.Fatalf("query raw preference: %v", err)
+	}
+	if err := sqliteStore.db.QueryRowContext(ctx, `SELECT agent_type FROM sessions WHERE id = 'sess-new'`).Scan(&rawSession); err != nil {
+		t.Fatalf("query raw session: %v", err)
+	}
+	if rawDefault != "codex" || rawPreference != "codex" || rawSession != "codex" {
+		t.Fatalf("raw default=%q preference=%q session=%q, want all codex", rawDefault, rawPreference, rawSession)
+	}
+}
+
 func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
@@ -1880,13 +1965,13 @@ func TestApplyStoredConfigOptions_ReplaysByExactConfigID(t *testing.T) {
 }
 
 func TestSessionSetConfigOption_ResolvesCategoryAliasToOptionID(t *testing.T) {
-	inst := &testInjectedInstance{name: "codexapp", alive: true}
+	inst := &testInjectedInstance{name: "codex", alive: true}
 	inst.setConfigFn = func(_ context.Context, p acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error) {
 		return []acp.ConfigOption{
 			{ID: acp.ConfigOptionIDReasoningEffort, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: p.Value},
 		}, nil
 	}
-	s := mustNewSession(t, "sess-config-alias", t.TempDir(), string(acp.ACPProviderCodexApp))
+	s := mustNewSession(t, "sess-config-alias", t.TempDir(), string(acp.ACPProviderCodex))
 	s.mu.Lock()
 	s.instance = inst
 	s.ready = true
@@ -1912,7 +1997,7 @@ func TestSessionSetConfigOption_ResolvesCategoryAliasToOptionID(t *testing.T) {
 }
 
 func TestApplyStoredConfigOptions_ReplaysByCategoryAlias(t *testing.T) {
-	inst := &testInjectedInstance{name: "codexapp"}
+	inst := &testInjectedInstance{name: "codex"}
 	inst.setConfigFn = func(_ context.Context, p acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error) {
 		return []acp.ConfigOption{
 			{ID: p.ConfigID, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: p.Value},
@@ -5381,7 +5466,7 @@ func TestHandleSessionRequestSessionArchiveShortSessionDeletesWithoutArchive(t *
 	t.Cleanup(func() { cleanupSessionArtifacts = oldCleanup })
 
 	now := time.Date(2026, 5, 17, 10, 15, 0, 0, time.UTC)
-	addRuntimeSession(c, "sess-short", "Short Archive Target", "codexapp", now, now)
+	addRuntimeSession(c, "sess-short", "Short Archive Target", "codex", now, now)
 	c.mu.Lock()
 	c.routeMap["im:app:short"] = "sess-short"
 	c.mu.Unlock()
@@ -5422,8 +5507,8 @@ func TestHandleSessionRequestSessionArchiveShortSessionDeletesWithoutArchive(t *
 	if inMemory || routeMapped {
 		t.Fatalf("short session still active after archive inMemory=%v routeMapped=%v", inMemory, routeMapped)
 	}
-	if len(cleanupCalls) != 1 || cleanupCalls[0].projectName != "proj1" || cleanupCalls[0].agentType != "codexapp" || cleanupCalls[0].sessionID != "sess-short" {
-		t.Fatalf("cleanup calls=%#v, want codexapp short session cleanup", cleanupCalls)
+	if len(cleanupCalls) != 1 || cleanupCalls[0].projectName != "proj1" || cleanupCalls[0].agentType != "codex" || cleanupCalls[0].sessionID != "sess-short" {
+		t.Fatalf("cleanup calls=%#v, want codex short session cleanup", cleanupCalls)
 	}
 }
 
@@ -5667,14 +5752,14 @@ func TestHandleSessionRequestSessionReloadRecordsAgentOnlyReplay(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 5, 12, 8, 0, 0, 0, time.UTC)
 	inst := &testInjectedInstance{
-		name:      "codexapp",
-		sessionID: "sess-codexapp",
+		name:      "codex",
+		sessionID: "sess-codex",
 		initResult: acp.InitializeResult{
 			ProtocolVersion:   "0.1",
 			AgentCapabilities: acp.AgentCapabilities{LoadSession: true},
 		},
 		loadUpdates: []acp.SessionUpdateParams{{
-			SessionID: "sess-codexapp",
+			SessionID: "sess-codex",
 			Update: acp.SessionUpdate{
 				SessionUpdate: acp.SessionUpdateAgentMessageChunk,
 				Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "restored without user chunk"}),
@@ -5682,23 +5767,23 @@ func TestHandleSessionRequestSessionReloadRecordsAgentOnlyReplay(t *testing.T) {
 		}},
 	}
 	c.registry = agent.DefaultACPFactory().Clone()
-	c.registry.Register(acp.ACPProviderCodexApp, func(context.Context, string) (agent.Instance, error) {
+	c.registry.Register(acp.ACPProviderCodex, func(context.Context, string) (agent.Instance, error) {
 		return inst, nil
 	})
 	if err := c.store.SaveSession(ctx, &SessionRecord{
-		ID:           "sess-codexapp",
+		ID:           "sess-codex",
 		ProjectName:  "proj1",
 		Status:       SessionPersisted,
-		AgentType:    "codexapp",
+		AgentType:    "codex",
 		AgentJSON:    `{}`,
 		CreatedAt:    now,
 		LastActiveAt: now,
-		Title:        "CodexApp reload",
+		Title:        "Codex reload",
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
 
-	resp, err := c.HandleSessionRequest(ctx, "session.reload", "proj1", json.RawMessage(`{"sessionId":"sess-codexapp"}`))
+	resp, err := c.HandleSessionRequest(ctx, "session.reload", "proj1", json.RawMessage(`{"sessionId":"sess-codex"}`))
 	if err != nil {
 		t.Fatalf("HandleSessionRequest(session.reload): %v", err)
 	}
@@ -5707,7 +5792,7 @@ func TestHandleSessionRequestSessionReloadRecordsAgentOnlyReplay(t *testing.T) {
 		t.Fatalf("reload response = %#v, want ok", body)
 	}
 
-	_, turns, err := c.sessionRecorder.ReadSessionTurns(ctx, "sess-codexapp", 0)
+	_, turns, err := c.sessionRecorder.ReadSessionTurns(ctx, "sess-codex", 0)
 	if err != nil {
 		t.Fatalf("ReadSessionTurns: %v", err)
 	}
@@ -5719,12 +5804,12 @@ func TestHandleSessionRequestSessionReloadRecordsAgentOnlyReplay(t *testing.T) {
 	}
 }
 
-func TestHandleSessionRequestSessionResumeListSupportsCodexApp(t *testing.T) {
+func TestHandleSessionRequestSessionResumeListNormalizesCodexAppAlias(t *testing.T) {
 	cwd := t.TempDir()
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	t.Setenv("USERPROFILE", homeDir)
-	writeCodexSessionFixture(t, homeDir, "sess-codexapp-resume", cwd, "Resume CodexApp", "assistant preview")
+	writeCodexSessionFixture(t, homeDir, "sess-codex-resume", cwd, "Resume Codex", "assistant preview")
 
 	c := newSessionViewTestClient(t)
 	c.cwd = cwd
@@ -5744,11 +5829,11 @@ func TestHandleSessionRequestSessionResumeListSupportsCodexApp(t *testing.T) {
 	if len(sessions) != 1 {
 		t.Fatalf("sessions len = %d, want 1", len(sessions))
 	}
-	if sessions[0].SessionID != "sess-codexapp-resume" || sessions[0].AgentType != "codexapp" {
-		t.Fatalf("session = %+v, want codexapp resumable session", sessions[0])
+	if sessions[0].SessionID != "sess-codex-resume" || sessions[0].AgentType != "codex" {
+		t.Fatalf("session = %+v, want codex resumable session", sessions[0])
 	}
 
-	importResp, err := c.HandleSessionRequest(context.Background(), "session.resume.import", "proj1", json.RawMessage(`{"agentType":"codexapp","sessionId":"sess-codexapp-resume"}`))
+	importResp, err := c.HandleSessionRequest(context.Background(), "session.resume.import", "proj1", json.RawMessage(`{"agentType":"codexapp","sessionId":"sess-codex-resume"}`))
 	if err != nil {
 		t.Fatalf("HandleSessionRequest(session.resume.import): %v", err)
 	}
@@ -5756,12 +5841,12 @@ func TestHandleSessionRequestSessionResumeListSupportsCodexApp(t *testing.T) {
 	if importBody["ok"] != true {
 		t.Fatalf("import response = %#v, want ok", importBody)
 	}
-	rec, err := c.store.LoadSession(context.Background(), "proj1", "sess-codexapp-resume")
+	rec, err := c.store.LoadSession(context.Background(), "proj1", "sess-codex-resume")
 	if err != nil {
 		t.Fatalf("LoadSession imported: %v", err)
 	}
-	if rec == nil || rec.AgentType != "codexapp" {
-		t.Fatalf("imported record = %+v, want codexapp agent", rec)
+	if rec == nil || rec.AgentType != "codex" {
+		t.Fatalf("imported record = %+v, want codex agent", rec)
 	}
 }
 

@@ -173,8 +173,6 @@ func (r *sessionRecovery) sourceFor(agentType string) (recoverySource, error) {
 		return claudeRecoverySource{}, nil
 	case "codex":
 		return codexRecoverySource{}, nil
-	case "codexapp":
-		return codexappRecoverySource{}, nil
 	case "copilot":
 		return copilotRecoverySource{}, nil
 	default:
@@ -183,7 +181,7 @@ func (r *sessionRecovery) sourceFor(agentType string) (recoverySource, error) {
 }
 
 func normalizeRecoveryAgentType(agentType string) (string, error) {
-	agentType = strings.ToLower(strings.TrimSpace(agentType))
+	agentType = strings.ToLower(normalizeAgentType(agentType))
 	if agentType == "" {
 		return "", fmt.Errorf("agentType is required")
 	}
@@ -671,29 +669,6 @@ func readCodexRecoverySessionPreview(path, fallback string) string {
 		}
 	}
 	return fallback
-}
-
-type codexappRecoverySource struct{}
-
-func (codexappRecoverySource) AgentType() string { return "codexapp" }
-
-func (codexappRecoverySource) List(projectCWD string, managedIDs map[string]bool) ([]recoverySession, error) {
-	items, err := codexRecoverySource{}.List(projectCWD, managedIDs)
-	if err != nil {
-		return nil, err
-	}
-	for i := range items {
-		items[i].AgentType = "codexapp"
-	}
-	return items, nil
-}
-
-func (s codexappRecoverySource) Find(projectCWD, sessionID string, managedIDs map[string]bool) (*recoverySession, error) {
-	items, err := s.List(projectCWD, managedIDs)
-	if err != nil {
-		return nil, err
-	}
-	return findRecoverySession(items, sessionID), nil
 }
 
 type copilotRecoverySource struct{}

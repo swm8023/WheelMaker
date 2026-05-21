@@ -3,7 +3,7 @@
 日期：2026-05-12
 状态：Phase 1 修订版
 
-本文是 WheelMaker `codexapp` agent 的协议转换说明。`codexapp` 对上必须表现为 ACP agent，对下连接 `codex app-server`。转换逻辑只能落在 agent 层，不能污染 `client.Session`、IM、registry、recorder 或 ACP 基础 transport。
+本文是 WheelMaker `codex` agent 的 app-server 协议转换说明。`codex` 对上必须表现为 ACP agent，对下连接 `codex app-server`。转换逻辑只能落在 agent 层，不能污染 `client.Session`、IM、registry、recorder 或 ACP 基础 transport。代码中的 `codexapp*` helper 名称仅表示内部 app-server bridge，不再是公开 agent type。
 
 ## 资料来源
 
@@ -211,7 +211,7 @@ client.Session
 
 ## Config Options
 
-`codexapp` 自己封装并暴露三个 ACP config options：
+`codex` 自己封装并暴露三个 ACP config options：
 
 | ACP config id | category | 来源 | app-server 落点 |
 |---|---|---|---|
@@ -259,7 +259,7 @@ ACP `initialize` 转 app-server：
 
 ACP result：
 
-- `agentInfo.name = codexapp`
+- `agentInfo.name = codex`
 - `loadSession = true`
 - `sessionCapabilities.list = {}`
 - Phase 1 `promptCapabilities.image/audio/embeddedContext = false`
@@ -434,11 +434,11 @@ Phase 1 只声明文本 prompt capability；`resource_link` 是 ACP 基线内容
 
 图片临时文件生命周期：
 
-- base64 图片由 `codexapp` agent 写入 session-scoped 临时目录。
+- base64 图片由 `codex` agent 写入 session-scoped 临时目录。
 - 临时目录放在 session 资源目录内，例如 `~/.wheelmaker/db/session/<projectName>/<sessionId>/images/...`。
 - `projectName` 与 `sessionId` 作为路径段使用前必须做 path-safe 处理，不能允许路径分隔符或 `..` 逃逸出项目 artifact 目录。
 - 临时目录不绑定 `AgentInstance` / `codexappConn` 生命周期；多 session 并存时，一个 session 被 suspend 或 instance close 不代表该 session 已结束。
-- `client` 只在真正删除 session 时调用通用 agent artifact cleanup hook，例如 `agent.CleanupSessionArtifacts(projectName, agentType, sessionID)`；`codexapp` 在 agent 包内清理自己的图片目录。
+- `client` 只在真正删除 session 时调用通用 agent artifact cleanup hook，例如 `agent.CleanupSessionArtifacts(projectName, agentType, sessionID)`；`codex` 在 agent 包内清理自己的图片目录。
 - `turn/start` 后不能立即删除临时图片；app-server 可能异步读取 `localImage.path`。
 - `session.archive` 成功移出 active session 时清理该 session 下的临时图片目录；turn 总数 `< 3` 的短会话会直接永久删除并清理同一目录。orphan/TTL 清理作为后续兜底任务，避免长期未归档的历史图片无限累积。
 

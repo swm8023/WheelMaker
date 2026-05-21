@@ -290,7 +290,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		jsonDecodeAt(json.RawMessage(parsed.raw.Content), "params.title", &title)
 		jsonDecodeAt(json.RawMessage(parsed.raw.Content), "params.agentType", &agentType)
 		title = strings.TrimSpace(title)
-		return r.upsertSessionProjection(ctx, parsed.raw.SessionID, strings.TrimSpace(agentType), title, parsed.raw.UpdatedAt, false)
+		return r.upsertSessionProjection(ctx, parsed.raw.SessionID, normalizeAgentType(agentType), title, parsed.raw.UpdatedAt, false)
 	default:
 		return nil
 	}
@@ -649,13 +649,13 @@ func (r *SessionRecorder) upsertSessionProjectionWithPublish(ctx context.Context
 		updatedAt = time.Now().UTC()
 	}
 	if rec == nil {
-		agentType = strings.TrimSpace(agentType)
+		agentType = normalizeAgentType(agentType)
 		if agentType == "" {
 			return sessionViewSummary{}, fmt.Errorf("session agent type is required")
 		}
 		rec = &SessionRecord{ID: sessionID, ProjectName: r.projectName, Status: SessionActive, AgentType: agentType, CreatedAt: updatedAt, LastActiveAt: updatedAt}
 	} else if strings.TrimSpace(rec.AgentType) == "" && strings.TrimSpace(agentType) != "" {
-		rec.AgentType = strings.TrimSpace(agentType)
+		rec.AgentType = normalizeAgentType(agentType)
 	}
 	if strings.TrimSpace(rec.AgentType) == "" {
 		return sessionViewSummary{}, fmt.Errorf("session agent type is required")
@@ -735,7 +735,7 @@ func buildSessionViewSummary(
 		SessionID:         strings.TrimSpace(sessionID),
 		Title:             strings.TrimSpace(title),
 		UpdatedAt:         lastActiveAt.UTC().Format(time.RFC3339),
-		AgentType:         strings.TrimSpace(agentType),
+		AgentType:         normalizeAgentType(agentType),
 		LatestTurnIndex:   maxInt64(0, latestTurnIndex),
 		Running:           running,
 		LastDoneTurnIndex: maxInt64(0, lastDoneTurnIndex),

@@ -625,14 +625,18 @@ const AGENT_TAG_VARIANT_INDEX: Record<string, number> = {
   codex: 0,
   copilot: 1,
   claude: 2,
-  codexapp: 3,
-  opencode: 4,
-  codebuddy: 5,
-  myflicker: 6,
+  opencode: 3,
+  codebuddy: 4,
+  myflicker: 5,
 };
 
+function normalizeAgentTypeName(value?: string | null): string {
+  const normalized = (value || '').trim();
+  return normalized.toLowerCase() === 'codexapp' ? 'codex' : normalized;
+}
+
 function tagVariantClass(prefix: string, value: string): string {
-  const normalized = value.trim().toLowerCase();
+  const normalized = normalizeAgentTypeName(value).toLowerCase();
   if (prefix === 'wide-session-agent' || prefix === 'token-stats-pill-agent') {
     const explicitIndex = AGENT_TAG_VARIANT_INDEX[normalized];
     if (typeof explicitIndex === 'number') {
@@ -4855,7 +4859,7 @@ function App() {
       const seen = new Set<string>();
       const agents: string[] = [];
       const append = (value?: string) => {
-        const normalized = (value || '').trim();
+        const normalized = normalizeAgentTypeName(value);
         if (!normalized) return;
         const key = normalized.toLowerCase();
         if (seen.has(key)) return;
@@ -7870,8 +7874,8 @@ function App() {
     agentType: string,
     options?: {closeMobileDrawer?: boolean},
   ) => {
-    const normalizedAgentType = agentType.trim();
-    if (!targetProjectId || !normalizedAgentType) {
+    agentType = normalizeAgentTypeName(agentType);
+    if (!targetProjectId || !agentType) {
       setError('No agent selected for new session');
       return;
     }
@@ -7908,8 +7912,8 @@ function App() {
   };
 
   const handleWideProjectResumeAgent = async (targetProjectId: string, agentType: string) => {
-    const normalizedAgentType = agentType.trim();
-    if (!targetProjectId || !normalizedAgentType) {
+    agentType = normalizeAgentTypeName(agentType);
+    if (!targetProjectId || !agentType) {
       setError('No agent selected for resume');
       return;
     }
@@ -7917,7 +7921,7 @@ function App() {
       projectId: targetProjectId,
       kind: 'resume',
       phase: 'sessions',
-      agentType: normalizedAgentType,
+      agentType,
     });
     setResumeLoading(true);
     setResumeSessions([]);
@@ -7933,6 +7937,7 @@ function App() {
   };
 
   const handleWideProjectResumeImport = async (targetProjectId: string, agentType: string, sessionId: string) => {
+    agentType = normalizeAgentTypeName(agentType);
     if (!targetProjectId || !agentType || !sessionId) return;
     setResumeLoading(true);
     let importedSessionId = '';
@@ -7981,8 +7986,8 @@ function App() {
   };
 
   const handleMobileProjectResumeAgent = async (targetProjectId: string, agentType: string) => {
-    const normalizedAgentType = agentType.trim();
-    if (!targetProjectId || !normalizedAgentType) {
+    agentType = normalizeAgentTypeName(agentType);
+    if (!targetProjectId || !agentType) {
       setError('No agent selected for resume');
       return;
     }
@@ -7990,7 +7995,7 @@ function App() {
       projectId: targetProjectId,
       kind: 'resume',
       phase: 'sessions',
-      agentType: normalizedAgentType,
+      agentType,
     });
     setResumeLoading(true);
     setResumeSessions([]);
@@ -8006,6 +8011,7 @@ function App() {
   };
 
   const handleMobileProjectResumeImport = async (targetProjectId: string, agentType: string, sessionId: string) => {
+    agentType = normalizeAgentTypeName(agentType);
     if (!targetProjectId || !agentType || !sessionId) return;
     setResumeLoading(true);
     let importedSessionId = '';
@@ -10192,6 +10198,7 @@ function App() {
                   <div className="wide-project-session-list mobile-project-session-list">
                     {visibleSessions.map(session => {
                       const sessionAgent = (session.agentType || '').trim();
+                      const displaySessionAgent = normalizeAgentTypeName(sessionAgent);
                       const sessionActionsOpen =
                         projectSessionActionMenu?.projectId === targetProjectId &&
                         projectSessionActionMenu.sessionId === session.sessionId;
@@ -10227,9 +10234,9 @@ function App() {
                             <span className="wide-session-title">
                               {resolveSessionDisplayTitle(session) || session.sessionId}
                             </span>
-                            {sessionAgent ? (
+                            {displaySessionAgent ? (
                               <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', sessionAgent)}`}>
-                                {sessionAgent}
+                                {displaySessionAgent}
                               </span>
                             ) : null}
                             <span className="wide-session-time" title={session.updatedAt || ''}>
@@ -10608,6 +10615,7 @@ function App() {
                 <div className="wide-project-session-list">
                   {visibleSessions.map(session => {
                     const sessionAgent = (session.agentType || '').trim();
+                    const displaySessionAgent = normalizeAgentTypeName(sessionAgent);
                     const sessionActionsOpen =
                       projectSessionActionMenu?.projectId === targetProjectId &&
                       projectSessionActionMenu.sessionId === session.sessionId;
@@ -10642,9 +10650,9 @@ function App() {
                           <span className="wide-session-title">
                             {resolveSessionDisplayTitle(session) || session.sessionId}
                           </span>
-                          {sessionAgent ? (
+                          {displaySessionAgent ? (
                             <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', sessionAgent)}`}>
-                              {sessionAgent}
+                              {displaySessionAgent}
                             </span>
                           ) : null}
                           <span className="wide-session-time" title={session.updatedAt || ''}>
