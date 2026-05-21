@@ -58,13 +58,14 @@ export type LocalReadInitOptions = {
   verifyProof?: LocalReadProofVerifier;
 };
 
-function base64ToBytes(value: string): Uint8Array {
+function base64ToArrayBuffer(value: string): ArrayBuffer {
   const binary = globalThis.atob(value);
-  const bytes = new Uint8Array(binary.length);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index);
   }
-  return bytes;
+  return buffer;
 }
 
 function createLocalReadNonce(): string {
@@ -100,7 +101,7 @@ export async function verifyLocalReadProof(input: {
   try {
     const key = await subtle.importKey(
       'raw',
-      base64ToBytes(input.candidate.proofPublicKey),
+      base64ToArrayBuffer(input.candidate.proofPublicKey),
       {name: 'Ed25519'} as AlgorithmIdentifier,
       false,
       ['verify'],
@@ -109,7 +110,7 @@ export async function verifyLocalReadProof(input: {
     return await subtle.verify(
       {name: 'Ed25519'} as AlgorithmIdentifier,
       key,
-      base64ToBytes(input.response.signature),
+      base64ToArrayBuffer(input.response.signature),
       data,
     );
   } catch {
@@ -378,11 +379,14 @@ export class RegistryRepository {
       return {endpointId, url, proofPublicKey, proofFingerprint};
     };
     const hubs = (payload.hubs ?? [])
-      .map(hub => ({
-        hubId: typeof hub?.hubId === 'string' ? hub.hubId.trim() : '',
-        localRead: normalizeLocalRead((hub as {localRead?: unknown})?.localRead),
-      }))
-      .filter((hub): hub is RegistryHub => {
+      .map((hub): RegistryHub => {
+        const localRead = normalizeLocalRead((hub as {localRead?: unknown})?.localRead);
+        return {
+          hubId: typeof hub?.hubId === 'string' ? hub.hubId.trim() : '',
+          ...(localRead ? {localRead} : {}),
+        };
+      })
+      .filter(hub => {
         if (!hub.hubId || seenHubIds.has(hub.hubId)) {
           return false;
         }

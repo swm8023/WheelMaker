@@ -3943,7 +3943,7 @@ function App() {
   useEffect(() => {
     service.setLocalHubReadEnabled(localHubReadEnabled);
     setLocalHubReadStatuses(service.getLocalHubReadStatuses(registryHubs));
-    workspaceStore.patchGlobalState({ localHubReadEnabled });
+    workspaceStore.rememberGlobalState({ localHubReadEnabled });
   }, [localHubReadEnabled, registryHubs]);
 
   useEffect(() => {

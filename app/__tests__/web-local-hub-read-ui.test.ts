@@ -22,7 +22,7 @@ describe('local hub read UI settings', () => {
 
     expect(mainTsx).toContain('const [localHubReadEnabled, setLocalHubReadEnabled] = useState(');
     expect(mainTsx).toContain('service.setLocalHubReadEnabled(localHubReadEnabled);');
-    expect(mainTsx).toContain("workspaceStore.patchGlobalState({ localHubReadEnabled });");
+    expect(mainTsx).toContain("workspaceStore.rememberGlobalState({ localHubReadEnabled });");
     expect(mainTsx).toContain('<span>Local Hub Read</span>');
     expect(mainTsx).toContain('checked={localHubReadEnabled}');
     expect(mainTsx).toContain('setLocalHubReadEnabled(event.target.checked)');
