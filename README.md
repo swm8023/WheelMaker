@@ -604,7 +604,7 @@ WheelMaker also includes a configuration and observability surface:
 ```text
 WheelMaker/
   server/   — Go daemon (hub, agent adapters, registry, monitor)
-  app/      — React Native mobile app + Web dashboard
+  app/      — Workspace Web UI for browsers and WheelMaker Desktop
   docs/     — protocols, design docs, and README visual assets
   scripts/  — build, deploy, and update scripts
 ```

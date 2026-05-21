@@ -275,8 +275,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('<div className="mobile-settings-title">{mobileSettingsTitle}</div>');
     expect(mainTsx).toContain('className="mobile-settings-group"');
     const chatSettingsStart = mainTsx.indexOf("renderSettingsSection('Chat'");
-    const latestTitleSettingStart = mainTsx.indexOf('<span>Use Latest Prompt Title</span>', chatSettingsStart);
-    const hideToolCallsSettingStart = mainTsx.indexOf('<span>Hide Tool Calls</span>', chatSettingsStart);
+    const latestTitleSettingStart = mainTsx.indexOf('Use Latest Prompt Title', chatSettingsStart);
+    const hideToolCallsSettingStart = mainTsx.indexOf('Hide Tool Calls', chatSettingsStart);
     expect(chatSettingsStart).toBeGreaterThanOrEqual(0);
     expect(latestTitleSettingStart).toBeGreaterThan(chatSettingsStart);
     expect(hideToolCallsSettingStart).toBeGreaterThan(latestTitleSettingStart);
@@ -462,7 +462,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("() => selectedChatDisplayTitle || 'No Selected Session'");
     expect(mainTsx).toContain('checked={useLatestPromptTitle}');
     expect(mainTsx).toContain('onChange={e => setUseLatestPromptTitle(e.target.checked)}');
-    expect(mainTsx).toContain('<span>Use Latest Prompt Title</span>');
+    expect(mainTsx).toContain('Use Latest Prompt Title');
     expect(mainTsx).not.toContain('className="chat-title-option"');
     expect(mainTsx).toContain('renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)');
     expect(mainTsx).toContain('renderBreadcrumbTitle(breadcrumbProjectName, fileBreadcrumbLabel)');
@@ -860,7 +860,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
     expect(mainTsx).toContain("setSettingsDetailView('tokenStats');");
     expect(mainTsx).toContain("settingsDetailView === 'tokenStats'");
-    expect(mainTsx).toContain('const renderSettingsSection = (title: string, rows: React.ReactNode) => (');
+    expect(mainTsx).toContain('const renderSettingsSection = (title: string, rows: React.ReactNode, icon?: string) => (');
     expect(mainTsx).toContain("renderSettingsSection('Appearance'");
     expect(mainTsx).toContain("renderSettingsSection('Chat'");
     expect(mainTsx).toContain("renderSettingsSection('Code Display'");

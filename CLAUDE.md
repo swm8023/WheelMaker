@@ -2,14 +2,14 @@
 ```
 WheelMaker/
   server/   — Go 守护进程（ACP 桥接、IM 适配器）
-  app/      — Flutter 移动端 App（iOS / Android）
+  app/      — Workspace Web UI（React / webpack，供浏览器与 WheelMaker Desktop 使用）
   docs/     — 共享协议与设计文档
   scripts/  — 脚本
 ```
 
 **根据工作区跳转到对应文档：**
 - 修改 Go 服务端 → 读 [server/CLAUDE.md](server/CLAUDE.md)
-- 修改 Flutter App → 读 [app/CLAUDE.md](app/CLAUDE.md)
+- 修改 Workspace Web UI → 读 [app/CLAUDE.md](app/CLAUDE.md)
 
 ## 全局约定
 - 代码注释和标识符用英文

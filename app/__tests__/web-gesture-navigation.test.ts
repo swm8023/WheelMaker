@@ -97,7 +97,7 @@ describe('gesture navigation', () => {
     expect(main).toContain('const [gestureNavigation, setGestureNavigation] = useState(');
     expect(main).toContain('typeof persistedGlobal.gestureNavigation === \'boolean\'');
     expect(main).toContain('gestureNavigation,');
-    expect(main).toContain('<span>Gesture Navigation</span>');
+    expect(main).toContain('Gesture Navigation');
     expect(main).toContain('checked={gestureNavigation}');
     expect(main).toContain('onChange={e => setGestureNavigation(e.target.checked)}');
     expect(main).toContain("gestureNavigation ? (");

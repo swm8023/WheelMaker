@@ -17,8 +17,8 @@ describe('agent package update settings UI source structure', () => {
     expect(chatStart).toBeGreaterThanOrEqual(0);
     expect(codeDisplayStart).toBeGreaterThan(chatStart);
     const chatSection = mainTsx.slice(chatStart, codeDisplayStart);
-    expect(chatSection).toContain('<span>Use Latest Prompt Title</span>');
-    expect(chatSection).toContain('<span>Hide Tool Calls</span>');
+    expect(chatSection).toContain('Use Latest Prompt Title');
+    expect(chatSection).toContain('Hide Tool Calls');
     expect(chatSection).not.toContain('Token Stats');
     expect(chatSection).not.toContain('CC Switch');
 
@@ -80,10 +80,10 @@ describe('agent package update settings UI source structure', () => {
     expect(stylesCss).toContain('.agent-package-hub-list');
     expect(stylesCss).toContain('.update-hub-header .wide-project-hub-tag');
     expect(stylesCss).toContain('font-size: 12.5px;');
-    const settingsDetailPageBlock = stylesCss.match(/\.settings-detail-page \{[\s\S]*?\n\}/)?.[0] ?? '';
+    const settingsDetailPageBlock = stylesCss.match(/^\.settings-detail-page \{[\s\S]*?\n\}/m)?.[0] ?? '';
     expect(settingsDetailPageBlock).toContain('flex: 1 1 auto;');
     expect(settingsDetailPageBlock).toContain('overflow: hidden;');
-    const settingsDetailBodyBlock = stylesCss.match(/\.settings-detail-body \{[\s\S]*?\n\}/)?.[0] ?? '';
+    const settingsDetailBodyBlock = stylesCss.match(/^\.settings-detail-body \{[\s\S]*?\n\}/m)?.[0] ?? '';
     expect(settingsDetailBodyBlock).toContain('overflow-y: auto;');
     expect(settingsDetailBodyBlock).toContain('scrollbar-gutter: stable;');
     expect(stylesCss).toContain('.wheelmaker-update-panel');

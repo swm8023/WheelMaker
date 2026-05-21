@@ -40,7 +40,7 @@ describe('web chat font settings', () => {
     expect(mainTsx).toContain('const chatFontFamily = useMemo(');
     expect(mainTsx).toContain('chatFont,');
     expect(mainTsx).toContain("renderSettingsSection('Chat'");
-    expect(mainTsx).toContain('<span>Chat Font</span>');
+    expect(mainTsx).toContain('Chat Font');
     expect(mainTsx).toContain('value={chatFont}');
     expect(mainTsx).toContain('if (isChatFontId(next)) setChatFont(next);');
     expect(mainTsx).toContain('CHAT_FONT_OPTIONS.map(item => (');

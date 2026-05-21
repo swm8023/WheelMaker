@@ -1,12 +1,52 @@
 const fs = require('fs');
 const path = require('path');
 
-describe('react-native CLI setup', () => {
-  test('declares community CLI plugin so start/run commands are registered', () => {
-    const packageJsonPath = path.join(__dirname, '..', 'package.json');
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-    const version = packageJson.devDependencies?.['@react-native/community-cli-plugin'] ?? packageJson.dependencies?.['@react-native/community-cli-plugin'];
+const projectRoot = path.join(__dirname, '..');
+const packageJsonPath = path.join(projectRoot, 'package.json');
+const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 
-    expect(version).toBeDefined();
+describe('web app package setup', () => {
+  test('does not declare React Native shell commands', () => {
+    const nativeScripts = ['android', 'android:web', 'build:web:native', 'ios'];
+
+    for (const scriptName of nativeScripts) {
+      expect(packageJson.scripts).not.toHaveProperty(scriptName);
+    }
+    expect(packageJson.scripts?.start ?? '').not.toContain('react-native');
+  });
+
+  test('does not declare React Native runtime or CLI packages', () => {
+    const dependencies = {
+      ...(packageJson.dependencies ?? {}),
+      ...(packageJson.devDependencies ?? {}),
+    };
+    const forbiddenPackageNames = Object.keys(dependencies).filter(
+      packageName =>
+        packageName === 'react-native' ||
+        packageName.startsWith('react-native-') ||
+        packageName.startsWith('@react-native/') ||
+        packageName.startsWith('@react-native-community/cli'),
+    );
+
+    expect(forbiddenPackageNames).toEqual([]);
+  });
+
+  test('does not keep native shell project files', () => {
+    const nativePaths = [
+      'android',
+      'ios',
+      'App.tsx',
+      'App.native.tsx',
+      'index.js',
+      'metro.config.js',
+      'babel.config.js',
+      'app.json',
+      path.join('scripts', 'sync_web_assets.ps1'),
+    ];
+    const existingPaths = nativePaths.filter(nativePath =>
+      fs.existsSync(path.join(projectRoot, nativePath)),
+    );
+
+    expect(existingPaths).toEqual([]);
   });
 });

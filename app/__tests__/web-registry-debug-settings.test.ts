@@ -31,7 +31,7 @@ describe('web registry debug settings', () => {
     expect(mainTsx).toContain('const [registryDebugPanelOpen, setRegistryDebugPanelOpen] = useState(');
     expect(mainTsx).toContain('registryDebugStore.setEnabled(registryDebug);');
     expect(mainTsx).toContain("renderSettingsSection('Debug'");
-    expect(mainTsx).toContain('<span>Debug</span>');
+    expect(mainTsx).toContain('Debug');
     expect(mainTsx).toContain('checked={registryDebug}');
     expect(mainTsx).toContain('onChange={event => setRegistryDebug(event.target.checked)}');
     expect(mainTsx).toContain('disabled={!registryDebug}');

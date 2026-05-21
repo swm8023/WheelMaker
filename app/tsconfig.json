@@ -1,13 +1,20 @@
 {
-  "extends": "@react-native/typescript-config",
   "compilerOptions": {
-    "types": ["jest"]
+    "target": "ES2021",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "lib": ["ES2021", "DOM", "ESNext"],
+    "types": ["jest", "node", "react", "react-dom"]
   },
   "include": [
-    "App.tsx",
-    "App.native.tsx",
     "__tests__/**/*.ts",
-    "__tests__/**/*.tsx"
+    "__tests__/**/*.tsx",
+    "web/src/**/*.ts",
+    "web/src/**/*.tsx"
   ],
-  "exclude": ["**/node_modules", "**/Pods", "web/**"]
+  "exclude": ["**/node_modules"]
 }

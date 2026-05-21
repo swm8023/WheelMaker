@@ -1,24 +1,21 @@
 # WheelMaker App
 
-The `app` workspace now has two clear parts:
-
-- Native shell (React Native): `App.native.tsx` + `android/` + `ios/`
-- Web product (pure React): `web/`
+The `app` workspace contains the Workspace Web UI. Browser builds and the
+Windows `WheelMakerDesktop` executable both use this same React/webpack output.
 
 ## Directory Layout
 
 - `web/src`: pure React UI entry and pages
 - `web/public`: web static template and runtime config
-- `scripts/sync_web_assets.ps1`: copy built web files into Android assets
-- `scripts/export_web_release.ps1`: export web files for Nginx/static hosting
+- `scripts/export_web_release.js`: export web files for static hosting
 
 ## Commands
 
 - `npm run web`: start pure React web dev server on `:8080`
-- `npm run build:web`: build web files to `dist/`
-- `npm run build:web:release`: export deployable files to `dist-web/`
-- `npm run build:web:native`: build web and sync to `android/app/src/main/assets/wheelmaker-web/`
-- `npm run android:web`: build synced web assets then run Android
+- `npm run start`: alias for `npm run web`
+- `npm run build:web`: build web files to `~/.wheelmaker/web` by default
+- `npm run build:web:release`: build and export deployable web files
+- `npm run tsc:web`: type-check the web code
 
 ## Runtime Config
 
@@ -34,10 +31,10 @@ Fields:
 
 ## Release Model
 
-1. Browser release:
+1. Browser/static release:
    - `npm run build:web:release`
-   - Deploy `dist-web/*` to Nginx static root.
+   - Serve the exported web root.
 
-2. Native release with local WebView content:
-   - `npm run build:web:native`
-   - Build native package normally.
+2. Desktop release:
+   - Run `publish-desktop.bat` from the repository root.
+   - The desktop publisher embeds this web output into the Go/WebView2 desktop executable.
