@@ -180,8 +180,7 @@ describe('agent package update settings UI source structure', () => {
 
     expect(mainTsx).toContain('const AGENT_TAG_VARIANT_INDEX');
     expect(mainTsx).toContain("claude: 2");
-    expect(mainTsx).toContain("codexacp: 3");
-    expect(mainTsx).not.toContain("codexapp: 3");
+    expect(mainTsx).toContain("codexapp: 3");
     expect(mainTsx).toContain('if (prefix === \'wide-session-agent\' || prefix === \'token-stats-pill-agent\')');
 
     const agentTagBlock = stylesCss.match(/\.wide-session-agent-tag \{[\s\S]*?\n\}/)?.[0] ?? '';

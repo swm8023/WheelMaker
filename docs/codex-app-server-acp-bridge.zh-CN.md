@@ -3,7 +3,7 @@
 日期：2026-05-12
 状态：Phase 1 修订版
 
-本文是 WheelMaker `codex` provider 的 Codex app-server 协议转换说明。实现内部仍使用 `codexapp*` 命名区分旧 ACP adapter；外部 agent type/tag 统一暴露为 `codex`。`codex` 对上必须表现为 ACP agent，对下连接 `codex app-server`。转换逻辑只能落在 agent 层，不能污染 `client.Session`、IM、registry、recorder 或 ACP 基础 transport。
+本文是 WheelMaker `codexapp` agent 的协议转换说明。`codexapp` 对上必须表现为 ACP agent，对下连接 `codex app-server`。转换逻辑只能落在 agent 层，不能污染 `client.Session`、IM、registry、recorder 或 ACP 基础 transport。
 
 ## 资料来源
 
@@ -259,7 +259,7 @@ ACP `initialize` 转 app-server：
 
 ACP result：
 
-- `agentInfo.name = codex`
+- `agentInfo.name = codexapp`
 - `loadSession = true`
 - `sessionCapabilities.list = {}`
 - Phase 1 `promptCapabilities.image/audio/embeddedContext = false`

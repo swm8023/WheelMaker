@@ -43,9 +43,6 @@ func (r *sessionRecovery) ListResumableSessions(ctx context.Context, agentType s
 	if err != nil {
 		return nil, err
 	}
-	if err := validateResumeImportAgentType(agentType); err != nil {
-		return nil, err
-	}
 	managed, err := r.managedSessionIDs(ctx)
 	if err != nil {
 		return nil, err
@@ -69,9 +66,6 @@ func (r *sessionRecovery) ListResumableSessions(ctx context.Context, agentType s
 func (r *sessionRecovery) ImportResumableSession(ctx context.Context, agentType, sessionID string) (map[string]any, error) {
 	agentType, err := normalizeRecoveryAgentType(agentType)
 	if err != nil {
-		return nil, err
-	}
-	if err := validateResumeImportAgentType(agentType); err != nil {
 		return nil, err
 	}
 	sessionID = strings.TrimSpace(sessionID)
@@ -179,18 +173,13 @@ func (r *sessionRecovery) sourceFor(agentType string) (recoverySource, error) {
 		return claudeRecoverySource{}, nil
 	case "codex":
 		return codexRecoverySource{}, nil
+	case "codexapp":
+		return codexappRecoverySource{}, nil
 	case "copilot":
 		return copilotRecoverySource{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported recovery agent: %s", agentType)
 	}
-}
-
-func validateResumeImportAgentType(agentType string) error {
-	if strings.EqualFold(strings.TrimSpace(agentType), string(acp.ACPProviderCodexACP)) {
-		return fmt.Errorf("codexacp is not supported for resume import")
-	}
-	return nil
 }
 
 func normalizeRecoveryAgentType(agentType string) (string, error) {
@@ -682,6 +671,29 @@ func readCodexRecoverySessionPreview(path, fallback string) string {
 		}
 	}
 	return fallback
+}
+
+type codexappRecoverySource struct{}
+
+func (codexappRecoverySource) AgentType() string { return "codexapp" }
+
+func (codexappRecoverySource) List(projectCWD string, managedIDs map[string]bool) ([]recoverySession, error) {
+	items, err := codexRecoverySource{}.List(projectCWD, managedIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].AgentType = "codexapp"
+	}
+	return items, nil
+}
+
+func (s codexappRecoverySource) Find(projectCWD, sessionID string, managedIDs map[string]bool) (*recoverySession, error) {
+	items, err := s.List(projectCWD, managedIDs)
+	if err != nil {
+		return nil, err
+	}
+	return findRecoverySession(items, sessionID), nil
 }
 
 type copilotRecoverySource struct{}

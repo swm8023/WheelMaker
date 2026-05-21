@@ -625,15 +625,10 @@ const AGENT_TAG_VARIANT_INDEX: Record<string, number> = {
   codex: 0,
   copilot: 1,
   claude: 2,
-  codexacp: 3,
+  codexapp: 3,
   opencode: 4,
   codebuddy: 5,
   myflicker: 6,
-};
-
-const isProjectActionAgentVisible = (agentType: string): boolean => {
-  const normalized = agentType.trim().toLowerCase();
-  return normalized !== 'codexacp';
 };
 
 function tagVariantClass(prefix: string, value: string): string {
@@ -4862,7 +4857,6 @@ function App() {
       const append = (value?: string) => {
         const normalized = (value || '').trim();
         if (!normalized) return;
-        if (!isProjectActionAgentVisible(normalized)) return;
         const key = normalized.toLowerCase();
         if (seen.has(key)) return;
         seen.add(key);

@@ -29,7 +29,7 @@ type ACPProviderPreset struct {
 
 var (
 	CodexACPProviderPreset = ACPProviderPreset{
-		Name:             "codexacp",
+		Name:             "codex",
 		BinaryName:       "codex-acp",
 		SkillProjectDirs: []string{".agents/skills"},
 		SkillUserDirs:    []string{"~/.codex/skills", "~/.agents/skills", "~/.copilot/skills"},
@@ -99,10 +99,6 @@ func NewACPProvider(preset ACPProviderPreset) *acpProvider {
 }
 
 func NewCodexProvider() *acpProvider {
-	return NewCodexACPProvider()
-}
-
-func NewCodexACPProvider() *acpProvider {
 	return NewACPProvider(CodexACPProviderPreset)
 }
 

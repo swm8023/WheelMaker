@@ -242,7 +242,7 @@ type Cursor = { turnIndex: number };
       "sessionId": "019e...",
       "projectName": "WheelMaker",
       "title": "...",
-      "agentType": "codex",
+      "agentType": "codexapp",
       "createdAt": "2026-05-12T00:34:13Z",
       "updatedAt": "2026-05-17T12:00:00Z",
       "archivedAt": "2026-05-17T12:34:56Z",

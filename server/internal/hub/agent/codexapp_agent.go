@@ -28,7 +28,7 @@ func NewCodexAppProvider() *codexAppProvider {
 }
 
 func (p *codexAppProvider) Name() string {
-	return string(protocol.ACPProviderCodex)
+	return "codexapp"
 }
 
 func (p *codexAppProvider) Launch() (string, []string, []string, error) {
@@ -38,7 +38,7 @@ func (p *codexAppProvider) Launch() (string, []string, []string, error) {
 	}
 	exe, err := lookPath("codex")
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("codex: codex not found: %w", err)
+		return "", nil, nil, fmt.Errorf("codexapp: codex not found: %w", err)
 	}
 	return exe, []string{"app-server", "--listen", "stdio://"}, nil, nil
 }
@@ -617,7 +617,7 @@ func (c *codexappConn) sendInitialize(ctx context.Context, result any) error {
 	}
 	out := protocol.InitializeResult{
 		ProtocolVersion: json.Number("1"),
-		AgentInfo:       &protocol.AgentInfo{Name: string(protocol.ACPProviderCodex), Title: "Codex App Server"},
+		AgentInfo:       &protocol.AgentInfo{Name: "codexapp", Title: "Codex App Server"},
 		AgentCapabilities: protocol.AgentCapabilities{
 			LoadSession: true,
 			PromptCapabilities: &protocol.PromptCapabilities{

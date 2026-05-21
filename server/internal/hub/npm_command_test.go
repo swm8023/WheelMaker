@@ -111,15 +111,8 @@ func TestNPMCommandScanReturnsRuntimeAndDeprecatedPackageRows(t *testing.T) {
 	if codex.Status != "checking_latest" || codex.InstalledVersion != "0.129.0" || codex.LatestVersion != "" {
 		t.Fatalf("codex package before latest=%#v", codex)
 	}
-	if !reflect.DeepEqual(codex.AgentTypes, []string{"codex"}) {
-		t.Fatalf("@openai/codex agentTypes=%v, want [codex]", codex.AgentTypes)
-	}
 	if codex.CanInstall || codex.CanUpdate || codex.CanUninstall {
 		t.Fatalf("codex action flags should be disabled while latest is checking: %#v", codex)
-	}
-	codexACP := findNPMTestPackage(t, body.Hub.Packages, "@zed-industries/codex-acp")
-	if !reflect.DeepEqual(codexACP.AgentTypes, []string{"codexacp"}) {
-		t.Fatalf("@zed-industries/codex-acp agentTypes=%v, want [codexacp]", codexACP.AgentTypes)
 	}
 
 	waitForNPMTestOperation(t, cmd)

@@ -59,20 +59,16 @@ func DefaultACPFactory() *ACPFactory {
 
 func newACPFactoryWithDefaults() *ACPFactory {
 	f := &ACPFactory{creators: map[protocol.ACPProvider]InstanceCreator{}}
-	codexProvider := NewCodexAppProvider()
-	if isProviderAvailable(codexProvider) {
-		f.Register(protocol.ACPProviderCodex, codexappInstanceCreator(codexProvider))
-	}
 	candidates := []struct {
 		provider protocol.ACPProvider
 		build    func() ACPProvider
 	}{
+		{provider: protocol.ACPProviderCodex, build: func() ACPProvider { return NewCodexProvider() }},
 		{provider: protocol.ACPProviderClaude, build: func() ACPProvider { return NewClaudeProvider() }},
 		{provider: protocol.ACPProviderCopilot, build: func() ACPProvider { return NewCopilotProvider() }},
 		{provider: protocol.ACPProviderMyflicker, build: func() ACPProvider { return NewMyflickerProvider() }},
 		{provider: protocol.ACPProviderOpenCode, build: func() ACPProvider { return NewOpenCodeProvider() }},
 		{provider: protocol.ACPProviderCodeBuddy, build: func() ACPProvider { return NewCodeBuddyProvider() }},
-		{provider: protocol.ACPProviderCodexACP, build: func() ACPProvider { return NewCodexACPProvider() }},
 	}
 	for _, candidate := range candidates {
 		prov := candidate.build()
@@ -80,6 +76,10 @@ func newACPFactoryWithDefaults() *ACPFactory {
 			continue
 		}
 		f.Register(candidate.provider, providerInstanceCreator(prov))
+	}
+	codexappProvider := NewCodexAppProvider()
+	if isProviderAvailable(codexappProvider) {
+		f.Register(protocol.ACPProviderCodexApp, codexappInstanceCreator(codexappProvider))
 	}
 	if len(f.Names()) == 0 {
 		agentLogger().Warn("no available ACP providers detected")
@@ -162,6 +162,7 @@ func (f *ACPFactory) PreferredName() string {
 		protocol.ACPProviderMyflicker,
 		protocol.ACPProviderOpenCode,
 		protocol.ACPProviderCodeBuddy,
+		protocol.ACPProviderCodexApp,
 	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
