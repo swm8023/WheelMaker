@@ -511,6 +511,8 @@ describe('web chat integration', () => {
     const mobileChatTitleRowBlock = stylesCss.match(/\.mobile-chat-title-row \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileChatTitleRowBlock).toContain('flex-direction: row;');
     expect(mobileChatTitleRowBlock).not.toContain('flex-direction: column;');
+    const mobileChatDrawerTitleBlock = stylesCss.match(/\.mobile-chat-drawer-title \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileChatDrawerTitleBlock).toContain('font-size: 15px;');
     expect(stylesCss).toContain('.sidebar-title-row .chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary-button {');
@@ -1106,6 +1108,11 @@ describe('web chat integration', () => {
     expect(selectedSessionRowBlock).toContain('color-mix(in srgb, var(--accent) 5%, transparent) 0,');
     expect(selectedSessionRowBlock).toContain('color-mix(in srgb, var(--accent) 16%, var(--panel-2)) 28px,');
     expect(selectedSessionRowBlock).not.toContain('box-shadow: inset');
+    const wideProjectActionBtnBlock = stylesCss.match(/\.wide-project-action-btn \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(wideProjectActionBtnBlock).toContain('opacity: 0.45;');
+    expect(stylesCss).not.toContain('.mobile-project-actions .wide-project-action-btn {');
+    const wideProjectSessionListBlock = stylesCss.match(/\.wide-project-session-list \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(wideProjectSessionListBlock).toContain('margin-top: -2px;');
     expect(stylesCss).not.toContain('.wide-session-row::after');
     expect(stylesCss).not.toContain('.project-session-row-wrap.actions-open .wide-session-row {');
     expect(stylesCss).toMatch(

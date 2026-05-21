@@ -3319,6 +3319,7 @@ body,
 }
 
 .wide-project-session-list {
+  margin-top: -2px;
   padding: 1px 0 1px 21px;
   animation: session-list-fade-in 180ms ease;
 }
@@ -3808,7 +3809,7 @@ body,
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
-  font-size: 13.5px;
+  font-size: 15px;
   font-weight: 800;
   letter-spacing: 0.02em;
   line-height: 1.15;
@@ -3861,10 +3862,6 @@ body,
 
 .mobile-project-actions {
   opacity: 1;
-}
-
-.mobile-project-actions .wide-project-action-btn {
-  opacity: 0.85;
 }
 
 .mobile-project-action-panel {
