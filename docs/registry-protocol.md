@@ -152,7 +152,7 @@ Code placement:
 
 ### 11. Related Documents
 
-- [registry-protocol.md](./registry-protocol.md) — Full Registry Protocol 2.2 specification
+- [Registry Protocol 2.2 specification](#1-目标与范围) — 本文第 1 章起
 - [session-management-and-sync.zh-CN.md](./session-management-and-sync.zh-CN.md) — Session conversation management, turn file serialization, and app/web sync model
 
 ## 1. 目标与范围
@@ -1839,7 +1839,7 @@ Registry 即将关闭客户端连接时提前通知：
 ## 10. 相关文档
 
 - [session-management-and-sync.zh-CN.md](./session-management-and-sync.zh-CN.md) — Session 对话管理、turn 文件序列化和 app/web 同步模型
-- Global Protocol 封装设计 — 已合并至本文第 0 章
+- [Global Protocol 封装设计](#0-wheelmaker-global-protocol-envelope) — 已合并至本文第 0 章
 - [architecture-3.0.md](./architecture-3.0.md) — 架构设计 3.0
 
 ## 11. 版本历史
