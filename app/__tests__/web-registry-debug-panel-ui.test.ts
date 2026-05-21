@@ -14,6 +14,9 @@ describe('web registry debug panel ui', () => {
     expect(panelTsx).toContain('className="registry-debug-list-pane"');
     expect(panelTsx).toContain('className="registry-debug-detail-pane"');
     expect(panelTsx).toContain('className="registry-debug-splitter"');
+    expect(panelTsx).toContain('<span>Conn</span>');
+    expect(panelTsx).toContain('className={`registry-debug-connection-tag ${record.connection.toLowerCase()}`}');
+    expect(panelTsx).toContain('{record.connection}');
     expect(panelTsx).toContain('Include multi-session records');
     expect(panelTsx).toContain('Jump to latest');
     expect(panelTsx).toContain('Clear');
@@ -51,6 +54,11 @@ describe('web registry debug panel ui', () => {
     expect(stylesCss).toContain('.registry-debug-list-pane');
     expect(stylesCss).toContain('.registry-debug-detail-pane');
     expect(stylesCss).toContain('.registry-debug-splitter');
+    expect(stylesCss).toContain('flex: 0 0 4px;');
+    expect(stylesCss).toContain('.registry-debug-connection-tag.local');
+    expect(stylesCss).toContain('.registry-debug-connection-tag.remote');
+    expect(stylesCss).toContain('minmax(72px, 150px)');
+    expect(stylesCss).toContain('minmax(66px, 120px)');
     expect(stylesCss).toContain('.registry-debug-detail-collapsed');
     expect(stylesCss).toContain('.registry-debug-resize-handle');
   });

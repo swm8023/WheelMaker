@@ -95,6 +95,7 @@ describe('registry debug records', () => {
       direction: 'out',
       phase: 'request',
       scope: 'session.*',
+      connection: 'Remote',
       method: 'session.send',
       requestId: 7,
       projectId: 'project-a',
@@ -105,6 +106,7 @@ describe('registry debug records', () => {
       direction: 'in',
       phase: 'response',
       scope: 'session.*',
+      connection: 'Remote',
       method: 'session.send',
       requestId: 7,
       projectId: 'project-a',
@@ -114,6 +116,7 @@ describe('registry debug records', () => {
     expect(records[2]).toMatchObject({
       phase: 'event',
       scope: 'session.*',
+      connection: 'Remote',
       sessionIds: ['sess-a', 'sess-b'],
       multiSession: true,
     });
@@ -127,11 +130,13 @@ describe('registry debug records', () => {
         payload: {path: 'README.md'},
       },
       raw: '{"requestId":8}',
+      connection: 'Local',
       timestamp: 1250,
     });
     const recordsWithFs = store.getRecords();
     expect(recordsWithFs[3]).toMatchObject({
       scope: 'fs.*',
+      connection: 'Local',
       method: 'fs.read',
       sessionIds: [],
     });

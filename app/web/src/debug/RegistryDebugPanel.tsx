@@ -57,7 +57,7 @@ const PANEL_MARGIN = 16;
 const LIST_PANE_DEFAULT_WIDTH = 520;
 const LIST_PANE_MIN_WIDTH = 340;
 const DETAIL_PANE_MIN_WIDTH = 260;
-const SPLITTER_WIDTH = 7;
+const SPLITTER_WIDTH = 4;
 
 function defaultPanelFrame(): RegistryDebugPanelFrame {
   const viewportWidth = window.innerWidth || 1280;
@@ -108,7 +108,7 @@ function clampListPaneWidth(width: number, panelWidth: number): number {
 function recordLabel(record: RegistryDebugRecord): string {
   const method = record.method || record.phase;
   const request = typeof record.requestId === 'number' ? `#${record.requestId}` : '';
-  return [record.timeText, record.direction, record.scope, record.phase, method, request].filter(Boolean).join(' ');
+  return [record.timeText, record.direction, record.connection, record.scope, record.phase, method, request].filter(Boolean).join(' ');
 }
 
 function selectedRecordValue(record: RegistryDebugRecord | undefined): unknown {
@@ -434,6 +434,7 @@ export function RegistryDebugPanel({
           <div className="registry-debug-list-header">
             <span>Time</span>
             <span>Dir</span>
+            <span>Conn</span>
             <span>Scope</span>
             <span>Method</span>
             <span>Req</span>
@@ -454,6 +455,11 @@ export function RegistryDebugPanel({
                 >
                   <span className="registry-debug-cell time">{record.timeText}</span>
                   <span className={`registry-debug-cell direction ${record.direction}`}>{record.direction}</span>
+                  <span className="registry-debug-cell connection">
+                    <span className={`registry-debug-connection-tag ${record.connection.toLowerCase()}`}>
+                      {record.connection}
+                    </span>
+                  </span>
                   <span className="registry-debug-cell scope">{record.scope}</span>
                   <span className="registry-debug-cell method">{record.method || '-'}</span>
                   <span className="registry-debug-cell request">{typeof record.requestId === 'number' ? record.requestId : '-'}</span>

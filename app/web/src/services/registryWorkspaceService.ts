@@ -1,6 +1,7 @@
 import {createRegistryRepository, type RegistryRepository} from './registryRepository';
 import {RegistryRequestError} from './registryClient';
 import type {RegistryDebugSink} from './registryClient';
+import type {RegistryDebugConnection} from '../debug/registryDebug';
 import {LocalHubReadManager, type LocalHubReadStatus} from './localHubReadManager';
 import type {
   RegistryEnvelope,
@@ -37,7 +38,7 @@ export type WorkspaceSession = {
 };
 
 export type RegistryWorkspaceServiceOptions = {
-  createRepository?: (debugSink?: RegistryDebugSink) => RegistryRepository;
+  createRepository?: (debugSink?: RegistryDebugSink, debugConnection?: RegistryDebugConnection) => RegistryRepository;
   localHubReadManager?: LocalHubReadManager;
 };
 
@@ -49,19 +50,19 @@ export class RegistryWorkspaceService {
   private closeListeners = new Set<() => void>();
   private unsubscribeRepositoryEvent: (() => void) | null = null;
   private unsubscribeRepositoryClose: (() => void) | null = null;
-  private readonly createRepository: (debugSink?: RegistryDebugSink) => RegistryRepository;
+  private readonly createRepository: (debugSink?: RegistryDebugSink, debugConnection?: RegistryDebugConnection) => RegistryRepository;
   private readonly localHubReadManager: LocalHubReadManager;
 
   constructor(private readonly debugSink?: RegistryDebugSink, options: RegistryWorkspaceServiceOptions = {}) {
     this.createRepository = options.createRepository ?? createRegistryRepository;
     this.localHubReadManager = options.localHubReadManager ?? new LocalHubReadManager({
-      createRepository: () => this.createRepository(this.debugSink),
+      createRepository: () => this.createRepository(this.debugSink, 'Local'),
       debugSink,
     });
   }
 
   async connect(wsUrl: string, token: string): Promise<WorkspaceSession> {
-    const repository = this.createRepository(this.debugSink);
+    const repository = this.createRepository(this.debugSink, 'Remote');
     const normalizedToken = token.trim();
     try {
       await repository.initialize(wsUrl, normalizedToken);

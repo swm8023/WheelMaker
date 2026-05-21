@@ -1,4 +1,5 @@
 import { RegistryClient, type RegistryDebugSink } from './registryClient';
+import type {RegistryDebugConnection} from '../debug/registryDebug';
 import {
   decodeSessionTurnToMessage,
   normalizeSessionReadPayload,
@@ -930,8 +931,11 @@ export class RegistryRepository {
   }
 }
 
-export const createRegistryRepository = (debugSink?: RegistryDebugSink): RegistryRepository => {
-  return new RegistryRepository(new RegistryClient(8000, debugSink));
+export const createRegistryRepository = (
+  debugSink?: RegistryDebugSink,
+  debugConnection: RegistryDebugConnection = 'Remote',
+): RegistryRepository => {
+  return new RegistryRepository(new RegistryClient(8000, debugSink, debugConnection));
 };
 
 export type RegistryResponse<TPayload> = RegistryEnvelope<TPayload>;

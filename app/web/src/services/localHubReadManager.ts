@@ -30,7 +30,7 @@ export class LocalHubReadManager {
   private readonly verifyProof?: LocalReadProofVerifier;
 
   constructor(options: LocalHubReadManagerOptions = {}) {
-    this.createRepository = options.createRepository ?? (() => createRegistryRepository(options.debugSink));
+    this.createRepository = options.createRepository ?? (() => createRegistryRepository(options.debugSink, 'Local'));
     this.verifyProof = options.verifyProof;
   }
 

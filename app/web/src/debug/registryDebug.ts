@@ -2,6 +2,7 @@ import type {RegistryEnvelope} from '../types/registry';
 
 export type RegistryDebugDirection = 'out' | 'in' | 'lifecycle';
 export type RegistryDebugScope = string;
+export type RegistryDebugConnection = 'Remote' | 'Local';
 
 export type RegistryDebugPhase =
   | 'request'
@@ -29,6 +30,7 @@ export type RegistryDebugRecord = {
   direction: RegistryDebugDirection;
   phase: RegistryDebugPhase;
   scope: RegistryDebugScope;
+  connection: RegistryDebugConnection;
   method?: string;
   requestId?: number;
   projectId?: string;
@@ -46,23 +48,27 @@ export type RegistryDebugCaptureEvent =
       kind: 'outbound';
       envelope: RegistryEnvelope;
       raw: string;
+      connection?: RegistryDebugConnection;
       timestamp?: number;
     }
   | {
       kind: 'inbound';
       envelope: RegistryEnvelope;
       raw: string;
+      connection?: RegistryDebugConnection;
       timestamp?: number;
     }
   | {
       kind: 'parse_error';
       raw: string;
       error: string;
+      connection?: RegistryDebugConnection;
       timestamp?: number;
     }
   | {
       kind: 'lifecycle';
       lifecycle: RegistryDebugLifecyclePayload;
+      connection?: RegistryDebugConnection;
       timestamp?: number;
     };
 
@@ -81,6 +87,7 @@ type CorrelatedRequest = {
   method?: string;
   projectId?: string;
   sessionIds: string[];
+  connection: RegistryDebugConnection;
   timestamp: number;
 };
 
@@ -224,13 +231,16 @@ export function createRegistryDebugStore(now: () => number = () => Date.now()): 
     }
   };
 
-  const appendRecord = (record: Omit<RegistryDebugRecord, 'id' | 'scope'>) => {
+  const appendRecord = (record: Omit<RegistryDebugRecord, 'id' | 'scope' | 'connection'> & {
+    connection?: RegistryDebugConnection;
+  }) => {
     records = [
       ...records,
       {
         id: nextId,
-        scope: resolveRegistryDebugScope(record.method, record.phase),
         ...record,
+        scope: resolveRegistryDebugScope(record.method, record.phase),
+        connection: record.connection ?? 'Remote',
       },
     ];
     nextId += 1;
@@ -254,6 +264,7 @@ export function createRegistryDebugStore(now: () => number = () => Date.now()): 
         method: input.envelope.method,
         projectId: input.envelope.projectId,
         sessionIds,
+        connection: input.connection ?? 'Remote',
         timestamp,
       });
     }
@@ -262,6 +273,7 @@ export function createRegistryDebugStore(now: () => number = () => Date.now()): 
       timeText: formatRegistryDebugTime(timestamp),
       direction: 'out',
       phase: 'request',
+      connection: input.connection,
       method: input.envelope.method,
       requestId: input.envelope.requestId,
       projectId: input.envelope.projectId,
@@ -289,6 +301,7 @@ export function createRegistryDebugStore(now: () => number = () => Date.now()): 
       timeText: formatRegistryDebugTime(timestamp),
       direction: 'in',
       phase: resolveInboundPhase(input.envelope.type),
+      connection: input.connection ?? correlated?.connection,
       method: input.envelope.method ?? correlated?.method,
       requestId: input.envelope.requestId,
       projectId: input.envelope.projectId ?? correlated?.projectId,
@@ -316,6 +329,7 @@ export function createRegistryDebugStore(now: () => number = () => Date.now()): 
       timeText: formatRegistryDebugTime(timestamp),
       direction: 'in',
       phase: 'parse_error',
+      connection: input.connection,
       sessionIds: [],
       multiSession: false,
       raw: input.raw,
@@ -333,6 +347,7 @@ export function createRegistryDebugStore(now: () => number = () => Date.now()): 
       timeText: formatRegistryDebugTime(timestamp),
       direction: 'lifecycle',
       phase: input.lifecycle.phase,
+      connection: input.connection,
       sessionIds: [],
       multiSession: false,
       lifecycle: input.lifecycle,

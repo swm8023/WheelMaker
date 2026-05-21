@@ -2267,8 +2267,8 @@ body,
   height: 28px;
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: 58px 28px 54px minmax(60px, 1fr) 30px minmax(42px, 0.7fr) minmax(52px, 0.8fr);
-  gap: 4px;
+  grid-template-columns: 56px 28px 44px 50px minmax(72px, 150px) 30px minmax(66px, 120px) minmax(70px, 1fr);
+  gap: 3px;
   align-items: center;
   padding: 0 8px;
   border-bottom: 1px solid var(--border);
@@ -2291,8 +2291,8 @@ body,
   background: transparent;
   color: var(--text);
   display: grid;
-  grid-template-columns: 58px 28px 54px minmax(60px, 1fr) 30px minmax(42px, 0.7fr) minmax(52px, 0.8fr);
-  gap: 4px;
+  grid-template-columns: 56px 28px 44px 50px minmax(72px, 150px) 30px minmax(66px, 120px) minmax(70px, 1fr);
+  gap: 3px;
   align-items: center;
   padding: 0 8px;
   font: inherit;
@@ -2334,6 +2334,37 @@ body,
   color: #c586c0;
 }
 
+.registry-debug-cell.connection {
+  display: inline-flex;
+  align-items: center;
+}
+
+.registry-debug-connection-tag {
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 1.15;
+  font-weight: 700;
+}
+
+.registry-debug-connection-tag.local {
+  border-color: color-mix(in srgb, #4db6ac 58%, var(--border));
+  background: color-mix(in srgb, #4db6ac 16%, transparent);
+  color: #4db6ac;
+}
+
+.registry-debug-connection-tag.remote {
+  border-color: color-mix(in srgb, #dcdcaa 48%, var(--border));
+  background: color-mix(in srgb, #dcdcaa 12%, transparent);
+  color: #dcdcaa;
+}
+
 .registry-debug-jump {
   position: absolute;
   right: 12px;
@@ -2351,11 +2382,10 @@ body,
 }
 
 .registry-debug-splitter {
-  flex: 0 0 7px;
+  flex: 0 0 4px;
   border: 0;
   border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 85%, var(--panel-3));
+  background: transparent;
   cursor: col-resize;
 }
 

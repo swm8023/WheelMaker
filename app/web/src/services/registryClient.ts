@@ -1,4 +1,4 @@
-import type {RegistryDebugCaptureEvent} from '../debug/registryDebug';
+import type {RegistryDebugCaptureEvent, RegistryDebugConnection} from '../debug/registryDebug';
 import type {RegistryConnectInitPayload, RegistryEnvelope, RegistryErrorPayload} from '../types/registry';
 
 export type RegistryDebugSink = (event: RegistryDebugCaptureEvent) => void;
@@ -41,7 +41,11 @@ export class RegistryClient {
   private readonly closeListeners = new Set<() => void>();
   private closing = false;
 
-  constructor(private readonly timeoutMs = 8000, private readonly debugSink?: RegistryDebugSink) {}
+  constructor(
+    private readonly timeoutMs = 8000,
+    private readonly debugSink?: RegistryDebugSink,
+    private readonly debugConnection: RegistryDebugConnection = 'Remote',
+  ) {}
 
   async connect(url: string): Promise<void> {
     if (this.ws?.readyState === WebSocket.OPEN) {
@@ -227,7 +231,7 @@ export class RegistryClient {
   }
 
   private emitDebug(event: RegistryDebugCaptureEvent): void {
-    this.debugSink?.(event);
+    this.debugSink?.({...event, connection: this.debugConnection});
   }
 
   private handleSocketClosed(ws: WebSocket): void {

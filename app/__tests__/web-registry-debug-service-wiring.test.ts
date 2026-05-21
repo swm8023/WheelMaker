@@ -15,15 +15,18 @@ describe('registry debug service wiring', () => {
     );
 
     expect(repositoryTs).toContain("import { RegistryClient, type RegistryDebugSink } from './registryClient';");
-    expect(repositoryTs).toContain('export const createRegistryRepository = (debugSink?: RegistryDebugSink): RegistryRepository => {');
-    expect(repositoryTs).toContain('return new RegistryRepository(new RegistryClient(8000, debugSink));');
+    expect(repositoryTs).toContain("import type {RegistryDebugConnection} from '../debug/registryDebug';");
+    expect(repositoryTs).toContain("debugConnection: RegistryDebugConnection = 'Remote'");
+    expect(repositoryTs).toContain('return new RegistryRepository(new RegistryClient(8000, debugSink, debugConnection));');
 
     expect(workspaceServiceTs).toContain("import type {RegistryDebugSink} from './registryClient';");
-    expect(workspaceServiceTs).toContain('createRepository?: (debugSink?: RegistryDebugSink) => RegistryRepository;');
+    expect(workspaceServiceTs).toContain("import type {RegistryDebugConnection} from '../debug/registryDebug';");
+    expect(workspaceServiceTs).toContain('createRepository?: (debugSink?: RegistryDebugSink, debugConnection?: RegistryDebugConnection) => RegistryRepository;');
     expect(workspaceServiceTs).toContain(
       'constructor(private readonly debugSink?: RegistryDebugSink, options: RegistryWorkspaceServiceOptions = {})',
     );
     expect(workspaceServiceTs).toContain('this.createRepository = options.createRepository ?? createRegistryRepository;');
-    expect(workspaceServiceTs).toContain('const repository = this.createRepository(this.debugSink);');
+    expect(workspaceServiceTs).toContain("createRepository: () => this.createRepository(this.debugSink, 'Local')");
+    expect(workspaceServiceTs).toContain("const repository = this.createRepository(this.debugSink, 'Remote');");
   });
 });

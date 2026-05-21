@@ -8,10 +8,11 @@ describe('web registry client debug hooks', () => {
   test('keeps debug capture at the registry websocket boundary', () => {
     const clientTs = fs.readFileSync(clientPath, 'utf8');
 
-    expect(clientTs).toContain("import type {RegistryDebugCaptureEvent} from '../debug/registryDebug';");
+    expect(clientTs).toContain("import type {RegistryDebugCaptureEvent, RegistryDebugConnection} from '../debug/registryDebug';");
     expect(clientTs).toContain('export type RegistryDebugSink = (event: RegistryDebugCaptureEvent) => void;');
-    expect(clientTs).toContain('constructor(private readonly timeoutMs = 8000, private readonly debugSink?: RegistryDebugSink) {}');
+    expect(clientTs).toContain("private readonly debugConnection: RegistryDebugConnection = 'Remote'");
     expect(clientTs).toContain('private emitDebug(event: RegistryDebugCaptureEvent): void {');
+    expect(clientTs).toContain('this.debugSink?.({...event, connection: this.debugConnection});');
   });
 
   test('records outbound wire json before websocket send', () => {
