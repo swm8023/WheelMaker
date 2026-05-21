@@ -50,6 +50,41 @@ describe('agent package update registry service', () => {
     });
   });
 
+  test('normalizes nullable package agent types from deprecated package rows', async () => {
+    const client = {
+      request: jest.fn().mockResolvedValue({
+        type: 'response',
+        payload: {
+          ok: true,
+          updatedAt: '2026-05-19T10:00:00Z',
+          hub: {
+            hubId: 'hub-b',
+            packages: [{
+              packageName: '@zed-industries/codex-acp',
+              displayName: 'Deprecated Codex ACP',
+              agentTypes: null,
+              kind: 'deprecated',
+              installed: true,
+              installedVersion: '0.1.0',
+              latestVersion: '',
+              status: 'deprecated',
+              error: '',
+              canInstall: false,
+              canUpdate: false,
+              canUninstall: true,
+            }],
+          },
+          operation: null,
+        },
+      }),
+    } as unknown as RegistryClient;
+    const repository = new RegistryRepository(client);
+
+    const result = await repository.scanNpmPackages('hub-b');
+
+    expect(result.hub?.packages[0].agentTypes).toEqual([]);
+  });
+
   test('sends cmd.npm write actions with controlled payloads', async () => {
     const client = {
       request: jest.fn().mockResolvedValue({

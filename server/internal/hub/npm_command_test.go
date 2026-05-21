@@ -140,6 +140,30 @@ func TestNPMCommandScanReturnsRuntimeAndDeprecatedPackageRows(t *testing.T) {
 	}
 }
 
+func TestNPMCommandScanDeprecatedCodexACPUsesEmptyAgentTypes(t *testing.T) {
+	runner := newFakeNPMRunner()
+	runner.set("npm", []string{"list", "-g", "--depth=0", "--json"}, npmCommandResult{
+		Stdout:   `{"dependencies":{"@zed-industries/codex-acp":{"version":"0.1.0"}}}`,
+		ExitCode: 0,
+	})
+
+	cmd := newNPMCommandWithRunner(runner)
+	resp, cmdErr := cmd.Handle(context.Background(), rawNPMCommandPayload(t, map[string]any{
+		"action": "scan",
+		"hubId":  "hub-a",
+	}))
+	if cmdErr != nil {
+		t.Fatalf("Handle scan error: %#v", cmdErr)
+	}
+	deprecatedCodex := findNPMTestPackage(t, resp.(npmCommandResponse).Hub.Packages, "@zed-industries/codex-acp")
+	if deprecatedCodex.AgentTypes == nil {
+		t.Fatalf("deprecated codex-acp agentTypes is nil; UI requires an empty array")
+	}
+	if len(deprecatedCodex.AgentTypes) != 0 {
+		t.Fatalf("deprecated codex-acp agentTypes=%v, want empty", deprecatedCodex.AgentTypes)
+	}
+}
+
 func TestNPMCommandScanListFailureReturnsHubError(t *testing.T) {
 	runner := newFakeNPMRunner()
 	runner.set("npm", []string{"list", "-g", "--depth=0", "--json"}, npmCommandResult{

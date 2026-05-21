@@ -228,7 +228,7 @@ func (c *NPMCommand) scan(ctx context.Context, hubID string) npmCommandResponse 
 		row := npmPackageStatus{
 			PackageName:      policy.PackageName,
 			DisplayName:      policy.DisplayName,
-			AgentTypes:       append([]string(nil), policy.AgentTypes...),
+			AgentTypes:       cloneNPMStringSlice(policy.AgentTypes),
 			Kind:             policy.Kind,
 			Installed:        installedVersion != "",
 			InstalledVersion: installedVersion,
@@ -252,7 +252,7 @@ func (c *NPMCommand) scan(ctx context.Context, hubID string) npmCommandResponse 
 		hub.Packages = append(hub.Packages, npmPackageStatus{
 			PackageName:      policy.PackageName,
 			DisplayName:      policy.DisplayName,
-			AgentTypes:       append([]string(nil), policy.AgentTypes...),
+			AgentTypes:       cloneNPMStringSlice(policy.AgentTypes),
 			Kind:             policy.Kind,
 			Installed:        true,
 			InstalledVersion: installedVersion,
@@ -261,6 +261,13 @@ func (c *NPMCommand) scan(ctx context.Context, hubID string) npmCommandResponse 
 		})
 	}
 	return npmCommandResponse{OK: true, UpdatedAt: updatedAt, Hub: hub, Operation: operation}
+}
+
+func cloneNPMStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	return append([]string(nil), values...)
 }
 
 type npmLatestResult struct {

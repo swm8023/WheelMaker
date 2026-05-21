@@ -16,6 +16,8 @@ import type {
   RegistryHub,
   RegistryLocalReadCandidate,
   RegistryNpmCommandResponse,
+  RegistryNpmHubSnapshot,
+  RegistryNpmPackage,
   RegistryProject,
   RegistryProjectAgentProfile,
   RegistryProjectListResponse,
@@ -68,6 +70,70 @@ function normalizeAgentType(agentType: unknown): string | undefined {
     return undefined;
   }
   return normalized.toLowerCase() === 'codexapp' ? 'codex' : normalized;
+}
+
+function normalizeAgentTypes(agentTypes: unknown): string[] {
+  if (!Array.isArray(agentTypes)) {
+    return [];
+  }
+  return agentTypes
+    .map(item => normalizeAgentType(item))
+    .filter((item): item is string => !!item);
+}
+
+function normalizeNpmPackage(raw: unknown): RegistryNpmPackage | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const input = raw as Record<string, unknown>;
+  const packageName = typeof input.packageName === 'string' ? input.packageName : '';
+  if (!packageName) {
+    return null;
+  }
+  return {
+    packageName,
+    displayName: typeof input.displayName === 'string' ? input.displayName : packageName,
+    agentTypes: normalizeAgentTypes(input.agentTypes),
+    kind: input.kind === 'deprecated' ? 'deprecated' : 'runtime',
+    installed: input.installed === true,
+    installedVersion: typeof input.installedVersion === 'string' ? input.installedVersion : '',
+    latestVersion: typeof input.latestVersion === 'string' ? input.latestVersion : '',
+    status: typeof input.status === 'string' ? input.status as RegistryNpmPackage['status'] : 'latest_unknown',
+    error: typeof input.error === 'string' ? input.error : '',
+    canInstall: input.canInstall === true,
+    canUpdate: input.canUpdate === true,
+    canUninstall: input.canUninstall === true,
+  };
+}
+
+function normalizeNpmHubSnapshot(raw: unknown, hubId: string): RegistryNpmHubSnapshot | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
+  const input = raw as Record<string, unknown>;
+  const packages = Array.isArray(input.packages)
+    ? input.packages.map(item => normalizeNpmPackage(item)).filter((item): item is RegistryNpmPackage => !!item)
+    : [];
+  return {
+    hubId: typeof input.hubId === 'string' && input.hubId ? input.hubId : hubId,
+    nodeVersion: typeof input.nodeVersion === 'string' ? input.nodeVersion : '',
+    npmVersion: typeof input.npmVersion === 'string' ? input.npmVersion : '',
+    npmPrefix: typeof input.npmPrefix === 'string' ? input.npmPrefix : '',
+    warning: typeof input.warning === 'string' ? input.warning : '',
+    error: typeof input.error === 'string' ? input.error : '',
+    packages,
+  };
+}
+
+function normalizeNpmCommandResponse(raw: unknown, hubId: string): RegistryNpmCommandResponse {
+  const input = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  return {
+    ok: input.ok === true,
+    accepted: input.accepted === true ? true : undefined,
+    updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : undefined,
+    hub: normalizeNpmHubSnapshot(input.hub, hubId),
+    operation: (input.operation ?? null) as RegistryNpmCommandResponse['operation'],
+  };
 }
 
 function base64ToArrayBuffer(value: string): ArrayBuffer {
@@ -834,7 +900,7 @@ export class RegistryRepository {
       payload: {action: 'scan', hubId},
       timeoutMs: 60000,
     });
-    return (resp.payload ?? {}) as RegistryNpmCommandResponse;
+    return normalizeNpmCommandResponse(resp.payload, hubId);
   }
 
   async installNpmPackage(hubId: string, packageName: string, version = 'latest'): Promise<RegistryNpmCommandResponse> {
@@ -847,7 +913,7 @@ export class RegistryRepository {
         version,
       },
     });
-    return (resp.payload ?? {}) as RegistryNpmCommandResponse;
+    return normalizeNpmCommandResponse(resp.payload, hubId);
   }
 
   async uninstallNpmPackage(hubId: string, packageName: string): Promise<RegistryNpmCommandResponse> {
@@ -859,7 +925,7 @@ export class RegistryRepository {
         packageName,
       },
     });
-    return (resp.payload ?? {}) as RegistryNpmCommandResponse;
+    return normalizeNpmCommandResponse(resp.payload, hubId);
   }
 
   async queryWheelMakerUpdate(hubId: string): Promise<RegistryWheelMakerUpdateResponse> {
