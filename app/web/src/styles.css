@@ -608,7 +608,7 @@ body,
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 18px 12px calc(env(safe-area-inset-bottom, 0px) + 22px);
+  padding: 14px 0 calc(env(safe-area-inset-bottom, 0px) + 22px);
   background: var(--bg);
 }
 
@@ -620,7 +620,7 @@ body,
 .mobile-settings-screen .settings-list {
   overflow: visible;
   gap: 18px;
-  padding: 0;
+  padding: 0 10px;
 }
 
 .mobile-settings-screen .settings-section-rows {
@@ -660,11 +660,11 @@ body,
 }
 
 .mobile-settings-screen .settings-detail-page {
-  padding: 4px 12px 12px;
+  padding: 0 8px 8px;
 }
 
 .mobile-settings-screen .settings-detail-header {
-  padding: 8px 0 10px;
+  padding: 6px 4px 8px;
 }
 
 .mobile-settings-screen .settings-detail-title {
@@ -672,7 +672,7 @@ body,
 }
 
 .mobile-settings-screen .settings-detail-body {
-  padding: 4px 0 16px;
+  padding: 4px 2px 16px;
   gap: 12px;
 }
 
