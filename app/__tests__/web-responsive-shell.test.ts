@@ -74,4 +74,22 @@ describe('web responsive shell split', () => {
     expect(appReturn).not.toContain('className={`drawer-overlay');
     expect(appReturn).not.toContain('className="workspace-left"');
   });
+
+  test('connection screen keeps the desktop title bar controls available', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    expect(mainTsx).toContain("import { DesktopTitleBar } from './shell/DesktopTitleBar';");
+
+    const disconnectedStart = mainTsx.indexOf('if (!connected && !keepWorkspaceVisible)');
+    const disconnectedEnd = mainTsx.indexOf('const projectMenu', disconnectedStart);
+    expect(disconnectedStart).toBeGreaterThanOrEqual(0);
+    expect(disconnectedEnd).toBeGreaterThan(disconnectedStart);
+    const disconnectedReturn = mainTsx.slice(disconnectedStart, disconnectedEnd);
+
+    expect(disconnectedReturn).toContain('<DesktopTitleBar title="WheelMaker" />');
+    expect(disconnectedReturn).toMatch(
+      /className=\{`page theme-\$\{themeMode\}`\}[\s\S]*?<DesktopTitleBar title="WheelMaker" \/>[\s\S]*?<div className="connect">/,
+    );
+  });
 });

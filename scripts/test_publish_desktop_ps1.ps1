@@ -36,7 +36,7 @@ Assert-Contains "publish_desktop.ps1" $script "npm run build:web"
 Assert-Contains "publish_desktop.ps1" $script "node scripts/export_web_release.js"
 Assert-Contains "publish_desktop.ps1" $script "go build"
 Assert-Contains "publish_desktop.ps1" $script "WheelMakerDesktop.exe"
-Assert-Contains "publish_desktop.ps1" $script '$shortcut.IconLocation = $script:DesktopGeneratedIconPng'
+Assert-Contains "publish_desktop.ps1" $script '$shortcut.IconLocation = $script:DesktopExe'
 Assert-Contains "publish_desktop.ps1" $script "desktop-release.json"
 Assert-Contains "publish_desktop.ps1" $script "CreateShortcut"
 Assert-Contains "publish_desktop.ps1" $script "Desktop"

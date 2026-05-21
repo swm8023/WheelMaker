@@ -18,6 +18,7 @@ declare const require: (id: string) => any;
 
 import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
 import { initializePWAFoundation } from './pwa';
+import { DesktopTitleBar } from './shell/DesktopTitleBar';
 import { ResponsiveShell } from './shell/ResponsiveShell';
 import {
   getLatestSessionReadCursor,
@@ -11832,6 +11833,7 @@ function App() {
     return (
       <div className={`page theme-${themeMode}`}>
         <style>{setiFontCss}</style>
+        <DesktopTitleBar title="WheelMaker" />
         <div className="connect">
           <h3>Connect to WheelMaker Registry</h3>
           <input

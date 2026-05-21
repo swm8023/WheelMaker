@@ -193,7 +193,7 @@ function New-DesktopShortcut {
   $shortcut = $shell.CreateShortcut($shortcutPath)
   $shortcut.TargetPath = $script:DesktopExe
   $shortcut.WorkingDirectory = $script:OutputDir
-  $shortcut.IconLocation = $script:DesktopGeneratedIconPng
+  $shortcut.IconLocation = $script:DesktopExe
   $shortcut.Save()
 }
 

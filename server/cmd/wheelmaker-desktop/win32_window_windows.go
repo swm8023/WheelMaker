@@ -34,6 +34,10 @@ const (
 	dwmwaUseImmersiveDarkMode = 20
 	dwmwaBorderColor          = 34
 	dwmwaCaptionColor         = 35
+
+	smCXSizeFrame    = 32
+	smCYSizeFrame    = 33
+	smCXPaddedBorder = 92
 )
 
 var (
@@ -50,6 +54,7 @@ var (
 	procPostMessageW          = user32.NewProc("PostMessageW")
 	procShowWindow            = user32.NewProc("ShowWindow")
 	procIsZoomed              = user32.NewProc("IsZoomed")
+	procGetSystemMetrics      = user32.NewProc("GetSystemMetrics")
 	procDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 )
 
@@ -60,6 +65,20 @@ type desktopWindowRect struct {
 	top    int32
 	right  int32
 	bottom int32
+}
+
+type desktopWindowFrameInsets struct {
+	x int32
+	y int32
+}
+
+func (r desktopWindowRect) expandedBy(insets desktopWindowFrameInsets) desktopWindowRect {
+	return desktopWindowRect{
+		left:   r.left - insets.x,
+		top:    r.top - insets.y,
+		right:  r.right + insets.x,
+		bottom: r.bottom + insets.y,
+	}
 }
 
 func (r desktopWindowRect) width() int32 {
@@ -140,6 +159,21 @@ func showWindow(hwnd uintptr, command uintptr) {
 func isWindowMaximized(hwnd uintptr) bool {
 	result, _, _ := procIsZoomed.Call(hwnd)
 	return result != 0
+}
+
+func getWindowFrameInsets() desktopWindowFrameInsets {
+	sizeFrameX := getSystemMetric(smCXSizeFrame)
+	sizeFrameY := getSystemMetric(smCYSizeFrame)
+	paddedBorder := getSystemMetric(smCXPaddedBorder)
+	return desktopWindowFrameInsets{
+		x: sizeFrameX + paddedBorder,
+		y: sizeFrameY + paddedBorder,
+	}
+}
+
+func getSystemMetric(index int32) int32 {
+	result, _, _ := procGetSystemMetrics.Call(uintptr(index))
+	return int32(result)
 }
 
 func setDwmWindowAttribute(hwnd uintptr, attribute uint32, value unsafe.Pointer, size uint32) error {

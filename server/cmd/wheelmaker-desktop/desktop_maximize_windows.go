@@ -6,6 +6,7 @@ type desktopWindowOps interface {
 	windowRect(hwnd uintptr) (desktopWindowRect, bool)
 	monitorWorkArea(hwnd uintptr) (desktopWindowRect, bool)
 	moveWindow(hwnd uintptr, rect desktopWindowRect)
+	frameInsets() desktopWindowFrameInsets
 	showWindow(hwnd uintptr, command uintptr)
 	isMaximized(hwnd uintptr) bool
 }
@@ -22,6 +23,10 @@ func (win32DesktopWindowOps) monitorWorkArea(hwnd uintptr) (desktopWindowRect, b
 
 func (win32DesktopWindowOps) moveWindow(hwnd uintptr, rect desktopWindowRect) {
 	moveWindowToRect(hwnd, rect)
+}
+
+func (win32DesktopWindowOps) frameInsets() desktopWindowFrameInsets {
+	return getWindowFrameInsets()
 }
 
 func (win32DesktopWindowOps) showWindow(hwnd uintptr, command uintptr) {
@@ -66,7 +71,7 @@ func (c *desktopMaximizeController) maximizeToWorkArea() {
 	c.restore = current
 	c.hasRestore = true
 	c.maximized = true
-	c.ops.moveWindow(c.hwnd, workArea)
+	c.ops.moveWindow(c.hwnd, workArea.expandedBy(c.ops.frameInsets()))
 }
 
 func (c *desktopMaximizeController) restoreWindow() {
