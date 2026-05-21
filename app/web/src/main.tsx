@@ -4919,6 +4919,7 @@ function App() {
       projectPinLongPressTimerRef.current = window.setTimeout(() => {
         projectPinLongPressTimerRef.current = null;
         projectPinLongPressTargetRef.current = targetProjectId;
+        try { navigator.vibrate?.(12); } catch { /* ignore */ }
         togglePinnedProject(targetProjectId);
       }, PROJECT_PIN_LONG_PRESS_MS);
     },
@@ -4984,6 +4985,7 @@ function App() {
           targetProjectId,
           sessionId,
         );
+        try { navigator.vibrate?.(12); } catch { /* ignore */ }
         setProjectSessionActionMenu({projectId: targetProjectId, sessionId});
       }, PROJECT_SESSION_LONG_PRESS_MS);
     },
@@ -10085,7 +10087,10 @@ function App() {
         </div>
         <div className="mobile-project-session-nav">
           {projects.length === 0 ? (
-            <div className="chat-empty-hint">No projects available.</div>
+            <div className="chat-empty-hint chat-empty-state">
+              <span className="codicon codicon-inbox" aria-hidden="true" />
+              <span>No projects available.</span>
+            </div>
           ) : null}
           {sortedProjectItems.map(projectItem => {
             const targetProjectId = projectItem.projectId;
@@ -10095,11 +10100,6 @@ function App() {
             const visibleSessions = projectSessions.slice(0, visibleCount);
             const collapsed = collapsedProjectIds.includes(targetProjectId);
             const pinnedProject = pinnedProjectIds.includes(targetProjectId);
-            const agents = getWideProjectAgents(projectItem, projectSessions);
-            const actionMenuOpen = mobileProjectActionMenu?.projectId === targetProjectId;
-            const activeMobileProjectActionMenu = actionMenuOpen
-              ? mobileProjectActionMenu
-              : null;
             const projectHub = projectItem.hubId || 'local';
             const projectHubVariant = tagVariantClass('wide-project-hub', projectItem.hubId || 'local');
             const sessionError = mobileProjectSessionErrors[targetProjectId] ?? '';
@@ -10177,107 +10177,6 @@ function App() {
                     </button>
                   </div>
                 </div>
-                {activeMobileProjectActionMenu ? (
-                  <div className="mobile-project-action-panel">
-                    <div className="wide-project-action-title">
-                      <span
-                        className={`codicon ${
-                          activeMobileProjectActionMenu.kind === 'new'
-                            ? 'codicon-add'
-                            : 'codicon-history'
-                        }`}
-                      />
-                      <span className="wide-project-action-title-copy">
-                        <span className="wide-project-action-title-main">
-                          {activeMobileProjectActionMenu.kind === 'new' ? 'New Session' : 'Resume Session'}
-                        </span>
-                        <span className="wide-project-action-title-sub">
-                          {projectItem.name}
-                        </span>
-                      </span>
-                    </div>
-                    {activeMobileProjectActionMenu.phase === 'agents' ? (
-                      <>
-                        {agents.map(agentType => (
-                          <button
-                            key={`${targetProjectId}:mobile:${activeMobileProjectActionMenu.kind}:${agentType}`}
-                            type="button"
-                            className="wide-project-action-menu-item"
-                            onClick={() => {
-                              if (activeMobileProjectActionMenu.kind === 'new') {
-                                handleMobileProjectCreateSession(
-                                  targetProjectId,
-                                  agentType,
-                                ).catch(() => undefined);
-                              } else {
-                                handleMobileProjectResumeAgent(
-                                  targetProjectId,
-                                  agentType,
-                                ).catch(() => undefined);
-                              }
-                            }}
-                          >
-                            <span className="codicon codicon-sparkle" />
-                            <span>{agentType}</span>
-                          </button>
-                        ))}
-                        {agents.length === 0 ? (
-                          <div className="wide-project-action-empty">
-                            No agents available.
-                          </div>
-                        ) : null}
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          className="wide-project-action-back"
-                          onClick={() => {
-                            setResumeSessions([]);
-                            setResumeLoading(false);
-                            setMobileProjectActionMenu({
-                              ...activeMobileProjectActionMenu,
-                              phase: 'agents',
-                              agentType: '',
-                            });
-                          }}
-                        >
-                          <span className="codicon codicon-arrow-left" />
-                          <span>{activeMobileProjectActionMenu.agentType}</span>
-                        </button>
-                        {resumeLoading ? (
-                          <div className="wide-project-action-empty">
-                            Loading sessions...
-                          </div>
-                        ) : null}
-                        {!resumeLoading
-                          ? resumeSessions.map(session => (
-                              <button
-                                key={`${targetProjectId}:mobile-resume:${session.sessionId}`}
-                                type="button"
-                                className="wide-project-action-menu-item"
-                                onClick={() => {
-                                  handleMobileProjectResumeImport(
-                                    targetProjectId,
-                                    activeMobileProjectActionMenu.agentType,
-                                    session.sessionId,
-                                  ).catch(() => undefined);
-                                }}
-                              >
-                                <span className="codicon codicon-history" />
-                                <span>{resolveSessionDisplayTitle(session) || session.sessionId}</span>
-                              </button>
-                            ))
-                          : null}
-                        {!resumeLoading && resumeSessions.length === 0 ? (
-                          <div className="wide-project-action-empty">
-                            No resumable sessions.
-                          </div>
-                        ) : null}
-                      </>
-                    )}
-                  </div>
-                ) : null}
                 {sessionError ? (
                   <div className="mobile-project-session-error">
                     <span>Session refresh failed.</span>
@@ -10360,6 +10259,137 @@ function App() {
             );
           })}
         </div>
+        {(() => {
+          if (!mobileProjectActionMenu) return null;
+          const sheetMenu = mobileProjectActionMenu;
+          const sheetProject = sortedProjectItems.find(p => p.projectId === sheetMenu.projectId);
+          if (!sheetProject) return null;
+          const sheetProjectSessions = projectSessionsByProjectId[sheetMenu.projectId] ?? [];
+          const sheetAgents = getWideProjectAgents(sheetProject, sheetProjectSessions);
+          return (
+            <>
+              <div
+                className="mobile-project-sheet-overlay"
+                onClick={() => setMobileProjectActionMenu(null)}
+                aria-hidden="true"
+              />
+              <div
+                className="mobile-project-sheet"
+                role="dialog"
+                aria-modal="true"
+                aria-label={sheetMenu.kind === 'new' ? 'New session' : 'Resume session'}
+              >
+                <div className="mobile-project-sheet-grip" aria-hidden="true" />
+                <div className="mobile-project-sheet-header">
+                  <span
+                    className={`codicon ${sheetMenu.kind === 'new' ? 'codicon-add' : 'codicon-history'} mobile-project-sheet-icon`}
+                    aria-hidden="true"
+                  />
+                  <span className="mobile-project-sheet-title-copy">
+                    <span className="mobile-project-sheet-title">
+                      {sheetMenu.kind === 'new' ? 'New Session' : 'Resume Session'}
+                    </span>
+                    <span className="mobile-project-sheet-subtitle">{sheetProject.name}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="mobile-project-sheet-close"
+                    onClick={() => setMobileProjectActionMenu(null)}
+                    aria-label="Close"
+                    title="Close"
+                  >
+                    <span className="codicon codicon-close" />
+                  </button>
+                </div>
+                <div className="mobile-project-sheet-body">
+                  {sheetMenu.phase === 'agents' ? (
+                    <>
+                      {sheetAgents.map(agentType => (
+                        <button
+                          key={`${sheetMenu.projectId}:sheet:${sheetMenu.kind}:${agentType}`}
+                          type="button"
+                          className="wide-project-action-menu-item mobile-project-sheet-item"
+                          onClick={() => {
+                            if (sheetMenu.kind === 'new') {
+                              handleMobileProjectCreateSession(
+                                sheetMenu.projectId,
+                                agentType,
+                              ).catch(() => undefined);
+                            } else {
+                              handleMobileProjectResumeAgent(
+                                sheetMenu.projectId,
+                                agentType,
+                              ).catch(() => undefined);
+                            }
+                          }}
+                        >
+                          <span className="codicon codicon-sparkle" />
+                          <span>{agentType}</span>
+                        </button>
+                      ))}
+                      {sheetAgents.length === 0 ? (
+                        <div className="wide-project-action-empty">
+                          <span className="codicon codicon-circle-slash" aria-hidden="true" />
+                          <span>No agents available.</span>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="wide-project-action-back mobile-project-sheet-back"
+                        onClick={() => {
+                          setResumeSessions([]);
+                          setResumeLoading(false);
+                          setMobileProjectActionMenu({
+                            ...sheetMenu,
+                            phase: 'agents',
+                            agentType: '',
+                          });
+                        }}
+                      >
+                        <span className="codicon codicon-arrow-left" />
+                        <span>{sheetMenu.agentType}</span>
+                      </button>
+                      {resumeLoading ? (
+                        <div className="wide-project-action-empty">
+                          <span className="codicon codicon-loading codicon-modifier-spin" aria-hidden="true" />
+                          <span>Loading sessions...</span>
+                        </div>
+                      ) : null}
+                      {!resumeLoading
+                        ? resumeSessions.map(session => (
+                            <button
+                              key={`${sheetMenu.projectId}:sheet-resume:${session.sessionId}`}
+                              type="button"
+                              className="wide-project-action-menu-item mobile-project-sheet-item"
+                              onClick={() => {
+                                handleMobileProjectResumeImport(
+                                  sheetMenu.projectId,
+                                  sheetMenu.agentType,
+                                  session.sessionId,
+                                ).catch(() => undefined);
+                              }}
+                            >
+                              <span className="codicon codicon-history" />
+                              <span>{resolveSessionDisplayTitle(session) || session.sessionId}</span>
+                            </button>
+                          ))
+                        : null}
+                      {!resumeLoading && resumeSessions.length === 0 ? (
+                        <div className="wide-project-action-empty">
+                          <span className="codicon codicon-history" aria-hidden="true" />
+                          <span>No resumable sessions.</span>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          );
+        })()}
       </>
     );
   };
@@ -10515,7 +10545,8 @@ function App() {
                         ))}
                         {agents.length === 0 ? (
                           <div className="wide-project-action-empty">
-                            No agents available.
+                            <span className="codicon codicon-circle-slash" aria-hidden="true" />
+                            <span>No agents available.</span>
                           </div>
                         ) : null}
                       </>
@@ -10539,7 +10570,8 @@ function App() {
                         </button>
                         {resumeLoading ? (
                           <div className="wide-project-action-empty">
-                            Loading sessions...
+                            <span className="codicon codicon-loading codicon-modifier-spin" aria-hidden="true" />
+                            <span>Loading sessions...</span>
                           </div>
                         ) : null}
                         {!resumeLoading
@@ -10563,7 +10595,8 @@ function App() {
                           : null}
                         {!resumeLoading && resumeSessions.length === 0 ? (
                           <div className="wide-project-action-empty">
-                            No resumable sessions.
+                            <span className="codicon codicon-history" aria-hidden="true" />
+                            <span>No resumable sessions.</span>
                           </div>
                         ) : null}
                       </>
