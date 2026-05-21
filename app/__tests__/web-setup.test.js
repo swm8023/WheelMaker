@@ -118,4 +118,11 @@ describe('web runtime setup', () => {
     expect(redirected.output.path).toBe(path.resolve(target));
     expect(normal.output.path).toBe(path.join(require('os').homedir(), '.wheelmaker', 'web'));
   });
+
+  test('webpack does not emit bundle size performance warnings for local PWA releases', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const webpackConfig = require(path.join(projectRoot, 'web', 'webpack.config.js'));
+
+    expect(webpackConfig.performance).toEqual({hints: false});
+  });
 });

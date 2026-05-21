@@ -65,5 +65,8 @@ module.exports = {
       directory: path.resolve(__dirname, 'public'),
     },
   },
+  performance: {
+    hints: false,
+  },
   devtool: 'source-map',
 };
