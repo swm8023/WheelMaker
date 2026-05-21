@@ -25,7 +25,7 @@ function Assert-NotContains {
 }
 
 Assert-Contains "publish_desktop.ps1" $script "WHEELMAKER_WEB_TARGET"
-Assert-Contains "publish_desktop.ps1" $script "app\web\public\icons\icon.svg"
+Assert-Contains "publish_desktop.ps1" $script "app\web\public\icons\icon.png"
 Assert-Contains "publish_desktop.ps1" $script "Restore-DesktopWebRootPlaceholder"
 Assert-Contains "publish_desktop.ps1" $script "go-winres@v0.3.3"
 Assert-Contains "publish_desktop.ps1" $script "--icon"
@@ -37,6 +37,8 @@ Assert-Contains "publish_desktop.ps1" $script "WheelMakerDesktop.exe"
 Assert-Contains "publish_desktop.ps1" $script "desktop-release.json"
 Assert-Contains "publish_desktop.ps1" $script "CreateShortcut"
 Assert-Contains "publish_desktop.ps1" $script "Desktop"
+Assert-NotContains "publish_desktop.ps1" $script "Get-EdgeExecutable"
+Assert-NotContains "publish_desktop.ps1" $script "Convert-DesktopIconSvgToPng"
 Assert-NotContains "publish_desktop.ps1" $script "Restart-Services"
 Assert-NotContains "publish_desktop.ps1" $script "update-now.signal"
 Assert-Contains "publish-desktop.bat" $bat "scripts\publish_desktop.ps1"

@@ -19,7 +19,11 @@ describe('registry debug service wiring', () => {
     expect(repositoryTs).toContain('return new RegistryRepository(new RegistryClient(8000, debugSink));');
 
     expect(workspaceServiceTs).toContain("import type {RegistryDebugSink} from './registryClient';");
-    expect(workspaceServiceTs).toContain('constructor(private readonly debugSink?: RegistryDebugSink) {}');
-    expect(workspaceServiceTs).toContain('const repository = createRegistryRepository(this.debugSink);');
+    expect(workspaceServiceTs).toContain('createRepository?: (debugSink?: RegistryDebugSink) => RegistryRepository;');
+    expect(workspaceServiceTs).toContain(
+      'constructor(private readonly debugSink?: RegistryDebugSink, options: RegistryWorkspaceServiceOptions = {})',
+    );
+    expect(workspaceServiceTs).toContain('this.createRepository = options.createRepository ?? createRegistryRepository;');
+    expect(workspaceServiceTs).toContain('const repository = this.createRepository(this.debugSink);');
   });
 });

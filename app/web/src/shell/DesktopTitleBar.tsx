@@ -35,7 +35,7 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
         onDoubleClick={() => invokeDesktopAction(bridge.toggleMaximize)}
         onPointerDown={handleDragPointerDown}
       >
-        <img className="desktop-titlebar-icon" src="/icons/icon.svg" alt="" draggable={false} />
+        <img className="desktop-titlebar-icon" src="/icons/icon.png" alt="" draggable={false} />
         <span className="desktop-titlebar-title">{title}</span>
       </div>
       <div className="desktop-titlebar-controls">

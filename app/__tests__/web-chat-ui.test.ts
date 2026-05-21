@@ -487,7 +487,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('<span className="chat-hub-summary-label">Hubs</span>');
     expect(mainTsx).toContain('<span className="chat-hub-summary-count">{hubCount}</span>');
     expect(mainTsx).toContain('{registryHubs.length > 0 ? (');
-    expect(mainTsx).toContain('registryHubs.map(hub => (');
+    expect(mainTsx).toContain('registryHubs.map(hub => {');
     expect(mainTsx).toContain('<span className="chat-hub-row-name">{hub.hubId}</span>');
     expect(mainTsx).toContain('<div className="chat-hub-empty">No hubs</div>');
     expect(mainTsx).toContain('<div className="mobile-chat-title-row">');

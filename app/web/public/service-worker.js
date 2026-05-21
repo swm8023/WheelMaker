@@ -1,15 +1,15 @@
 /* eslint-env serviceworker */
 
-const CACHE_NAME = 'wheelmaker-web-pwa-v4';
-const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon.svg'];
+const CACHE_NAME = 'wheelmaker-web-pwa-v5';
+const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon.png'];
 function showLocalNotification(payload = {}) {
   const title = payload.title || 'WheelMaker';
   const body = payload.body || 'You have new updates';
   const url = payload.url || '/';
   return self.registration.showNotification(title, {
     body,
-    icon: payload.icon || '/icons/icon.svg',
-    badge: payload.badge || '/icons/icon.svg',
+    icon: payload.icon || '/icons/icon.png',
+    badge: payload.badge || '/icons/icon.png',
     data: { url },
   });
 }

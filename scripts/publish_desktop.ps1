@@ -94,78 +94,24 @@ function Build-DesktopWeb {
   }
 }
 
-function Get-EdgeExecutable {
-  $candidates = @(
-    (Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe"),
-    (Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe")
-  )
-  foreach ($candidate in $candidates) {
-    if (Test-Path -LiteralPath $candidate) { return $candidate }
-  }
-  $command = Get-Command "msedge" -ErrorAction SilentlyContinue
-  if ($command) { return $command.Source }
-  throw "Microsoft Edge is required to render the PWA SVG icon for the desktop exe resource."
-}
-
-function Convert-DesktopIconSvgToPng {
-  $iconSource = Join-Path $script:RepoRoot "app\web\public\icons\icon.svg"
+function Copy-DesktopIconPng {
+  $iconSource = Join-Path $script:RepoRoot "app\web\public\icons\icon.png"
   if (-not (Test-Path -LiteralPath $iconSource)) {
     throw ("PWA icon source is missing: {0}" -f $iconSource)
   }
   if ($WhatIf) {
-    Write-Host ("[whatif] render {0} -> {1}" -f $iconSource, $script:DesktopIconPng)
+    Write-Host ("[whatif] copy {0} -> {1}" -f $iconSource, $script:DesktopIconPng)
     return
   }
 
-  $edge = Get-EdgeExecutable
   New-Item -ItemType Directory -Path $script:DesktopWinresDir -Force | Out-Null
-  Remove-Item -LiteralPath $script:DesktopIconPng -Force -ErrorAction SilentlyContinue
-  $tempDir = Join-Path $env:TEMP ("wm-desktop-icon-{0}" -f ([Guid]::NewGuid().ToString("N")))
-  New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-  try {
-    $htmlPath = Join-Path $tempDir "icon.html"
-    $iconUri = (New-Object System.Uri($iconSource)).AbsoluteUri
-    $html = @"
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-html, body { margin: 0; width: 512px; height: 512px; overflow: hidden; background: transparent; }
-img { display: block; width: 512px; height: 512px; }
-</style>
-</head>
-<body><img src="$iconUri" alt=""></body>
-</html>
-"@
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($htmlPath, $html, $utf8NoBom)
-    $htmlUri = (New-Object System.Uri($htmlPath)).AbsoluteUri
-    Invoke-Checked -FilePath $edge -Arguments @(
-      "--headless",
-      "--disable-gpu",
-      "--hide-scrollbars",
-      "--window-size=512,512",
-      "--screenshot=$script:DesktopIconPng",
-      $htmlUri
-    ) -FailureMessage "desktop icon render failed"
-    $deadline = (Get-Date).AddSeconds(5)
-    while (-not (Test-Path -LiteralPath $script:DesktopIconPng)) {
-      if ((Get-Date) -ge $deadline) { break }
-      Start-Sleep -Milliseconds 100
-    }
-    if (-not (Test-Path -LiteralPath $script:DesktopIconPng)) {
-      throw ("desktop icon render did not create {0}" -f $script:DesktopIconPng)
-    }
-  } finally {
-    Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-  }
+  Copy-Item -LiteralPath $iconSource -Destination $script:DesktopIconPng -Force
 }
 
 function Build-DesktopResource {
   Assert-Command -Name "go" -Hint "Install Go 1.26+."
   Write-Step "generate desktop exe icon resource"
-  Convert-DesktopIconSvgToPng
+  Copy-DesktopIconPng
   if ($WhatIf) {
     Write-Host ("[whatif] go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64 --out {0} --no-suffix --manifest gui --icon {1}" -f $script:DesktopSyso, $script:DesktopIconPng)
     return

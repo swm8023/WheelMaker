@@ -18,7 +18,7 @@ describe('web release exporter', () => {
     expect(result.status).toBe(0);
     expect(fs.existsSync(path.join(target, 'manifest.webmanifest'))).toBe(true);
     expect(fs.existsSync(path.join(target, 'service-worker.js'))).toBe(true);
-    expect(fs.existsSync(path.join(target, 'icons', 'icon.svg'))).toBe(true);
+    expect(fs.existsSync(path.join(target, 'icons', 'icon.png'))).toBe(true);
   });
 
   test('release script is wired through npm without powershell', () => {

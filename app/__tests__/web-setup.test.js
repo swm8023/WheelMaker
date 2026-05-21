@@ -68,21 +68,33 @@ describe('web runtime setup', () => {
 
   test('uses the current WheelMaker brand icon for PWA and desktop publishing', () => {
     const projectRoot = path.join(__dirname, '..');
-    const iconPath = path.join(projectRoot, 'web', 'public', 'icons', 'icon.svg');
+    const iconPath = path.join(projectRoot, 'web', 'public', 'icons', 'icon.png');
     const manifest = JSON.parse(
       fs.readFileSync(path.join(projectRoot, 'web', 'public', 'manifest.webmanifest'), 'utf8'),
     );
-    const icon = fs.readFileSync(iconPath, 'utf8');
+    const icon = fs.readFileSync(iconPath);
+    const serviceWorker = fs.readFileSync(
+      path.join(projectRoot, 'web', 'public', 'service-worker.js'),
+      'utf8',
+    );
+    const indexHtml = fs.readFileSync(
+      path.join(projectRoot, 'web', 'public', 'index.html'),
+      'utf8',
+    );
 
-    expect(manifest.icons?.[0]?.src).toBe('/icons/icon.svg');
-    expect(icon).toContain('id="appTile"');
-    expect(icon).toContain('id="wmMarkBlue"');
-    expect(icon).toContain('id="wmMarkWhite"');
-    expect(icon).toContain('id="wmMarkTop"');
-    expect(icon).toContain('rx="92"');
-    expect(icon).toContain('d="M104 354V154L149 202V282L211 219L287 354H345L214 222L141 354Z"');
-    expect(icon).toContain('d="M264 244L300 208L327 235L405 154V354H361V267L317 310L294 287L282 300Z"');
-    expect(icon).toContain('filter="url(#tileShadow)"');
+    expect(manifest.icons?.[0]).toMatchObject({
+      src: '/icons/icon.png',
+      sizes: '1254x1254',
+      type: 'image/png',
+      purpose: 'any maskable',
+    });
+    expect(icon.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+    expect(icon.readUInt32BE(16)).toBe(1254);
+    expect(icon.readUInt32BE(20)).toBe(1254);
+    expect(serviceWorker).toContain('/icons/icon.png');
+    expect(serviceWorker).not.toContain('/icons/icon.svg');
+    expect(indexHtml).toContain('href="/icons/icon.png"');
+    expect(indexHtml).not.toContain('href="/icons/icon.svg"');
   });
 
   test('webpack output path can be redirected for desktop staging', () => {
