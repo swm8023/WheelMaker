@@ -52,6 +52,7 @@ import {createChatDurablePersistQueue} from './chat/chatDurablePersist';
 import {createChatReadRepairQueue} from './chat/chatReadRepair';
 import {buildChatDisplayIndex} from './chat/chatDisplayIndex';
 import {useChatLayoutMetrics} from './chat/chatLayoutMetrics';
+import {resolveWideProjectActionPopoverPlacement, type WideProjectActionPopoverPlacement} from './chat/wideProjectActionPopover';
 import {ChatVirtuosoTurnList, type ChatVirtuosoTurnListHandle} from './chat/ChatVirtuosoTurnList';
 import {
   CHAT_FONT_OPTIONS,
@@ -203,6 +204,7 @@ type WideProjectActionMenuState = {
   kind: 'new' | 'resume';
   phase: 'agents' | 'sessions';
   agentType: string;
+  popover?: WideProjectActionPopoverPlacement | null;
 };
 type MobileProjectActionMenuState = WideProjectActionMenuState;
 type ProjectSessionActionMenuState = {
@@ -6327,6 +6329,7 @@ function App() {
   const openWideProjectActionMenu = (
     targetProjectId: string,
     kind: 'new' | 'resume',
+    anchor: HTMLElement | null,
   ) => {
     resetProjectResumeState();
     setMobileProjectActionMenu(null);
@@ -6335,6 +6338,11 @@ function App() {
       kind,
       phase: 'agents',
       agentType: '',
+      popover: resolveWideProjectActionPopoverPlacement({
+        anchorRect: anchor?.getBoundingClientRect() ?? null,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      }),
     });
   };
 
@@ -6352,6 +6360,7 @@ function App() {
             kind,
             phase: 'agents',
             agentType: '',
+            popover: null,
           },
     );
   };
@@ -10346,7 +10355,7 @@ function App() {
                     onPointerDown={event => event.stopPropagation()}
                     onClick={event => {
                       event.stopPropagation();
-                      openWideProjectActionMenu(targetProjectId, 'new');
+                      openWideProjectActionMenu(targetProjectId, 'new', event.currentTarget);
                     }}
                   >
                     <span className="codicon codicon-add" />
@@ -10359,7 +10368,7 @@ function App() {
                     onPointerDown={event => event.stopPropagation()}
                     onClick={event => {
                       event.stopPropagation();
-                      openWideProjectActionMenu(targetProjectId, 'resume');
+                      openWideProjectActionMenu(targetProjectId, 'resume', event.currentTarget);
                     }}
                   >
                     <span className="codicon codicon-history" />
@@ -10369,6 +10378,17 @@ function App() {
                   <div
                     ref={wideProjectActionMenuRef}
                     className="wide-project-action-popover"
+                    style={wideProjectActionMenu.popover
+                      ? {
+                          top: `${wideProjectActionMenu.popover.top}px`,
+                          left: `${wideProjectActionMenu.popover.left}px`,
+                          width: `${wideProjectActionMenu.popover.width}px`,
+                          maxHeight: `${wideProjectActionMenu.popover.maxHeight}px`,
+                          transform: wideProjectActionMenu.popover.placement === 'above'
+                            ? 'translateY(-100%)'
+                            : undefined,
+                        }
+                      : undefined}
                   >
                     <div className="wide-project-action-title">
                       <span

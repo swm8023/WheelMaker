@@ -932,6 +932,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="wide-project-session-list"');
     expect(mainTsx).toContain('className="wide-project-action-btn"');
     expect(mainTsx).toContain('className="wide-project-action-popover"');
+    expect(mainTsx).toContain("import {resolveWideProjectActionPopoverPlacement");
+    expect(mainTsx).toContain('style={wideProjectActionMenu.popover');
     expect(mainTsx).toContain('className="wide-project-action-title"');
     expect(mainTsx).toContain("wideProjectActionMenu.kind === 'new' ? 'New Session' : 'Resume Session'");
     expect(mainTsx).toContain("const sessionAgent = (session.agentType || '').trim();");
@@ -1063,6 +1065,9 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.wide-session-agent-0 {');
     expect(stylesCss).toContain('.wide-session-time {');
     expect(stylesCss).toContain('.wide-project-action-popover {');
+    expect(stylesCss).toMatch(
+      /\.wide-project-action-popover \{[\s\S]*position: fixed;[\s\S]*overflow-y: auto;[\s\S]*overscroll-behavior: contain;[\s\S]*\}/,
+    );
     expect(stylesCss).toMatch(/\.wide-project-row \{[^}]*min-height: 32px;[^}]*\}/);
     expect(stylesCss).toMatch(/\.wide-project-toggle \{[^}]*height: 30px;[^}]*\}/);
     expect(stylesCss).toMatch(/\.wide-session-row \{[^}]*min-height: 26px;[^}]*\}/);

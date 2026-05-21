@@ -3460,11 +3460,14 @@ body,
 }
 
 .wide-project-action-popover {
-  position: absolute;
-  top: 32px;
-  right: 4px;
-  width: min(260px, 78vw);
-  z-index: 35;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: min(260px, calc(100vw - 16px));
+  max-height: min(280px, calc(100vh - 16px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: 80;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel);
