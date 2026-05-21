@@ -34,9 +34,9 @@ describe('web resume session ui', () => {
     expect(mainTsx).not.toContain('className="chat-agent-picker-card chat-agent-picker-overlay"');
     expect(mainTsx).not.toContain('className="chat-resume-list"');
     expect(mainTsx).toContain('className="wide-project-action-popover"');
-    expect(mainTsx).toContain('className="mobile-project-action-panel"');
+    expect(mainTsx).toContain('className="mobile-project-sheet"');
     expect(mainTsx).toContain("wideProjectActionMenu.kind === 'new' ? 'New Session' : 'Resume Session'");
-    expect(mainTsx).toContain("activeMobileProjectActionMenu.kind === 'new' ? 'New Session' : 'Resume Session'");
+    expect(mainTsx).toContain("sheetMenu.kind === 'new' ? 'New Session' : 'Resume Session'");
 
     // Ensure no conflicting cancel class.
     expect(mainTsx).not.toContain('className="chat-agent-picker-cancel"');
@@ -47,6 +47,6 @@ describe('web resume session ui', () => {
     expect(styles).not.toContain('.chat-resume-list {');
     expect(styles).not.toContain('.chat-resume-item {');
     expect(styles).toContain('.wide-project-action-popover {');
-    expect(styles).toContain('.mobile-project-action-panel {');
+    expect(styles).toContain('.mobile-project-sheet {');
   });
 });

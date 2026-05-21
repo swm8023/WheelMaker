@@ -854,7 +854,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="mobile-chat-drawer-header"');
     expect(mainTsx).toContain('<span className="mobile-chat-drawer-title">Chats</span>');
     expect(mainTsx).toContain('className="mobile-project-session-nav"');
-    expect(mainTsx).toContain('className="mobile-project-action-panel"');
+    expect(mainTsx).toContain('className="mobile-project-sheet"');
     expect(mainTsx).toContain('className="mobile-project-session-error"');
     expect(mainTsx).toContain('if (!isWide) setDrawerOpen(false);');
     expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
@@ -895,7 +895,7 @@ describe('web chat integration', () => {
 
     expect(stylesCss).toContain('.mobile-chat-drawer-header {');
     expect(stylesCss).toContain('.mobile-project-session-nav {');
-    expect(stylesCss).toContain('.mobile-project-action-panel {');
+    expect(stylesCss).toContain('.mobile-project-sheet {');
     expect(stylesCss).toContain('.mobile-project-session-error {');
     expect(stylesCss).toContain('.settings-detail-header {');
     expect(stylesCss).toContain('.settings-detail-row {');
