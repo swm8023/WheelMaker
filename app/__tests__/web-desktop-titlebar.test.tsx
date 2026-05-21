@@ -65,7 +65,9 @@ describe('desktop title bar', () => {
     });
     expect(doubleClickPreventDefault).toHaveBeenCalled();
     expect(startDrag).toHaveBeenCalledTimes(1);
-    expect(toggleMaximize).toHaveBeenCalledTimes(1);
+    expect(toggleMaximize).toHaveBeenCalledTimes(2);
+    dragRegion.props.onDoubleClick();
+    expect(toggleMaximize).toHaveBeenCalledTimes(2);
 
     const buttons = root.findAllByType('button');
     expect(buttons.map(button => button.props['aria-label'])).toEqual([
@@ -79,7 +81,7 @@ describe('desktop title bar', () => {
     buttons[2].props.onClick();
 
     expect(minimize).toHaveBeenCalled();
-    expect(toggleMaximize).toHaveBeenCalledTimes(2);
+    expect(toggleMaximize).toHaveBeenCalledTimes(3);
     expect(close).toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { getDesktopWindowBridge } from './desktopRuntime';
 
 type DesktopTitleBarProps = {
@@ -11,6 +11,7 @@ function invokeDesktopAction(action: (() => Promise<void> | void) | undefined) {
 
 export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
   const bridge = getDesktopWindowBridge();
+  const suppressNextDoubleClickRef = useRef(false);
   if (!bridge) {
     return null;
   }
@@ -25,9 +26,19 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
     }
     event.preventDefault();
     if (event.detail >= 2) {
+      suppressNextDoubleClickRef.current = true;
+      invokeDesktopAction(bridge.toggleMaximize);
       return;
     }
     invokeDesktopAction(bridge.startDrag);
+  };
+
+  const handleDragDoubleClick = () => {
+    if (suppressNextDoubleClickRef.current) {
+      suppressNextDoubleClickRef.current = false;
+      return;
+    }
+    invokeDesktopAction(bridge.toggleMaximize);
   };
 
   return (
@@ -35,7 +46,7 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
       <div
         className="desktop-titlebar-drag-region"
         data-desktop-titlebar-drag-region={true}
-        onDoubleClick={() => invokeDesktopAction(bridge.toggleMaximize)}
+        onDoubleClick={handleDragDoubleClick}
         onPointerDown={handleDragPointerDown}
       >
         <img className="desktop-titlebar-icon" src="/icons/icon.svg" alt="" draggable={false} />
