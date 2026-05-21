@@ -48,8 +48,12 @@ Assert-Contains "npm install -g"
 Assert-Contains "~/Library/LaunchAgents"
 Assert-Contains "~/.config/systemd/user"
 Assert-Contains 'WorkingDirectory=$REPO_ROOT'
+Assert-Contains 'tmp="$(mktemp "${dest_dir}/.${dest_name}.tmp.XXXXXX")"'
+Assert-Contains 'cp "$source" "$tmp"'
+Assert-Contains 'mv -f "$tmp" "$dest"'
 Assert-Contains "git stash push -u -m"
 Assert-Contains "wheelmaker deploy auto-stash before pull"
+Assert-NotContains 'cp "$source" "$dest"'
 Assert-NotContains "skip git pull and continue"
 Assert-NotContains "require_command npx"
 Assert-NotContains 'WorkingDirectory=$(systemd_quote "$REPO_ROOT")'

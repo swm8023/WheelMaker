@@ -16,6 +16,13 @@ function Assert-Contains {
   }
 }
 
+function Assert-NotContains {
+  param([string]$Needle)
+  if ($text.Contains($Needle)) {
+    throw "refresh_server_linux.sh should not contain text: $Needle"
+  }
+}
+
 Assert-Contains "refresh_server_linux.sh is Linux-only"
 Assert-Contains "systemctl --user"
 Assert-Contains "wheelmaker-hub.service"
@@ -28,5 +35,9 @@ Assert-Contains "npm run build:web:release"
 Assert-Contains "--skip-web-publish"
 Assert-Contains "daemon-reload"
 Assert-Contains "EnvironmentFile="
+Assert-Contains 'tmp="$(mktemp "${dest_dir}/.${dest_name}.tmp.XXXXXX")"'
+Assert-Contains 'cp "$source" "$tmp"'
+Assert-Contains 'mv -f "$tmp" "$dest"'
+Assert-NotContains 'cp "$source" "$dest"'
 
 Write-Host "refresh_server_linux.sh source checks passed"

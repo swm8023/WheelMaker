@@ -355,9 +355,25 @@ install_binary() {
   fi
   [[ -f "$source" ]] || die "source binary not found: ${source}"
   step "install binary: ${source} -> ${dest}"
-  mkdir -p "$(dirname "$dest")"
-  cp "$source" "$dest"
-  chmod 0755 "$dest"
+  local dest_dir
+  local dest_name
+  local tmp
+  dest_dir="$(dirname "$dest")"
+  dest_name="$(basename "$dest")"
+  mkdir -p "$dest_dir"
+  tmp="$(mktemp "${dest_dir}/.${dest_name}.tmp.XXXXXX")"
+  if ! cp "$source" "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! chmod 0755 "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! mv -f "$tmp" "$dest"; then
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 publish_web() {
