@@ -23,7 +23,7 @@ describe('skill management settings UI source structure', () => {
     const activityBarEnd = mainTsx.indexOf('const floatingControlStack = !isWide ? (', activityBarStart);
     const activityBar = mainTsx.slice(activityBarStart, activityBarEnd);
 
-    expect(activityBar).toContain('codicon-symbol-method');
+    expect(activityBar).toContain('codicon-extensions');
     expect(activityBar).toContain("openSettingsDetail('skills')");
     expect(activityBar.indexOf('title="Update"')).toBeLessThan(activityBar.indexOf('title="Skills"'));
     expect(activityBar.indexOf('title="Skills"')).toBeLessThan(activityBar.indexOf('title="Token Stats"'));

@@ -205,7 +205,7 @@ describe('agent package update settings UI source structure', () => {
     const activityBar = mainTsx.slice(activityBarStart, activityBarEnd);
 
     expect(activityBar).toContain('codicon-cloud-download');
-    expect(activityBar).toContain('codicon-pulse');
+    expect(activityBar).toContain('codicon-graph-line');
     expect(activityBar).toContain("openSettingsDetail('update')");
     expect(activityBar).toContain("openSettingsDetail('tokenStats')");
     expect(activityBar.indexOf("title={reconnecting ? 'Reconnecting...' : 'Refresh project'}")).toBeLessThan(
