@@ -3108,22 +3108,6 @@ body,
   margin-bottom: 4px;
 }
 
-.wide-project-section.active > .wide-project-row::before {
-  content: '';
-  position: absolute;
-  left: -2px;
-  top: 4px;
-  bottom: 4px;
-  width: 2px;
-  border-radius: 2px;
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--accent) 70%, transparent),
-    color-mix(in srgb, var(--accent) 30%, transparent)
-  );
-  pointer-events: none;
-}
-
 .wide-project-section.active .wide-project-row {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
@@ -3381,6 +3365,9 @@ body,
 }
 
 .wide-session-row.selected {
+  margin-left: -21px;
+  width: calc(100% + 21px);
+  padding-left: 24px;
   background: linear-gradient(
     to right,
     color-mix(in srgb, var(--accent) 5%, transparent) 0,
