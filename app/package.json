@@ -12,7 +12,7 @@
     "web:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restart_web.ps1 -Port 8080"
   },
   "dependencies": {
-    "@codingame/monaco-vscode-theme-seti-default-extension": "^28.4.1",
+    "@codingame/monaco-vscode-theme-seti-default-extension": "^32.0.2",
     "@fontsource/ibm-plex-sans": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@shikijs/core": "^4.0.2",
