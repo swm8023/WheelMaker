@@ -12065,7 +12065,7 @@ function App() {
           title="Skills"
           aria-label="Skills"
         >
-          <span className="codicon codicon-symbol-method" />
+          <span className="codicon codicon-extensions" />
         </button>
         <button
           type="button"
@@ -12074,7 +12074,7 @@ function App() {
           title="Token Stats"
           aria-label="Token Stats"
         >
-          <span className="codicon codicon-pulse" />
+          <span className="codicon codicon-graph-line" />
         </button>
         <button
           type="button"
