@@ -220,7 +220,7 @@ Run: `cd server && go test ./...`
 
 Expected: PASS.
 
-- [ ] **Step 4: Run required repo completion sequence**
+- [x] **Step 4: Run required repo completion sequence**
 
 Run:
 
