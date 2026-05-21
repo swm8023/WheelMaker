@@ -48,6 +48,7 @@ func (webView2Launcher) Launch(url string, opts desktopWindowOptions) error {
 }
 
 func bindDesktopWindowBridge(w webview2.WebView, hwnd uintptr) error {
+	maximizeController := newDesktopMaximizeController(hwnd, win32DesktopWindowOps{})
 	bindings := []struct {
 		name string
 		fn   func() error
@@ -61,11 +62,7 @@ func bindDesktopWindowBridge(w webview2.WebView, hwnd uintptr) error {
 			return nil
 		}},
 		{desktopToggleMaximizeBinding, func() error {
-			if isWindowMaximized(hwnd) {
-				showWindow(hwnd, swRestore)
-			} else {
-				showWindow(hwnd, swMaximize)
-			}
+			maximizeController.toggle()
 			return nil
 		}},
 		{desktopCloseBinding, func() error {

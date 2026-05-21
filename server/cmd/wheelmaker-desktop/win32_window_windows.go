@@ -42,6 +42,9 @@ var (
 	procGetWindowLongPtrW     = user32.NewProc("GetWindowLongPtrW")
 	procSetWindowLongPtrW     = user32.NewProc("SetWindowLongPtrW")
 	procSetWindowPos          = user32.NewProc("SetWindowPos")
+	procGetWindowRect         = user32.NewProc("GetWindowRect")
+	procMonitorFromWindow     = user32.NewProc("MonitorFromWindow")
+	procGetMonitorInfoW       = user32.NewProc("GetMonitorInfoW")
 	procReleaseCapture        = user32.NewProc("ReleaseCapture")
 	procSendMessageW          = user32.NewProc("SendMessageW")
 	procPostMessageW          = user32.NewProc("PostMessageW")
@@ -49,6 +52,30 @@ var (
 	procIsZoomed              = user32.NewProc("IsZoomed")
 	procDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 )
+
+const monitorDefaultToNearest = 2
+
+type desktopWindowRect struct {
+	left   int32
+	top    int32
+	right  int32
+	bottom int32
+}
+
+func (r desktopWindowRect) width() int32 {
+	return r.right - r.left
+}
+
+func (r desktopWindowRect) height() int32 {
+	return r.bottom - r.top
+}
+
+type monitorInfo struct {
+	cbSize    uint32
+	rcMonitor desktopWindowRect
+	rcWork    desktopWindowRect
+	dwFlags   uint32
+}
 
 func getWindowLongPtr(hwnd uintptr, index int32) uintptr {
 	value, _, _ := procGetWindowLongPtrW.Call(hwnd, uintptr(index))
@@ -61,6 +88,37 @@ func setWindowLongPtr(hwnd uintptr, index int32, value uintptr) {
 
 func setWindowPos(hwnd uintptr, flags uintptr) {
 	procSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0, flags)
+}
+
+func getWindowRect(hwnd uintptr) (desktopWindowRect, bool) {
+	var rect desktopWindowRect
+	result, _, _ := procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rect)))
+	return rect, result != 0
+}
+
+func getMonitorWorkArea(hwnd uintptr) (desktopWindowRect, bool) {
+	monitor, _, _ := procMonitorFromWindow.Call(hwnd, monitorDefaultToNearest)
+	if monitor == 0 {
+		return desktopWindowRect{}, false
+	}
+	info := monitorInfo{cbSize: uint32(unsafe.Sizeof(monitorInfo{}))}
+	result, _, _ := procGetMonitorInfoW.Call(monitor, uintptr(unsafe.Pointer(&info)))
+	if result == 0 {
+		return desktopWindowRect{}, false
+	}
+	return info.rcWork, true
+}
+
+func moveWindowToRect(hwnd uintptr, rect desktopWindowRect) {
+	procSetWindowPos.Call(
+		hwnd,
+		0,
+		uintptr(uint32(rect.left)),
+		uintptr(uint32(rect.top)),
+		uintptr(uint32(rect.width())),
+		uintptr(uint32(rect.height())),
+		swpNoZOrder|swpNoOwnerZOrder,
+	)
 }
 
 func releaseCapture() {
