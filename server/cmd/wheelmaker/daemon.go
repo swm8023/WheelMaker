@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
-	"strings"
 	"syscall"
 	"time"
 
@@ -16,14 +15,6 @@ import (
 )
 
 const guardianInterval = 30 * time.Second
-const workerStopFileEnv = "WHEELMAKER_WORKER_STOP_FILE"
-
-var (
-	listWorkerProcessesForDaemon = listWorkerProcesses
-	killProcessForDaemon         = killProcess
-	workerStopPollInterval       = 200 * time.Millisecond
-	workerGracefulStopTimeout    = 10 * time.Second
-)
 
 type daemonProcess struct {
 	PID int
@@ -34,7 +25,6 @@ type workerSpec struct {
 	markerFlag string
 	args       []string
 	keepPID    int
-	stopFile   string
 }
 
 func runGuardian(workerArgs []string) error {
@@ -65,10 +55,7 @@ func runGuardianWithContext(ctx context.Context, workerArgs []string) error {
 
 	reconcile := func() {
 		for _, spec := range specs {
-			if strings.TrimSpace(spec.stopFile) == "" {
-				spec.stopFile = newWorkerStopFile(spec.markerFlag)
-			}
-			pid, recErr := reconcileWorkers(exePath, exeName, spec.markerFlag, spec.args, spec.keepPID, spec.stopFile)
+			pid, recErr := reconcileWorkers(exePath, exeName, spec.markerFlag, spec.args, spec.keepPID)
 			if recErr != nil {
 				fmt.Fprintf(os.Stderr, "wheelmaker guardian[%s]: %v\n", spec.name, recErr)
 				continue
@@ -128,14 +115,14 @@ func sanitizeWorkerArgs(args []string) []string {
 	return out
 }
 
-func reconcileWorkers(exePath, exeName, markerFlag string, workerArgs []string, preferredPID int, stopFile string) (int, error) {
-	workers, err := listWorkerProcessesForDaemon(exeName, markerFlag)
+func reconcileWorkers(exePath, exeName, markerFlag string, workerArgs []string, preferredPID int) (int, error) {
+	workers, err := listWorkerProcesses(exeName, markerFlag)
 	if err != nil {
 		if preferredPID > 0 {
 			hubScopedLogger.Warn("daemon list %s workers failed keep_previous_pid=%d err=%v", markerFlag, preferredPID, err)
 			return preferredPID, nil
 		}
-		pid, startErr := startWorker(exePath, workerArgs, stopFile)
+		pid, startErr := startWorker(exePath, workerArgs)
 		if startErr != nil {
 			return 0, fmt.Errorf("list workers failed: %w; start fallback failed: %v", err, startErr)
 		}
@@ -143,7 +130,7 @@ func reconcileWorkers(exePath, exeName, markerFlag string, workerArgs []string, 
 		return pid, nil
 	}
 	if len(workers) == 0 {
-		pid, startErr := startWorker(exePath, workerArgs, stopFile)
+		pid, startErr := startWorker(exePath, workerArgs)
 		if startErr != nil {
 			return 0, startErr
 		}
@@ -156,7 +143,7 @@ func reconcileWorkers(exePath, exeName, markerFlag string, workerArgs []string, 
 		if proc.PID == keepPID {
 			continue
 		}
-		if killErr := killProcessForDaemon(proc.PID); killErr != nil {
+		if killErr := killProcess(proc.PID); killErr != nil {
 			hubScopedLogger.Warn("daemon failed to stop extra %s worker pid=%d err=%v", markerFlag, proc.PID, killErr)
 			continue
 		}
@@ -167,23 +154,13 @@ func reconcileWorkers(exePath, exeName, markerFlag string, workerArgs []string, 
 
 func shutdownWorkers(exeName string, specs []*workerSpec) {
 	for _, spec := range specs {
-		workers, err := listWorkerProcessesForDaemon(exeName, spec.markerFlag)
+		workers, err := listWorkerProcesses(exeName, spec.markerFlag)
 		if err != nil {
 			hubScopedLogger.Warn("daemon shutdown list %s workers failed err=%v", spec.markerFlag, err)
 			continue
 		}
 		for _, proc := range workers {
-			if strings.TrimSpace(spec.stopFile) != "" {
-				if err := requestWorkerStop(spec.stopFile); err != nil {
-					hubScopedLogger.Warn("daemon shutdown request %s worker pid=%d graceful stop failed err=%v", spec.markerFlag, proc.PID, err)
-				} else if waitForWorkerExit(exeName, spec.markerFlag, proc.PID, workerGracefulStopTimeout) {
-					hubScopedLogger.Info("daemon shutdown gracefully stopped %s worker pid=%d", spec.markerFlag, proc.PID)
-					continue
-				} else {
-					hubScopedLogger.Warn("daemon shutdown %s worker pid=%d graceful stop timed out", spec.markerFlag, proc.PID)
-				}
-			}
-			if killErr := killProcessForDaemon(proc.PID); killErr != nil {
+			if killErr := killProcess(proc.PID); killErr != nil {
 				hubScopedLogger.Warn("daemon shutdown stop %s worker pid=%d failed err=%v", spec.markerFlag, proc.PID, killErr)
 				continue
 			}
@@ -212,16 +189,8 @@ func chooseKeepPID(workers []daemonProcess, preferredPID int) int {
 	return workers[0].PID
 }
 
-func startWorker(exePath string, workerArgs []string, stopFile string) (int, error) {
+func startWorker(exePath string, workerArgs []string) (int, error) {
 	cmd := exec.Command(exePath, workerArgs...)
-	stopFile = strings.TrimSpace(stopFile)
-	if stopFile != "" {
-		_ = os.Remove(stopFile)
-		if err := os.MkdirAll(filepath.Dir(stopFile), 0o755); err != nil {
-			return 0, fmt.Errorf("create worker stop dir: %w", err)
-		}
-		cmd.Env = append(os.Environ(), workerStopFileEnv+"="+stopFile)
-	}
 	restoreIO, err := configureWorkerCommandIO(cmd)
 	if err != nil {
 		return 0, err
@@ -232,96 +201,6 @@ func startWorker(exePath string, workerArgs []string, stopFile string) (int, err
 	}
 	restoreIO()
 	return cmd.Process.Pid, nil
-}
-
-func newWorkerStopFile(markerFlag string) string {
-	name := strings.Trim(strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z':
-			return r
-		case r >= 'A' && r <= 'Z':
-			return r
-		case r >= '0' && r <= '9':
-			return r
-		default:
-			return '-'
-		}
-	}, markerFlag), "-")
-	if name == "" {
-		name = "worker"
-	}
-	return filepath.Join(os.TempDir(), "wheelmaker", fmt.Sprintf("%s-%d-%d.stop", name, os.Getpid(), time.Now().UnixNano()))
-}
-
-func requestWorkerStop(stopFile string) error {
-	stopFile = strings.TrimSpace(stopFile)
-	if stopFile == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(stopFile), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(stopFile, []byte("stop\n"), 0o644)
-}
-
-func waitForWorkerExit(exeName, markerFlag string, pid int, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for {
-		workers, err := listWorkerProcessesForDaemon(exeName, markerFlag)
-		if err != nil {
-			return false
-		}
-		if !hasDaemonProcess(workers, pid) {
-			return true
-		}
-		if !time.Now().Before(deadline) {
-			return false
-		}
-		time.Sleep(workerStopPollInterval)
-	}
-}
-
-func hasDaemonProcess(workers []daemonProcess, pid int) bool {
-	for _, worker := range workers {
-		if worker.PID == pid {
-			return true
-		}
-	}
-	return false
-}
-
-func workerContextWithStopFile(parent context.Context, stopFile string, pollInterval time.Duration) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(parent)
-	stopFile = strings.TrimSpace(stopFile)
-	if stopFile == "" {
-		return ctx, cancel
-	}
-	if pollInterval <= 0 {
-		pollInterval = workerStopPollInterval
-	}
-	go func() {
-		ticker := time.NewTicker(pollInterval)
-		defer ticker.Stop()
-		for {
-			if workerStopFileExists(stopFile) {
-				cancel()
-				return
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
-	return ctx, cancel
-}
-
-func workerStopFileExists(stopFile string) bool {
-	if _, err := os.Stat(stopFile); err == nil {
-		return true
-	}
-	return false
 }
 
 func configureWorkerCommandIO(cmd *exec.Cmd) (func(), error) {

@@ -2310,165 +2310,6 @@ func TestStartingNextPromptSynthesizesInterruptedPromptDone(t *testing.T) {
 	}
 }
 
-func TestClientClosePersistsUnfinishedSessionViewPrompt(t *testing.T) {
-	ctx := context.Background()
-	tmp := t.TempDir()
-	dbPath := filepath.Join(tmp, "client.sqlite3")
-	historyRoot := filepath.Join(tmp, "session")
-
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	c := New(store, "proj1", t.TempDir())
-	c.SetSessionHistoryRoot(historyRoot)
-	c.SetSessionViewSink(c)
-
-	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-close", "Shutdown Persist")); err != nil {
-		t.Fatalf("RecordEvent created: %v", err)
-	}
-	started := sessionViewPromptEvent("sess-close", "still running", nil)
-	started.UpdatedAt = time.Date(2026, 5, 20, 6, 45, 0, 0, time.UTC)
-	if err := c.RecordEvent(ctx, started); err != nil {
-		t.Fatalf("RecordEvent prompt: %v", err)
-	}
-
-	if err := c.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	reopened, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore reopen: %v", err)
-	}
-	defer reopened.Close()
-	rec, err := reopened.LoadSession(ctx, "proj1", "sess-close")
-	if err != nil {
-		t.Fatalf("LoadSession: %v", err)
-	}
-	if rec == nil {
-		t.Fatal("session record missing after close")
-	}
-	latest := sessionSyncLatestPersistedTurnIndex(rec.SessionSyncJSON)
-	if latest != 2 {
-		t.Fatalf("latest persisted turn index = %d, want 2", latest)
-	}
-
-	turns, err := newFileSessionTurnStore(historyRoot).ReadTurns(ctx, "proj1", "sess-close", 0, latest)
-	if err != nil {
-		t.Fatalf("ReadTurns: %v", err)
-	}
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2", len(turns))
-	}
-	var firstTurn acp.IMTurnMessage
-	if err := json.Unmarshal([]byte(turns[0].Content), &firstTurn); err != nil {
-		t.Fatalf("unmarshal first turn: %v", err)
-	}
-	if got := strings.TrimSpace(firstTurn.Method); got != acp.IMMethodPromptRequest {
-		t.Fatalf("turns[0] method = %q, want %q", got, acp.IMMethodPromptRequest)
-	}
-	if got := decodePromptDoneStopReason(t, turns[1].Content); got != "interrupted" {
-		t.Fatalf("turns[1] stopReason = %q, want interrupted", got)
-	}
-}
-
-func TestSessionRecorderPersistsFinishedLiveTurnPrefixBeforePromptDone(t *testing.T) {
-	ctx := context.Background()
-	tmp := t.TempDir()
-	dbPath := filepath.Join(tmp, "client.sqlite3")
-	historyRoot := filepath.Join(tmp, "session")
-
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	c := New(store, "proj1", t.TempDir())
-	c.SetSessionHistoryRoot(historyRoot)
-	c.SetSessionViewSink(c)
-	defer c.Close()
-
-	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-live-prefix", "Live Prefix")); err != nil {
-		t.Fatalf("RecordEvent created: %v", err)
-	}
-	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-live-prefix", "run", nil)); err != nil {
-		t.Fatalf("RecordEvent prompt: %v", err)
-	}
-	if err := c.RecordEvent(ctx, sessionViewAssistantChunkTextEvent("sess-live-prefix", "middle answer", "streaming")); err != nil {
-		t.Fatalf("RecordEvent assistant chunk: %v", err)
-	}
-	if err := c.RecordEvent(ctx, sessionViewToolUpdatedTextEvent("sess-live-prefix", "Run build")); err != nil {
-		t.Fatalf("RecordEvent tool update: %v", err)
-	}
-
-	rec, err := c.store.LoadSession(ctx, "proj1", "sess-live-prefix")
-	if err != nil {
-		t.Fatalf("LoadSession: %v", err)
-	}
-	if rec == nil {
-		t.Fatal("session record missing")
-	}
-	latest := sessionSyncLatestPersistedTurnIndex(rec.SessionSyncJSON)
-	if latest != 2 {
-		t.Fatalf("latest persisted turn index = %d, want 2 before prompt_done", latest)
-	}
-	turns, err := newFileSessionTurnStore(historyRoot).ReadTurns(ctx, "proj1", "sess-live-prefix", 0, latest)
-	if err != nil {
-		t.Fatalf("ReadTurns: %v", err)
-	}
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2", len(turns))
-	}
-	if text := strings.TrimSpace(extractTextChunk(decodeTurnSessionUpdate(t, turns[1].Content).Content)); text != "middle answer" {
-		t.Fatalf("persisted assistant text = %q, want middle answer", text)
-	}
-}
-
-func TestSessionRecorderReadsActivePromptSnapshotAfterRestartBeforePromptDone(t *testing.T) {
-	ctx := context.Background()
-	tmp := t.TempDir()
-	dbPath := filepath.Join(tmp, "client.sqlite3")
-	historyRoot := filepath.Join(tmp, "session")
-
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	c := New(store, "proj1", t.TempDir())
-	c.SetSessionHistoryRoot(historyRoot)
-	c.SetSessionViewSink(c)
-	defer c.Close()
-
-	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-live-snapshot", "Live Snapshot")); err != nil {
-		t.Fatalf("RecordEvent created: %v", err)
-	}
-	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-live-snapshot", "run", nil)); err != nil {
-		t.Fatalf("RecordEvent prompt: %v", err)
-	}
-	if err := c.RecordEvent(ctx, sessionViewAssistantChunkTextEvent("sess-live-snapshot", "middle answer", "streaming")); err != nil {
-		t.Fatalf("RecordEvent assistant chunk: %v", err)
-	}
-
-	c.sessionRecorder.ResetPromptState()
-
-	latest, turns, err := c.sessionRecorder.ReadSessionTurns(ctx, "sess-live-snapshot", 0)
-	if err != nil {
-		t.Fatalf("ReadSessionTurns: %v", err)
-	}
-	if latest != 2 {
-		t.Fatalf("latest turn index = %d, want 2", latest)
-	}
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2", len(turns))
-	}
-	if text := strings.TrimSpace(extractTextChunk(decodeTurnSessionUpdate(t, turns[1].Content).Content)); text != "middle answer" {
-		t.Fatalf("snapshot assistant text = %q, want middle answer", text)
-	}
-	if turns[1].Finished {
-		t.Fatal("snapshot assistant turn finished = true, want false before prompt_done")
-	}
-}
-
 func newSessionViewTestClient(t *testing.T) *Client {
 	t.Helper()
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
@@ -2975,7 +2816,7 @@ func TestAddMessageTurnMutatesStateInPlace(t *testing.T) {
 	}
 
 	state := newSessionPromptState(1)
-	if err := c.sessionRecorder.addMessageTurn(ctx, &state, parsed); err != nil {
+	if err := c.sessionRecorder.addMessageTurn(&state, parsed); err != nil {
 		t.Fatalf("addMessageTurn: %v", err)
 	}
 
@@ -4302,9 +4143,8 @@ func TestSessionReadAfterTurnIndexReturnsLaterTurns(t *testing.T) {
 	}
 }
 
-func TestSessionRecorderResetPromptStateContinuesAfterPersistedRestartSnapshot(t *testing.T) {
+func TestSessionRecorderResetPromptStateRestartsTurnIndexWhenNothingPersisted(t *testing.T) {
 	c := newSessionViewTestClient(t)
-	c.SetSessionHistoryRoot(t.TempDir())
 	ctx := context.Background()
 
 	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Task")); err != nil {
@@ -4324,17 +4164,11 @@ func TestSessionRecorderResetPromptStateContinuesAfterPersistedRestartSnapshot(t
 	if err != nil {
 		t.Fatalf("ReadSessionTurns: %v", err)
 	}
-	if len(turns) != 3 {
-		t.Fatalf("turns len = %d, want 3", len(turns))
+	if len(turns) != 1 {
+		t.Fatalf("turns len = %d, want 1", len(turns))
 	}
-	for i, turn := range turns {
-		want := int64(i + 1)
-		if turn.TurnIndex != want {
-			t.Fatalf("turns[%d].TurnIndex = %d, want %d", i, turn.TurnIndex, want)
-		}
-	}
-	if got := decodePromptDoneStopReason(t, turns[1].Content); got != "interrupted" {
-		t.Fatalf("turns[1] stopReason = %q, want interrupted", got)
+	if turns[0].TurnIndex != 1 {
+		t.Fatalf("turns[0].TurnIndex = %d, want 1", turns[0].TurnIndex)
 	}
 }
 

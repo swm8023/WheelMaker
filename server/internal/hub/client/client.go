@@ -191,9 +191,6 @@ func (c *Client) Close() error {
 		}
 	}
 	if c.sessionRecorder != nil {
-		if err := c.sessionRecorder.FlushActivePromptStates(ctx, "interrupted"); err != nil {
-			hubLogger(c.projectName).Warn("flush active session turns during close err=%v", err)
-		}
 		c.sessionRecorder.Close()
 	}
 	if store != nil {
