@@ -9019,9 +9019,12 @@ function App() {
     );
   };
 
-  const renderSettingsSection = (title: string, rows: React.ReactNode) => (
+  const renderSettingsSection = (title: string, rows: React.ReactNode, icon?: string) => (
     <section className="settings-section" aria-label={title}>
-      <div className="settings-section-title">{title}</div>
+      <div className="settings-section-title">
+        {icon ? <span className={`codicon codicon-${icon}`} aria-hidden="true" /> : null}
+        <span>{title}</span>
+      </div>
       <div className="settings-section-rows">{rows}</div>
     </section>
   );
@@ -9734,7 +9737,10 @@ function App() {
         {renderSettingsSection('Appearance', (
         <>
           <label className="settings-row sidebar-setting-row">
-            <span>Dark Mode</span>
+            <span>
+              <span className="codicon codicon-color-mode settings-row-icon" aria-hidden="true" />
+              Dark Mode
+            </span>
             <input
               type="checkbox"
               checked={themeMode === 'dark'}
@@ -9744,7 +9750,10 @@ function App() {
             />
           </label>
           <label className="settings-row sidebar-setting-row">
-            <span>Gesture Navigation</span>
+            <span>
+              <span className="codicon codicon-move settings-row-icon" aria-hidden="true" />
+              Gesture Navigation
+            </span>
             <input
               type="checkbox"
               checked={gestureNavigation}
@@ -9752,11 +9761,14 @@ function App() {
             />
           </label>
         </>
-        ))}
+        ), 'paintcan')}
         {renderSettingsSection('Chat', (
         <>
         <label className="settings-row sidebar-setting-row">
-          <span>Use Latest Prompt Title</span>
+          <span>
+            <span className="codicon codicon-lightbulb settings-row-icon" aria-hidden="true" />
+            Use Latest Prompt Title
+          </span>
           <input
             type="checkbox"
             checked={useLatestPromptTitle}
@@ -9764,7 +9776,10 @@ function App() {
           />
         </label>
         <label className="settings-row sidebar-setting-row">
-          <span>Hide Tool Calls</span>
+          <span>
+            <span className="codicon codicon-tools settings-row-icon" aria-hidden="true" />
+            Hide Tool Calls
+          </span>
           <input
             type="checkbox"
             checked={hideToolCalls}
@@ -9772,7 +9787,10 @@ function App() {
           />
         </label>
         <label className="settings-row sidebar-setting-row">
-          <span>Local Hub Read</span>
+          <span>
+            <span className="codicon codicon-cloud-download settings-row-icon" aria-hidden="true" />
+            Local Hub Read
+          </span>
           <input
             type="checkbox"
             checked={localHubReadEnabled}
@@ -9780,7 +9798,10 @@ function App() {
           />
         </label>
         <label className="settings-row sidebar-setting-row">
-          <span>Chat Font</span>
+          <span>
+            <span className="codicon codicon-text-size settings-row-icon" aria-hidden="true" />
+            Chat Font
+          </span>
           <select
             className="sidebar-setting-select"
             value={chatFont}
@@ -9797,11 +9818,14 @@ function App() {
           </select>
         </label>
         </>
-        ))}
+        ), 'comment-discussion')}
         {renderSettingsSection('Code Display', (
         <>
         <label className="settings-row sidebar-setting-row">
-          <span>Code Theme</span>
+          <span>
+            <span className="codicon codicon-symbol-color settings-row-icon" aria-hidden="true" />
+            Code Theme
+          </span>
           <select
             className="sidebar-setting-select"
             value={codeTheme}
@@ -9828,7 +9852,10 @@ function App() {
           </select>
         </label>
         <label className="settings-row sidebar-setting-row">
-          <span>Code Font</span>
+          <span>
+            <span className="codicon codicon-symbol-string settings-row-icon" aria-hidden="true" />
+            Code Font
+          </span>
           <select
             className="sidebar-setting-select"
             value={codeFont}
@@ -9845,7 +9872,10 @@ function App() {
           </select>
         </label>
         <label className="settings-row sidebar-setting-row">
-          <span>Font Size</span>
+          <span>
+            <span className="codicon codicon-text-size settings-row-icon" aria-hidden="true" />
+            Font Size
+          </span>
           <select
             className="sidebar-setting-select"
             value={String(codeFontSize)}
@@ -9863,7 +9893,10 @@ function App() {
           </select>
         </label>
         <label className="settings-row sidebar-setting-row">
-          <span>Line Height</span>
+          <span>
+            <span className="codicon codicon-list-flat settings-row-icon" aria-hidden="true" />
+            Line Height
+          </span>
           <select
             className="sidebar-setting-select"
             value={String(codeLineHeight)}
@@ -9881,7 +9914,10 @@ function App() {
           </select>
         </label>
         <label className="settings-row sidebar-setting-row">
-          <span>Tab Size</span>
+          <span>
+            <span className="codicon codicon-indent settings-row-icon" aria-hidden="true" />
+            Tab Size
+          </span>
           <select
             className="sidebar-setting-select"
             value={String(codeTabSize)}
@@ -9899,7 +9935,7 @@ function App() {
           </select>
         </label>
         </>
-        ))}
+        ), 'code')}
         {renderSettingsSection('More', (
         <>
         <button
@@ -9909,7 +9945,10 @@ function App() {
             setSettingsDetailView('update');
           }}
         >
-          <span>Update</span>
+          <span>
+            <span className="codicon codicon-cloud-download settings-row-icon" aria-hidden="true" />
+            Update
+          </span>
           <span className="codicon codicon-chevron-right" />
         </button>
         <button
@@ -9920,7 +9959,10 @@ function App() {
             setSettingsDetailView('skills');
           }}
         >
-          <span>Skills</span>
+          <span>
+            <span className="codicon codicon-extensions settings-row-icon" aria-hidden="true" />
+            Skills
+          </span>
           <span className="codicon codicon-chevron-right" />
         </button>
         <button
@@ -9931,7 +9973,10 @@ function App() {
             setSettingsDetailView('tokenStats');
           }}
         >
-          <span>Token Stats</span>
+          <span>
+            <span className="codicon codicon-graph-line settings-row-icon" aria-hidden="true" />
+            Token Stats
+          </span>
           <span className="codicon codicon-chevron-right" />
         </button>
         <button
@@ -9941,7 +9986,10 @@ function App() {
             setSettingsDetailView('ccSwitch');
           }}
         >
-          <span>CC Switch</span>
+          <span>
+            <span className="codicon codicon-arrow-swap settings-row-icon" aria-hidden="true" />
+            CC Switch
+          </span>
           <span className="codicon codicon-chevron-right" />
         </button>
         <button
@@ -9952,7 +10000,10 @@ function App() {
             openDatabasePanel();
           }}
         >
-          <span>Database</span>
+          <span>
+            <span className="codicon codicon-database settings-row-icon" aria-hidden="true" />
+            Database
+          </span>
           <span className="codicon codicon-chevron-right" />
         </button>
         <button
@@ -9960,15 +10011,21 @@ function App() {
           className="settings-row settings-danger-row"
           onClick={requestClearLocalCache}
         >
-          <span>Clear Local Cache</span>
-          <span className="codicon codicon-trash" />
+          <span>
+            <span className="codicon codicon-trash settings-row-icon" aria-hidden="true" />
+            Clear Local Cache
+          </span>
+          <span className="codicon codicon-chevron-right" />
         </button>
         </>
-        ))}
+        ), 'list-unordered')}
         {renderSettingsSection('Debug', (
         <>
         <label className="settings-row sidebar-setting-row">
-          <span>Debug</span>
+          <span>
+            <span className="codicon codicon-bug settings-row-icon" aria-hidden="true" />
+            Debug
+          </span>
           <input
             type="checkbox"
             checked={registryDebug}
@@ -9983,11 +10040,14 @@ function App() {
             setRegistryDebugPanelOpen(true);
           }}
         >
-          <span>Open</span>
-          <span className="codicon codicon-debug-alt" />
+          <span>
+            <span className="codicon codicon-debug-alt settings-row-icon" aria-hidden="true" />
+            Open Debug Panel
+          </span>
+          <span className="codicon codicon-chevron-right" />
         </button>
         </>
-        ))}
+        ), 'bug')}
       </div>
     </>
     );
