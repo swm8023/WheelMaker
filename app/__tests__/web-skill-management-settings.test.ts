@@ -7,7 +7,7 @@ const stylesCss = fs.readFileSync(path.join(root, 'web/src/styles.css'), 'utf8')
 
 describe('skill management settings UI source structure', () => {
   test('adds Skills as a settings detail and More row after Update', () => {
-    expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | null;");
+    expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | 'portRelay' | null;");
     expect(mainTsx).toContain("settingsDetailView === 'skills'");
     expect(mainTsx).toContain('renderSkillsSettingsDetail(options)');
 

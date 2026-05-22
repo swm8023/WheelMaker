@@ -182,6 +182,7 @@ import type {
   RegistryNpmPackage,
   RegistryHub,
   RegistryProject,
+  RegistryPortRelaySnapshot,
   RegistrySkillCommandResponse,
   RegistrySkillScope,
   RegistrySkillSnapshot,
@@ -264,7 +265,7 @@ type ConfirmTarget =
       projectName?: string;
       includeProjects?: boolean;
     };
-type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | null;
+type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | 'portRelay' | null;
 type ActiveSettingsDetailView = Exclude<SettingsDetailView, null>;
 type SettingsDetailShellOptions = {
   hideDetailHeader?: boolean;
@@ -487,6 +488,7 @@ const PROJECT_SESSION_LONG_PRESS_MS = 450;
 const DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO = 0.45;
 const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
+const DEFAULT_PORT_RELAY_SNAPSHOT: RegistryPortRelaySnapshot = {ok: true, enabled: false, status: 'Disabled'};
 let mermaidRenderSequence = 0;
 
 function nextMermaidRenderId(): string {
@@ -498,6 +500,36 @@ function buildChatDraftKey(activeProjectId: string, sessionId: string): string {
   const projectKey = activeProjectId.trim() || CHAT_DRAFT_KEY_PROJECT_FALLBACK;
   const sessionKey = sessionId.trim() || CHAT_NEW_DRAFT_SESSION_KEY;
   return `${projectKey}:${sessionKey}`;
+}
+
+function generatePortRelayAccessCode(): string {
+  const crypto = globalThis.crypto;
+  if (crypto?.getRandomValues) {
+    const bytes = new Uint8Array(4);
+    crypto.getRandomValues(bytes);
+    const value = ((bytes[0] << 24) >>> 0) + (bytes[1] << 16) + (bytes[2] << 8) + bytes[3];
+    return String(value % 1_000_000).padStart(6, '0');
+  }
+  return String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
+}
+
+function buildPortRelayOpenUrl(registryAddress: string, portRelayListenPort: string | number): string {
+  const port = String(portRelayListenPort).trim();
+  if (!port) return '';
+  const rawAddress = (registryAddress || getDefaultRegistryAddress()).trim();
+  const addressWithScheme = /^[a-z]+:\/\//i.test(rawAddress) ? rawAddress : `http://${rawAddress}`;
+  try {
+    const url = new URL(addressWithScheme);
+    if (url.protocol === 'ws:') url.protocol = 'http:';
+    if (url.protocol === 'wss:') url.protocol = 'https:';
+    url.port = port;
+    url.pathname = '/';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return `http://127.0.0.1:${port}/`;
+  }
 }
 
 function agentPackageActionForPackage(pkg: RegistryNpmPackage): 'install' | 'update' | 'uninstall' | null {
@@ -625,6 +657,8 @@ function settingsDetailTitle(detail: ActiveSettingsDetailView): string {
       return 'CC Switch';
     case 'database':
       return 'Database';
+    case 'portRelay':
+      return 'Port Relay';
   }
 }
 
@@ -2547,6 +2581,14 @@ function App() {
   const [skillSourceSelectedNames, setSkillSourceSelectedNames] = useState<string[]>([]);
   const [skillSourceLoading, setSkillSourceLoading] = useState(false);
   const [skillSourceError, setSkillSourceError] = useState('');
+  const [portRelaySnapshot, setPortRelaySnapshot] = useState<RegistryPortRelaySnapshot>(DEFAULT_PORT_RELAY_SNAPSHOT);
+  const [portRelayLoading, setPortRelayLoading] = useState(false);
+  const [portRelayError, setPortRelayError] = useState('');
+  const [portRelayListenPort, setPortRelayListenPort] = useState('28810');
+  const [portRelayHubId, setPortRelayHubId] = useState('');
+  const [portRelayTargetHost, setPortRelayTargetHost] = useState('127.0.0.1');
+  const [portRelayTargetPort, setPortRelayTargetPort] = useState('');
+  const [portRelayAccessCode, setPortRelayAccessCode] = useState('');
 
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [workspaceProjectMenuOpen, setWorkspaceProjectMenuOpen] = useState(false);
@@ -4712,6 +4754,9 @@ function App() {
     }
     if (detail === 'database') {
       openDatabasePanel();
+    }
+    if (detail === 'portRelay') {
+      setPortRelayError('');
     }
     setSettingsDetailView(detail);
   }, [setSidebarSettingsOpen, setSidebarCollapsed]);
@@ -7137,6 +7182,129 @@ function App() {
     return deriveRegistryHubIds(snapshot.hubs);
   }, []);
 
+  const applyPortRelaySnapshot = useCallback((snapshot: RegistryPortRelaySnapshot) => {
+    setPortRelaySnapshot(snapshot);
+    if (!snapshot.enabled) {
+      return;
+    }
+    if (typeof snapshot.listenPort === 'number') {
+      setPortRelayListenPort(String(snapshot.listenPort));
+    }
+    if (snapshot.hubId) {
+      setPortRelayHubId(snapshot.hubId);
+    }
+    if (snapshot.targetHost) {
+      setPortRelayTargetHost(snapshot.targetHost);
+    }
+    if (typeof snapshot.targetPort === 'number') {
+      setPortRelayTargetPort(String(snapshot.targetPort));
+    }
+  }, []);
+
+  const refreshPortRelayStatus = useCallback(async () => {
+    setPortRelayLoading(true);
+    setPortRelayError('');
+    try {
+      const snapshot = await service.getPortRelayStatus();
+      applyPortRelaySnapshot(snapshot);
+    } catch (err) {
+      setPortRelayError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPortRelayLoading(false);
+    }
+  }, [applyPortRelaySnapshot]);
+
+  useEffect(() => {
+    if (portRelayHubId || registryHubs.length === 0) {
+      return;
+    }
+    const firstHub = deriveRegistryHubIds(registryHubs)[0];
+    if (firstHub) {
+      setPortRelayHubId(firstHub);
+    }
+  }, [portRelayHubId, registryHubs]);
+
+  useEffect(() => {
+    if (settingsDetailView !== 'portRelay') {
+      return;
+    }
+    refreshPortRelayStatus().catch(() => undefined);
+  }, [settingsDetailView, refreshPortRelayStatus]);
+
+  const enablePortRelay = useCallback(async () => {
+    const listenPort = Number(portRelayListenPort);
+    const targetPort = Number(portRelayTargetPort);
+    const accessCode = portRelayAccessCode || generatePortRelayAccessCode();
+    setPortRelayAccessCode(accessCode);
+    if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) {
+      setPortRelayError('Listen port must be in 1..65535.');
+      return;
+    }
+    if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
+      setPortRelayError('Target port must be in 1..65535.');
+      return;
+    }
+    if (!portRelayHubId) {
+      setPortRelayError('Hub is required.');
+      return;
+    }
+    setPortRelayLoading(true);
+    setPortRelayError('');
+    try {
+      const snapshot = await service.enablePortRelay({
+        listenPort,
+        hubId: portRelayHubId,
+        targetHost: portRelayTargetHost || '127.0.0.1',
+        targetPort,
+        accessCode,
+      });
+      applyPortRelaySnapshot(snapshot);
+    } catch (err) {
+      setPortRelayError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPortRelayLoading(false);
+    }
+  }, [applyPortRelaySnapshot, portRelayAccessCode, portRelayHubId, portRelayListenPort, portRelayTargetHost, portRelayTargetPort]);
+
+  const disablePortRelay = useCallback(async () => {
+    setPortRelayLoading(true);
+    setPortRelayError('');
+    try {
+      const snapshot = await service.disablePortRelay();
+      applyPortRelaySnapshot(snapshot);
+    } catch (err) {
+      setPortRelayError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPortRelayLoading(false);
+    }
+  }, [applyPortRelaySnapshot]);
+
+  const regeneratePortRelayAccessCode = useCallback(async () => {
+    const accessCode = generatePortRelayAccessCode();
+    setPortRelayAccessCode(accessCode);
+    if (!portRelaySnapshot.enabled) {
+      return;
+    }
+    setPortRelayLoading(true);
+    setPortRelayError('');
+    try {
+      const snapshot = await service.regeneratePortRelayAccessCode(accessCode);
+      applyPortRelaySnapshot(snapshot);
+    } catch (err) {
+      setPortRelayError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPortRelayLoading(false);
+    }
+  }, [applyPortRelaySnapshot, portRelaySnapshot.enabled]);
+
+  const openPortRelay = useCallback(() => {
+    const openUrl = buildPortRelayOpenUrl(address, portRelayListenPort);
+    if (!openUrl) {
+      return;
+    }
+    window.open(openUrl, '_blank', 'noopener,noreferrer');
+  }, [address, portRelayListenPort]);
+
   const updateHubCards = useMemo(() => {
     const hubIds = new Set<string>([
       ...deriveRegistryHubIds(registryHubs),
@@ -9174,6 +9342,18 @@ function App() {
         </button>
       );
     }
+    if (detail === 'portRelay') {
+      return (
+        <button
+          type="button"
+          className="token-stats-refresh-btn token-stats-refresh-inline"
+          onClick={() => refreshPortRelayStatus().catch(() => undefined)}
+          disabled={portRelayLoading}
+        >
+          {portRelayLoading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      );
+    }
     return null;
   };
 
@@ -9802,6 +9982,105 @@ function App() {
       options,
     );
 
+  const renderPortRelaySettingsDetail = (options?: SettingsDetailShellOptions) => {
+    const hubIds = deriveRegistryHubIds(registryHubs);
+    const selectedHubId = portRelayHubId || hubIds[0] || '';
+    const openUrl = buildPortRelayOpenUrl(address, portRelayListenPort);
+    const statusClass = String(portRelaySnapshot.status || 'Disabled').toLowerCase();
+    return renderSettingsDetailShell(
+      'Port Relay',
+      <div className="port-relay-panel">
+        <div className="port-relay-header">
+          <span className={`port-relay-status-pill ${statusClass}`}>{portRelaySnapshot.status}</span>
+          {portRelaySnapshot.relayUrl ? <span className="port-relay-url">{portRelaySnapshot.relayUrl}</span> : null}
+        </div>
+        {portRelayError || portRelaySnapshot.error ? (
+          <div className="settings-metadata-error">{portRelayError || portRelaySnapshot.error}</div>
+        ) : null}
+        <div className="port-relay-form-grid">
+          <label>
+            <span>Listen Port</span>
+            <input
+              value={portRelayListenPort}
+              inputMode="numeric"
+              onChange={event => setPortRelayListenPort(event.target.value.replace(/[^\d]/g, '').slice(0, 5))}
+            />
+          </label>
+          <label>
+            <span>Hub</span>
+            <select
+              value={selectedHubId}
+              onChange={event => setPortRelayHubId(event.target.value)}
+            >
+              {hubIds.length === 0 ? <option value="">No hub</option> : null}
+              {hubIds.map(hubId => (
+                <option key={hubId} value={hubId}>{hubId}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Target Host</span>
+            <input
+              value={portRelayTargetHost}
+              onChange={event => setPortRelayTargetHost(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Target Port</span>
+            <input
+              value={portRelayTargetPort}
+              inputMode="numeric"
+              onChange={event => setPortRelayTargetPort(event.target.value.replace(/[^\d]/g, '').slice(0, 5))}
+            />
+          </label>
+        </div>
+        <div className="port-relay-code-row">
+          <input
+            value={portRelayAccessCode || 'Regenerate required'}
+            readOnly
+            aria-label="Port relay access code"
+          />
+          <button
+            type="button"
+            className="settings-detail-action-btn"
+            onClick={() => regeneratePortRelayAccessCode().catch(() => undefined)}
+            disabled={portRelayLoading}
+          >
+            Generate
+          </button>
+        </div>
+        <div className="port-relay-actions">
+          <button
+            type="button"
+            className="settings-detail-action-btn"
+            onClick={() => enablePortRelay().catch(() => undefined)}
+            disabled={portRelayLoading || !selectedHubId}
+          >
+            {portRelayLoading ? 'Working...' : 'Enable'}
+          </button>
+          <button
+            type="button"
+            className="settings-detail-action-btn danger"
+            onClick={() => disablePortRelay().catch(() => undefined)}
+            disabled={portRelayLoading || !portRelaySnapshot.enabled}
+          >
+            Disable
+          </button>
+          <button
+            type="button"
+            className="settings-detail-action-btn"
+            onClick={openPortRelay}
+            disabled={!portRelaySnapshot.enabled || !openUrl}
+          >
+            Open
+          </button>
+        </div>
+      </div>,
+      renderSettingsDetailActions('portRelay'),
+      options,
+    );
+  };
+
   const renderSettingsContent = (
     showSectionTitle: boolean,
     options: SettingsDetailShellOptions = {},
@@ -9820,6 +10099,9 @@ function App() {
     }
     if (settingsDetailView === 'database') {
       return renderDatabaseSettingsDetail(options);
+    }
+    if (settingsDetailView === 'portRelay') {
+      return renderPortRelaySettingsDetail(options);
     }
     return (
     <>
@@ -10083,6 +10365,20 @@ function App() {
           <span>
             <span className="codicon codicon-database settings-row-icon" aria-hidden="true" />
             Database
+          </span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
+        <button
+          type="button"
+          className="settings-row settings-detail-row"
+          onClick={() => {
+            setPortRelayError('');
+            setSettingsDetailView('portRelay');
+          }}
+        >
+          <span>
+            <span className="codicon codicon-radio-tower settings-row-icon" aria-hidden="true" />
+            Port Relay
           </span>
           <span className="codicon codicon-chevron-right" />
         </button>

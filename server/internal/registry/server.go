@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/swm8023/wheelmaker/internal/portrelay"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
@@ -100,6 +101,8 @@ type Server struct {
 	nextConnID    atomic.Int64
 	nextForwardID atomic.Int64
 	nextConnEpoch atomic.Int64
+
+	relay *portrelay.Controller
 }
 
 type connectionState struct {
@@ -107,6 +110,8 @@ type connectionState struct {
 	role            string
 	hubID           string
 	scopeHubID      string
+	relayHost       string
+	relaySecure     bool
 	initialized     bool
 	connectionEpoch int64
 	peer            *peerConn
@@ -129,13 +134,18 @@ func New(cfg Config) *Server {
 	if cfg.ServerVersion == "" {
 		cfg.ServerVersion = defaultServerVersion
 	}
-	return &Server{
+	s := &Server{
 		cfg:          cfg,
 		hubs:         make(map[string]rp.HubSnapshot),
 		projectToHub: make(map[string]string),
 		hubPeers:     make(map[string]*peerConn),
 		clientPeers:  make(map[string]*connectionState),
 	}
+	s.relay = portrelay.NewController(portrelay.ControllerConfig{
+		RegistryAddr:      cfg.Addr,
+		ForwardHubRequest: s.forwardRelayHubRequest,
+	})
+	return s
 }
 
 // Handler returns the HTTP handler for this server.
@@ -177,6 +187,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	state := &connectionState{
 		id:             fmt.Sprintf("conn-%d", s.nextConnID.Add(1)),
 		peer:           newPeerConn(ws),
+		relayHost:      relayControlHost(r),
+		relaySecure:    relayControlSecure(r),
 		seenRequestIDs: map[int64]struct{}{},
 		lastProjectSeq: map[string]int64{},
 	}
@@ -277,6 +289,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			s.handleBatch(state.peer, state, in)
 		case "hub.ping":
 			_ = s.writeResponse(state.peer, in.RequestID, in.Method, "", map[string]any{"ok": true})
+		case rp.MethodRelayEnable, rp.MethodRelayDisable, rp.MethodRelayStatus, rp.MethodRelayRegenerateAccessCode:
+			s.handleRelayRequest(state.peer, state, in)
 		case "monitor.status", "monitor.log", "monitor.db", "monitor.action":
 			s.handleMonitorForwardRequest(state.peer, state, in)
 		case "cmd.npm", "cmd.update", "cmd.skills":
@@ -329,6 +343,7 @@ func methodAllowed(role string, method string) bool {
 		return method == "registry.reportProjects" || method == "registry.updateProject" || method == "registry.session.updated" || method == "registry.session.message" || method == "hub.ping"
 	case "client":
 		return method == "project.list" || method == "project.syncCheck" || method == "batch" ||
+			method == rp.MethodRelayEnable || method == rp.MethodRelayDisable || method == rp.MethodRelayStatus || method == rp.MethodRelayRegenerateAccessCode ||
 			method == "cmd.npm" || method == "cmd.update" || method == "cmd.skills" ||
 			method == "chat.send" || strings.HasPrefix(method, "session.") ||
 			strings.HasPrefix(method, "fs.") || strings.HasPrefix(method, "git.")
@@ -336,6 +351,72 @@ func methodAllowed(role string, method string) bool {
 		return method == "project.list" || method == "monitor.listHub" || method == "batch" || strings.HasPrefix(method, "monitor.")
 	default:
 		return false
+	}
+}
+
+func (s *Server) handleRelayRequest(peer *peerConn, state *connectionState, in envelope) {
+	if s.relay == nil {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInternal, "relay controller unavailable", nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultRequestTimeout)
+	defer cancel()
+	resp, errPayload := s.relay.Handle(ctx, in.Method, in.Payload, state.relayHost, state.relaySecure)
+	if errPayload != nil {
+		_ = s.writeError(peer, in.RequestID, in.Method, errPayload.Code, errPayload.Message, errPayload.Details)
+		return
+	}
+	_ = s.writeResponse(peer, in.RequestID, in.Method, "", resp)
+}
+
+func (s *Server) forwardRelayHubRequest(ctx context.Context, hubID string, method string, payload any) portrelay.ControlResult {
+	hubID = strings.TrimSpace(hubID)
+	if hubID == "" {
+		return portrelay.ControlResult{Code: codeInvalidArgument, Message: "hubId is required"}
+	}
+	s.mu.RLock()
+	hub := s.hubs[hubID]
+	hubPeer := s.hubPeers[hubID]
+	s.mu.RUnlock()
+	if hub.HubID == "" {
+		return portrelay.ControlResult{Code: codeNotFound, Message: "hub not found", Details: map[string]any{"hubId": hubID}}
+	}
+	if hubPeer == nil {
+		return portrelay.ControlResult{Code: codeUnavailable, Message: "hub offline", Details: map[string]any{"hubId": hubID}}
+	}
+
+	forwardID := s.nextForwardID.Add(1)
+	waitCh := hubPeer.registerPending(forwardID)
+	if err := hubPeer.write(envelope{
+		RequestID: forwardID,
+		Type:      "request",
+		Method:    method,
+		Payload:   rp.MustRaw(payload),
+	}); err != nil {
+		hubPeer.resolvePending(forwardID, envelope{})
+		return portrelay.ControlResult{Code: codeInternal, Message: "forward request write failed"}
+	}
+
+	select {
+	case resp, ok := <-waitCh:
+		if !ok {
+			return portrelay.ControlResult{Code: codeInternal, Message: "hub disconnected"}
+		}
+		if resp.Type == "error" {
+			var errPayload errorPayload
+			if err := decodePayload(resp.Payload, &errPayload); err == nil {
+				return portrelay.ControlResult{
+					Code:    errPayload.Code,
+					Message: errPayload.Message,
+					Details: errPayload.Details,
+				}
+			}
+			return portrelay.ControlResult{Code: codeInternal, Message: "hub relay request failed"}
+		}
+		return portrelay.ControlResult{Payload: resp.Payload}
+	case <-ctx.Done():
+		hubPeer.resolvePending(forwardID, envelope{})
+		return portrelay.ControlResult{Code: codeTimeout, Message: "hub response timeout"}
 	}
 }
 func (s *Server) handleConnectInit(peer *peerConn, state *connectionState, in envelope) bool {
@@ -1136,4 +1217,19 @@ func (s *Server) errorEnvelope(method, code, message string, details map[string]
 			Details: details,
 		}),
 	}
+}
+
+func relayControlHost(r *http.Request) string {
+	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); forwarded != "" {
+		return forwarded
+	}
+	return r.Host
+}
+
+func relayControlSecure(r *http.Request) bool {
+	proto := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")))
+	if proto == "https" || proto == "wss" {
+		return true
+	}
+	return r.TLS != nil
 }

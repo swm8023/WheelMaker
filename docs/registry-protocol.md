@@ -313,7 +313,7 @@ Hub 上报（`reportProjects`、`updateProject`）和 Client 查询（`project.l
 | 角色 | 允许的请求方法 |
 |------|---------------|
 | `hub` | `registry.reportProjects`、`registry.updateProject`、`registry.session.updated`、`registry.session.message`、`hub.ping` |
-| `client` | `project.list`、`project.syncCheck`、`cmd.npm`、`cmd.update`、`cmd.skills`、`chat.send`、`session.*`、`fs.*`、`git.*`、`batch` |
+| `client` | `project.list`、`project.syncCheck`、`relay.enable`、`relay.disable`、`relay.status`、`relay.regenerateAccessCode`、`cmd.npm`、`cmd.update`、`cmd.skills`、`chat.send`、`session.*`、`fs.*`、`git.*`、`batch` |
 | `monitor` | `project.list`、`monitor.listHub`、`monitor.status`、`monitor.log`、`monitor.db`、`monitor.action`、`batch` |
 
 - 方法与角色不匹配返回 `FORBIDDEN`。
@@ -1627,7 +1627,123 @@ App 侧不使用 `query`。如果 `operation.running=true`，继续定时发 `sc
 - 目标 hub 离线：`UNAVAILABLE`。
 - CLI 执行失败不暴露完整 stdout/stderr，响应 payload 使用 `ok:false` 和最多 500 字符的 `errorSummary`。
 
-### 5.13 Chat / Session 透传方法
+### 5.13 Port Relay 方法（全局单例）
+
+`relay.*` 方法由 `client` 角色调用，用于管理 Registry 进程上的单例端口中转。它不按 `projectId` 路由，也不允许 `hub` 或 `monitor` 角色调用。Registry 只暴露公开方法；内部下发给 Hub 的 `relay.open` / `relay.close` 不属于 Client API。
+
+#### 5.13.1 `relay.status`
+
+查询当前 relay slot，不改变状态，不返回访问码明文。
+
+请求：
+
+```json
+{}
+```
+
+响应：
+
+```json
+{
+  "ok": true,
+  "enabled": false,
+  "status": "Disabled"
+}
+```
+
+启用后响应包含：
+
+```json
+{
+  "ok": true,
+  "enabled": true,
+  "status": "Opening|Up|Error",
+  "listenPort": 28810,
+  "hubId": "hub-a",
+  "targetHost": "127.0.0.1",
+  "targetPort": 12345,
+  "relayUrl": "http://registry-host:28810/",
+  "accessCodeGeneration": 3,
+  "tunnelConnectedAt": "2026-05-22T10:00:00Z",
+  "error": ""
+}
+```
+
+#### 5.13.2 `relay.enable`
+
+启用或替换全局 relay slot。Registry 校验参数、启动或切换 data-plane listener、生成 relay id 和 nonce，然后通过目标 Hub 现有 `/ws` 控制连接下发内部 `relay.open`。Hub 收到后主动连接 Registry relay 端口的 `__wheelmaker` 内部 tunnel path。`relay.enable` 的响应状态以 tunnel 是否在短窗口内连回为准：连回为 `Up`，Hub 已接受但尚未连回为 `Opening`。
+
+请求：
+
+```json
+{
+  "listenPort": 28810,
+  "hubId": "hub-a",
+  "targetHost": "127.0.0.1",
+  "targetPort": 12345,
+  "accessCode": "483921"
+}
+```
+
+约束：
+
+- `accessCode` 必须是 6 位数字。
+- `listenPort` 与 `targetPort` 必须在 `1..65535`。
+- `listenPort` 不允许等于 Registry 标准 `/ws` 端口。
+- `hubId` 必须指向已连接且在线的 Hub。
+
+响应同 `relay.status`。常见错误：
+
+- `INVALID_ARGUMENT`：payload 非法、端口非法、访问码非法。
+- `NOT_FOUND`：Hub 不存在。
+- `UNAVAILABLE`：Hub 离线。
+- `TIMEOUT`：Hub control request 超时。
+- `INTERNAL`：listener 或转发内部错误。
+
+#### 5.13.3 `relay.disable`
+
+关闭当前 relay slot。Registry 关闭 data-plane listener 和 active tunnel，并向旧目标 Hub 下发内部 `relay.close`。
+
+请求：
+
+```json
+{}
+```
+
+响应通常为：
+
+```json
+{
+  "ok": true,
+  "enabled": false,
+  "status": "Disabled"
+}
+```
+
+#### 5.13.4 `relay.regenerateAccessCode`
+
+重新设置 6 位访问码并递增 `accessCodeGeneration`。旧 data-plane cookie 因 generation 不匹配立即失效；不重建 listener，也不要求 Hub tunnel 重连。当前未启用时返回 `INVALID_ARGUMENT`。
+
+请求：
+
+```json
+{
+  "accessCode": "111222"
+}
+```
+
+#### 5.13.5 Data Plane
+
+Relay data plane 监听在 `listenPort` 上，同一端口处理普通 HTTP 与 WebSocket upgrade。保留内部路径：
+
+- `GET /__wheelmaker/relay/hub`：Hub 主动建立 tunnel，使用 `relayId` 和 `nonce` 校验。
+- `POST /__wheelmaker/relay/login`：访问码登录，设置 `wm_port_relay` HttpOnly cookie。
+- `GET /__wheelmaker/relay/logout`：清除 cookie。
+- `GET /__wheelmaker/relay/status`：只读状态。
+
+其他路径必须先通过 data-plane cookie 认证；认证通过后，HTTP 请求和 WebSocket text/binary frame 通过 Hub 主动建立的 binary tunnel 转发到 `targetHost:targetPort`。Hub 侧目标请求固定设置浏览器风格 `User-Agent`。
+
+### 5.14 Chat / Session 透传方法
 
 Registry 对以下 client 请求按 `projectId` 转发到 hub，并把 hub 响应原样返回：
 

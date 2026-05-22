@@ -415,6 +415,30 @@ export interface RegistryProjectListResponse {
   hubs: RegistryHub[];
 }
 
+export type RegistryPortRelayStatus = 'Disabled' | 'Opening' | 'Up' | 'Error';
+
+export interface RegistryPortRelaySnapshot {
+  ok: boolean;
+  enabled: boolean;
+  status: RegistryPortRelayStatus;
+  listenPort?: number;
+  hubId?: string;
+  targetHost?: string;
+  targetPort?: number;
+  relayUrl?: string;
+  accessCodeGeneration?: number;
+  tunnelConnectedAt?: string;
+  error?: string;
+}
+
+export interface RegistryPortRelayEnablePayload {
+  listenPort: number;
+  hubId: string;
+  targetHost: string;
+  targetPort: number;
+  accessCode: string;
+}
+
 export interface RegistryProject {
   projectId: string;
   name: string;

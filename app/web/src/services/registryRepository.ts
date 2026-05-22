@@ -21,6 +21,8 @@ import type {
   RegistryProject,
   RegistryProjectAgentProfile,
   RegistryProjectListResponse,
+  RegistryPortRelayEnablePayload,
+  RegistryPortRelaySnapshot,
   RegistryResumableSession,
   RegistrySessionConfigOption,
   RegistrySessionConfigOptionValue,
@@ -474,6 +476,39 @@ export class RegistryRepository {
 
   async listProjects(): Promise<RegistryProject[]> {
     return (await this.listProjectSnapshot()).projects;
+  }
+
+  async getPortRelayStatus(): Promise<RegistryPortRelaySnapshot> {
+    const resp = await this.client.request({
+      method: 'relay.status',
+      payload: {},
+    });
+    return (resp.payload ?? {ok: true, enabled: false, status: 'Disabled'}) as RegistryPortRelaySnapshot;
+  }
+
+  async enablePortRelay(payload: RegistryPortRelayEnablePayload): Promise<RegistryPortRelaySnapshot> {
+    const resp = await this.client.request({
+      method: 'relay.enable',
+      payload,
+      timeoutMs: 15000,
+    });
+    return (resp.payload ?? {}) as RegistryPortRelaySnapshot;
+  }
+
+  async disablePortRelay(): Promise<RegistryPortRelaySnapshot> {
+    const resp = await this.client.request({
+      method: 'relay.disable',
+      payload: {},
+    });
+    return (resp.payload ?? {ok: true, enabled: false, status: 'Disabled'}) as RegistryPortRelaySnapshot;
+  }
+
+  async regeneratePortRelayAccessCode(accessCode: string): Promise<RegistryPortRelaySnapshot> {
+    const resp = await this.client.request({
+      method: 'relay.regenerateAccessCode',
+      payload: {accessCode},
+    });
+    return (resp.payload ?? {}) as RegistryPortRelaySnapshot;
   }
 
   async syncCheck(projectId: string, payload: RegistrySyncCheckPayload): Promise<RegistrySyncCheckResponse> {

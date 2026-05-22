@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/swm8023/wheelmaker/internal/portrelay"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
@@ -89,6 +90,7 @@ type Reporter struct {
 	npmCommand      *NPMCommand
 	updateCommand   *UpdateCommand
 	skillsCommand   *SkillsCommand
+	relayClient     *portrelay.HubClient
 
 	localReadMu         sync.RWMutex
 	localReadServer     *http.Server
@@ -144,6 +146,7 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		npmCommand:    NewNPMCommand(),
 		updateCommand: NewUpdateCommand(monitorBase),
 		skillsCommand: NewSkillsCommand(skillsCommandConfig{HubID: cfg.HubID, Projects: cp}),
+		relayClient:   portrelay.NewHubClient(),
 	}
 	r.requestSeq.Store(2)
 	return r
@@ -443,6 +446,10 @@ func (r *Reporter) handleRegistryRequest(conn *websocket.Conn, in envelope) {
 		r.replyCmdUpdate(conn, in)
 	case "cmd.skills":
 		r.replyCmdSkills(conn, in)
+	case rp.MethodRelayOpen:
+		r.replyRelayOpen(conn, in)
+	case rp.MethodRelayClose:
+		r.replyRelayClose(conn, in)
 	case "fs.list":
 		r.replyFSList(conn, in)
 	case "fs.info":
@@ -481,6 +488,44 @@ func (r *Reporter) handleRegistryRequest(conn *websocket.Conn, in envelope) {
 			}),
 		})
 	}
+}
+
+func (r *Reporter) replyRelayOpen(conn *websocket.Conn, req envelope) {
+	var payload rp.RelayOpenPayload
+	if err := decodePayload(req.Payload, &payload); err != nil {
+		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "invalid relay.open payload")
+		return
+	}
+	if r.relayClient == nil {
+		r.relayClient = portrelay.NewHubClient()
+	}
+	if err := r.relayClient.Open(payload); err != nil {
+		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, err.Error())
+		return
+	}
+	_ = r.writeJSON(conn, "->", envelope{
+		RequestID: req.RequestID,
+		Type:      "response",
+		Method:    req.Method,
+		Payload:   rp.MustRaw(map[string]any{"ok": true}),
+	})
+}
+
+func (r *Reporter) replyRelayClose(conn *websocket.Conn, req envelope) {
+	var payload rp.RelayClosePayload
+	if err := decodePayload(req.Payload, &payload); err != nil {
+		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "invalid relay.close payload")
+		return
+	}
+	if r.relayClient != nil {
+		r.relayClient.Close(payload.RelayID)
+	}
+	_ = r.writeJSON(conn, "->", envelope{
+		RequestID: req.RequestID,
+		Type:      "response",
+		Method:    req.Method,
+		Payload:   rp.MustRaw(map[string]any{"ok": true}),
+	})
 }
 
 func (r *Reporter) runKeepalive(ctx context.Context, conn *websocket.Conn, done <-chan struct{}) {

@@ -13,6 +13,8 @@ import type {
   RegistryGitStatus,
   RegistryHub,
   RegistryNpmCommandResponse,
+  RegistryPortRelayEnablePayload,
+  RegistryPortRelaySnapshot,
   RegistryProject,
   RegistryProjectListResponse,
   RegistrySessionConfigOption,
@@ -507,6 +509,34 @@ export class RegistryWorkspaceService {
       throw new Error('session is not ready');
     }
     return this.repository.scanNpmPackages(hubId);
+  }
+
+  async getPortRelayStatus(): Promise<RegistryPortRelaySnapshot> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.getPortRelayStatus();
+  }
+
+  async enablePortRelay(payload: RegistryPortRelayEnablePayload): Promise<RegistryPortRelaySnapshot> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.enablePortRelay(payload);
+  }
+
+  async disablePortRelay(): Promise<RegistryPortRelaySnapshot> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.disablePortRelay();
+  }
+
+  async regeneratePortRelayAccessCode(accessCode: string): Promise<RegistryPortRelaySnapshot> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.regeneratePortRelayAccessCode(accessCode);
   }
 
   async installNpmPackage(hubId: string, packageName: string, version = 'latest'): Promise<RegistryNpmCommandResponse> {

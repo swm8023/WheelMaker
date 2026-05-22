@@ -3,7 +3,8 @@ export type MobileSettingsHistoryDetail =
   | 'skills'
   | 'tokenStats'
   | 'ccSwitch'
-  | 'database';
+  | 'database'
+  | 'portRelay';
 
 export type MobileSettingsHistoryState = {
   wheelMakerHistory: 'mobile-settings';
@@ -36,6 +37,7 @@ export function isMobileSettingsHistoryState(input: unknown): input is MobileSet
       || state.detail === 'tokenStats'
       || state.detail === 'ccSwitch'
       || state.detail === 'database'
+      || state.detail === 'portRelay'
     );
 }
 
