@@ -15,6 +15,9 @@ func TestDesktopRuntimeInitScriptExposesWindowBridge(t *testing.T) {
 		desktopMinimizeBinding,
 		desktopToggleMaximizeBinding,
 		desktopCloseBinding,
+		desktopGetWebSourceBinding,
+		desktopSetWebSourceBinding,
+		desktopSetRemoteWebBinding,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("desktop runtime init script missing %q: %s", want, script)

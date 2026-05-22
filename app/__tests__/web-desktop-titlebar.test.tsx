@@ -25,25 +25,52 @@ describe('desktop title bar', () => {
     const minimize = jest.fn();
     const toggleMaximize = jest.fn();
     const close = jest.fn();
+    const getWebSourceState = jest.fn(async () => ({
+      preference: 'auto',
+      actualSource: 'embedded',
+      displayTitle: 'WheelMaker - Embedded',
+      displaySource: 'Embedded',
+      remoteUrl: '',
+      remoteHost: '',
+    }));
+    const setWebSourcePreference = jest.fn(async () => ({
+      preference: 'embedded',
+      actualSource: 'embedded',
+      displayTitle: 'WheelMaker - Embedded',
+      displaySource: 'Embedded',
+      remoteUrl: '',
+      remoteHost: '',
+    }));
+    const reload = jest.fn();
     (global as typeof globalThis & { window?: unknown }).window = {
+      location: {reload},
       WheelMakerDesktop: {
         enabled: true,
         startDrag,
         minimize,
         toggleMaximize,
         close,
+        getWebSourceState,
+        setWebSourcePreference,
       },
     };
 
     let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
-    await ReactTestRenderer.act(() => {
+    await ReactTestRenderer.act(async () => {
       renderer = ReactTestRenderer.create(<DesktopTitleBar title="WheelMaker" />);
     });
 
     const root = renderer!.root;
     expect(root.findByProps({'data-desktop-titlebar': true})).toBeDefined();
-    expect(root.findByProps({className: 'desktop-titlebar-title'}).props.children).toBe('WheelMaker');
+    expect(root.findByProps({className: 'desktop-titlebar-title'}).props.children).toBe('WheelMaker - Embedded');
     expect(root.findByType('img').props.src).toBe('/icons/icon.svg');
+    const select = root.findByProps({className: 'desktop-titlebar-source-select'});
+    expect(select.props.value).toBe('auto');
+    await ReactTestRenderer.act(async () => {
+      await select.props.onChange({target: {value: 'embedded'}});
+    });
+    expect(setWebSourcePreference).toHaveBeenCalledWith('embedded');
+    expect(reload).toHaveBeenCalled();
 
     const dragRegion = root.findByProps({'data-desktop-titlebar-drag-region': true});
     expect(dragRegion.props.onPointerDown).toBeUndefined();

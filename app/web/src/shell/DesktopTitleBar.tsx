@@ -1,5 +1,9 @@
-import React, { useRef } from 'react';
-import { getDesktopWindowBridge } from './desktopRuntime';
+import React, { useEffect, useRef, useState } from 'react';
+import { getDesktopWindowBridge, type DesktopWebSourceState } from './desktopRuntime';
+import {
+  readDesktopWebSourceState,
+  setDesktopWebSourcePreference,
+} from './desktop/webSource';
 
 type DesktopTitleBarProps = {
   title: string;
@@ -12,6 +16,18 @@ function invokeDesktopAction(action: (() => Promise<void> | void) | undefined) {
 export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
   const bridge = getDesktopWindowBridge();
   const suppressNextDoubleClickRef = useRef(false);
+  const [webSourceState, setWebSourceState] = useState<DesktopWebSourceState | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    readDesktopWebSourceState().then(state => {
+      if (!cancelled) {
+        setWebSourceState(state);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   if (!bridge) {
     return null;
   }
@@ -40,6 +56,15 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
     }
     invokeDesktopAction(bridge.toggleMaximize);
   };
+  const handleWebSourcePreferenceChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const preference = event.target.value === 'embedded' ? 'embedded' : 'auto';
+    const nextState = await setDesktopWebSourcePreference(preference);
+    if (nextState) {
+      setWebSourceState(nextState);
+    }
+    window.location.reload();
+  };
+  const displayTitle = webSourceState?.displayTitle || title;
 
   return (
     <div className="desktop-titlebar" data-desktop-titlebar={true}>
@@ -50,9 +75,21 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
         onMouseDown={handleDragMouseDown}
       >
         <img className="desktop-titlebar-icon" src="/icons/icon.svg" alt="" draggable={false} />
-        <span className="desktop-titlebar-title">{title}</span>
+        <span className="desktop-titlebar-title" title={webSourceState?.remoteUrl || displayTitle}>{displayTitle}</span>
       </div>
       <div className="desktop-titlebar-controls">
+        {webSourceState && bridge.setWebSourcePreference ? (
+          <select
+            className="desktop-titlebar-source-select"
+            aria-label="Desktop web source"
+            title={webSourceState.remoteUrl || webSourceState.displaySource}
+            value={webSourceState.preference}
+            onChange={handleWebSourcePreferenceChange}
+          >
+            <option value="auto">Auto</option>
+            <option value="embedded">Embedded</option>
+          </select>
+        ) : null}
         <button
           type="button"
           className="desktop-titlebar-button"

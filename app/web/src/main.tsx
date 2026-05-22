@@ -19,6 +19,7 @@ declare const require: (id: string) => any;
 import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
 import { initializePWAFoundation } from './pwa';
 import { DesktopTitleBar } from './shell/DesktopTitleBar';
+import { submitDesktopRemoteWebCandidate } from './shell/desktop/webSource';
 import { ResponsiveShell } from './shell/ResponsiveShell';
 import {
   getLatestSessionReadCursor,
@@ -6842,6 +6843,7 @@ function App() {
     try {
       const ws = toRegistryWsUrl(nextAddress);
       const result = await workspaceController.connect(ws, trimmedToken);
+      submitDesktopRemoteWebCandidate(ws);
       const persistedSelectedChatKey = workspaceStore.migrateSelectedChatSessionKey(result.hydrated.projectId);
       const preferredSelectedChatKey =
         previousSelectedChatKey ||

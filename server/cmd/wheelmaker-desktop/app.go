@@ -16,6 +16,7 @@ type desktopWindowOptions struct {
 	IconID         uint
 	CustomTitleBar bool
 	ThemeColor     string
+	WebSource      *desktopWebSourceRuntime
 }
 
 type desktopLauncher interface {
@@ -23,22 +24,28 @@ type desktopLauncher interface {
 }
 
 func runDesktopApp(assets fs.FS, launcher desktopLauncher) error {
+	return runDesktopAppWithWebSource(assets, launcher, newEmbeddedOnlyDesktopWebSourceRuntime())
+}
+
+func runDesktopAppWithWebSource(assets fs.FS, launcher desktopLauncher, webSource *desktopWebSourceRuntime) error {
 	if _, err := fs.Stat(assets, "index.html"); err != nil {
 		return fmt.Errorf("desktop web assets missing index.html: %w", err)
 	}
-	srv, err := startDesktopAssetServer(assets)
+	webSource.RefreshActualSource()
+	srv, err := startDesktopAssetServerWithWebSource(assets, webSource)
 	if err != nil {
 		return err
 	}
 	defer srv.Close()
 
 	opts := desktopWindowOptions{
-		Title:          "WheelMaker",
+		Title:          webSource.WindowTitle(),
 		Width:          1280,
 		Height:         840,
 		IconID:         desktopResourceIconID,
 		CustomTitleBar: true,
 		ThemeColor:     desktopTitleBarThemeColor,
+		WebSource:      webSource,
 	}
 	if err := launcher.Launch(srv.URL(), opts); err != nil {
 		if errors.Is(err, errWebView2Unavailable) {

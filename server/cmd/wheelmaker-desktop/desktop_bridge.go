@@ -8,14 +8,17 @@ const (
 	desktopMinimizeBinding       = "__wheelMakerDesktopMinimize"
 	desktopToggleMaximizeBinding = "__wheelMakerDesktopToggleMaximize"
 	desktopCloseBinding          = "__wheelMakerDesktopClose"
+	desktopGetWebSourceBinding   = "__wheelMakerDesktopGetWebSourceState"
+	desktopSetWebSourceBinding   = "__wheelMakerDesktopSetWebSourcePreference"
+	desktopSetRemoteWebBinding   = "__wheelMakerDesktopSetRemoteWebCandidate"
 )
 
 func desktopRuntimeInitScript() string {
 	return `(() => {
-  const invoke = name => () => {
+  const invoke = name => (...args) => {
     const fn = window[name];
     if (typeof fn === 'function') {
-      return fn();
+      return fn(...args);
     }
     return Promise.resolve();
   };
@@ -25,6 +28,9 @@ func desktopRuntimeInitScript() string {
     minimize: invoke('` + desktopMinimizeBinding + `'),
     toggleMaximize: invoke('` + desktopToggleMaximizeBinding + `'),
     close: invoke('` + desktopCloseBinding + `'),
+    getWebSourceState: invoke('` + desktopGetWebSourceBinding + `'),
+    setWebSourcePreference: invoke('` + desktopSetWebSourceBinding + `'),
+    setRemoteWebCandidate: invoke('` + desktopSetRemoteWebBinding + `'),
   });
 })();`
 }

@@ -37,7 +37,7 @@ func (webView2Launcher) Launch(url string, opts desktopWindowOptions) error {
 			applyCustomTitleBarFrame(hwnd)
 		}
 		applyDesktopWindowTheme(hwnd, opts.ThemeColor)
-		if err := bindDesktopWindowBridge(w, hwnd); err != nil {
+		if err := bindDesktopWindowBridge(w, hwnd, opts.WebSource); err != nil {
 			return err
 		}
 		w.Init(desktopRuntimeInitScript())
@@ -47,11 +47,14 @@ func (webView2Launcher) Launch(url string, opts desktopWindowOptions) error {
 	return nil
 }
 
-func bindDesktopWindowBridge(w webview2.WebView, hwnd uintptr) error {
+func bindDesktopWindowBridge(w webview2.WebView, hwnd uintptr, webSource *desktopWebSourceRuntime) error {
+	if webSource == nil {
+		webSource = newEmbeddedOnlyDesktopWebSourceRuntime()
+	}
 	maximizeController := newDesktopMaximizeController(hwnd, win32DesktopWindowOps{})
 	bindings := []struct {
 		name string
-		fn   func() error
+		fn   interface{}
 	}{
 		{desktopStartDragBinding, func() error {
 			startWindowDrag(hwnd)
@@ -68,6 +71,23 @@ func bindDesktopWindowBridge(w webview2.WebView, hwnd uintptr) error {
 		{desktopCloseBinding, func() error {
 			postWindowClose(hwnd)
 			return nil
+		}},
+		{desktopGetWebSourceBinding, func() desktopWebSourceState {
+			return webSource.State()
+		}},
+		{desktopSetWebSourceBinding, func(preference string) (desktopWebSourceState, error) {
+			state, err := webSource.SetPreference(preference)
+			if err == nil {
+				w.SetTitle(state.DisplayTitle)
+			}
+			return state, err
+		}},
+		{desktopSetRemoteWebBinding, func(candidate desktopRemoteWebCandidate) (desktopWebSourceState, error) {
+			state, err := webSource.SetRemoteCandidate(candidate)
+			if err == nil {
+				w.SetTitle(state.DisplayTitle)
+			}
+			return state, err
 		}},
 	}
 	for _, binding := range bindings {

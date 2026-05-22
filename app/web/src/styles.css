@@ -216,6 +216,20 @@ body,
   align-items: stretch;
 }
 
+.desktop-titlebar-source-select {
+  align-self: center;
+  height: 24px;
+  max-width: 116px;
+  margin-right: 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panel-2) 82%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 0 18px 0 8px;
+}
+
 .desktop-titlebar-button {
   width: 46px;
   height: 100%;

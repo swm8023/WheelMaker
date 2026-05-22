@@ -78,6 +78,20 @@ func TestDesktopAssetHandlerDoesNotFallbackForMissingFileAsset(t *testing.T) {
 	}
 }
 
+func TestDesktopAssetHandlerDoesNotFallbackForRegistryWebSocketPath(t *testing.T) {
+	handler := newDesktopAssetHandler(fstest.MapFS{
+		"index.html": {Data: []byte("<html>shell</html>")},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status=%d want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
 func TestStartDesktopAssetServerUsesLoopback(t *testing.T) {
 	srv, err := startDesktopAssetServer(fstest.MapFS{
 		"index.html": {Data: []byte("<html>loopback</html>")},

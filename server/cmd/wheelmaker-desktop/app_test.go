@@ -43,8 +43,8 @@ func TestRunDesktopAppLaunchesWithCustomTitleBarAndIcon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runDesktopApp: %v", err)
 	}
-	if launcher.opts.Title != "WheelMaker" {
-		t.Fatalf("title=%q, want WheelMaker", launcher.opts.Title)
+	if launcher.opts.Title != "WheelMaker - Embedded" {
+		t.Fatalf("title=%q, want WheelMaker - Embedded", launcher.opts.Title)
 	}
 	if !launcher.opts.CustomTitleBar {
 		t.Fatal("expected custom title bar to be enabled")

@@ -17,5 +17,5 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	return runDesktopApp(assets, newWebView2Launcher())
+	return runDesktopAppWithWebSource(assets, newWebView2Launcher(), newDefaultDesktopWebSourceRuntime())
 }
