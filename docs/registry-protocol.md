@@ -1848,7 +1848,7 @@ Registry 即将关闭客户端连接时提前通知：
 
 1. **协议版本硬切换**：`connect.init.payload.protocolVersion` 必须为 `2.3`，不接受 `2.2` Hub/Client 连接。
 
-2. **Codex 身份收敛**：`codex` 表示基于 `codex app-server` 的 Codex agent；不再暴露旧 `codexapp` agent type。旧本地数据库中读到的 `codexapp` 会按 `codex` 处理，后续写入统一保存为 `codex`。
+2. **Codex 身份收敛**：`codex` 表示基于 `codex app-server` 的 Codex agent；不再暴露旧 `codexapp` agent type。升级后的 Hub 打开本地 SQLite store 时会一次性把旧 `codexapp` 持久化值迁移为 `codex`；迁移完成后，协议解析、新建会话和恢复会话都不再把 `codexapp` 当作有效公开 agent identity。
 
 3. **旧 Codex ACP 路径下线**：Hub 的 new/resume agent 列表不再提供旧 Codex ACP 适配器入口。
 
