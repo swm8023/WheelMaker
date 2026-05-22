@@ -424,6 +424,20 @@ export class RegistryWorkspaceService {
     return this.repository.archiveSession(projectId, sessionId);
   }
 
+  async renameSession(sessionId: string, title: string): Promise<{ok: boolean; sessionId: string; session: RegistrySessionSummary}> {
+    if (!this.session || !this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.renameSession(this.session.selectedProjectId, sessionId, title);
+  }
+
+  async renameProjectSession(projectId: string, sessionId: string, title: string): Promise<{ok: boolean; sessionId: string; session: RegistrySessionSummary}> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.renameSession(projectId, sessionId, title);
+  }
+
   async listResumableSessions(agentType: string): Promise<RegistryResumableSession[]> {
     if (!this.session || !this.repository) {
       return [];

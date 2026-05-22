@@ -23,12 +23,11 @@ describe('web hide tool calls setting', () => {
     expect(mainTsx).toContain('const [hideToolCalls, setHideToolCalls] = useState(');
     expect(mainTsx).toContain("renderSettingsSection('Chat'");
     const chatSettingsStart = mainTsx.indexOf("renderSettingsSection('Chat'");
-    const latestTitleSettingStart = mainTsx.indexOf('Use Latest Prompt Title', chatSettingsStart);
     const hideToolCallsSettingStart = mainTsx.indexOf('Hide Tool Calls', chatSettingsStart);
-    expect(latestTitleSettingStart).toBeGreaterThan(chatSettingsStart);
-    expect(hideToolCallsSettingStart).toBeGreaterThan(latestTitleSettingStart);
-    expect(mainTsx).toContain('checked={useLatestPromptTitle}');
-    expect(mainTsx).toContain('onChange={e => setUseLatestPromptTitle(e.target.checked)}');
+    expect(mainTsx).not.toContain('Use Latest Prompt Title');
+    expect(hideToolCallsSettingStart).toBeGreaterThan(chatSettingsStart);
+    expect(mainTsx).not.toContain('checked={useLatestPromptTitle}');
+    expect(mainTsx).not.toContain('onChange={e => setUseLatestPromptTitle(e.target.checked)}');
     expect(mainTsx).toContain('Hide Tool Calls');
     expect(mainTsx).toContain('hideToolCalls={hideToolCalls}');
     expect(mainTsx).toMatch(

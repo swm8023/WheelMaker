@@ -212,6 +212,11 @@ type ProjectSessionActionMenuState = {
   projectId: string;
   sessionId: string;
 };
+type RenameSessionTarget = {
+  projectId: string;
+  sessionId: string;
+  title: string;
+};
 type ConfirmTarget =
   | {
       kind: 'archive';
@@ -2375,11 +2380,6 @@ function App() {
       ? persistedGlobal.gestureNavigation
       : false,
   );
-  const [useLatestPromptTitle, setUseLatestPromptTitle] = useState(
-    typeof persistedGlobal.useLatestPromptTitle === 'boolean'
-      ? persistedGlobal.useLatestPromptTitle
-      : false,
-  );
   const codeFontFamily = useMemo(
     () => resolveCodeFontFamily(codeFont),
     [codeFont],
@@ -2647,7 +2647,7 @@ function App() {
       const projectName = projectItem.name || projectItem.projectId;
       const projectSessions = projectSessionsByProjectId[projectItem.projectId] ?? [];
       for (const session of projectSessions) {
-        const sessionTitle = resolveChatSessionTitle(session.title ?? '', false) || session.sessionId;
+        const sessionTitle = resolveChatSessionTitle(session.title ?? '') || session.sessionId;
         labels[session.sessionId] = `${projectName} / ${sessionTitle}`;
       }
     }
@@ -2667,6 +2667,10 @@ function App() {
   const [chatShowScrollToBottom, setChatShowScrollToBottom] = useState(false);
   const [chatReloadingSessionId, setChatReloadingSessionId] = useState('');
   const [chatArchivingSessionId, setChatArchivingSessionId] = useState('');
+  const [chatRenamingSessionId, setChatRenamingSessionId] = useState('');
+  const [renameTarget, setRenameTarget] = useState<RenameSessionTarget | null>(null);
+  const [renameTitleDraft, setRenameTitleDraft] = useState('');
+  const [renameError, setRenameError] = useState('');
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
   const [confirmError, setConfirmError] = useState('');
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
@@ -3971,7 +3975,6 @@ function App() {
       registryDebug,
       localHubReadEnabled,
       gestureNavigation,
-      useLatestPromptTitle,
       tab,
       selectedProjectId: projectId,
       floatingControlSlot,
@@ -3995,7 +3998,6 @@ function App() {
     registryDebug,
     localHubReadEnabled,
     gestureNavigation,
-    useLatestPromptTitle,
     tab,
     projectId,
     floatingControlSlot,
@@ -4068,17 +4070,17 @@ function App() {
   );
   const resolveSessionDisplayTitle = useCallback(
     (session?: Pick<RegistrySessionSummary, 'sessionId' | 'title'> | null) =>
-      resolveChatSessionTitle(session?.title ?? '', useLatestPromptTitle) ||
+      resolveChatSessionTitle(session?.title ?? '') ||
       session?.sessionId ||
       '',
-    [useLatestPromptTitle],
+    [],
   );
   const selectedChatDisplayTitle = useMemo(
     () =>
-      resolveChatSessionTitle(selectedChatSession?.title ?? '', useLatestPromptTitle) ||
+      resolveChatSessionTitle(selectedChatSession?.title ?? '') ||
       selectedChatSession?.sessionId ||
       '',
-    [selectedChatSession, useLatestPromptTitle],
+    [selectedChatSession],
   );
   const chatBreadcrumbLabel = useMemo(
     () => selectedChatDisplayTitle || 'No Selected Session',
@@ -6449,6 +6451,56 @@ function App() {
     }
   };
 
+  const handleRenameProjectSession = async (targetProjectId: string, sessionId: string, title: string) => {
+    const normalizedSessionId = sessionId.trim();
+    const normalizedTitle = Array.from(title.replace(/\r\n|\r|\n/g, ' ').trim()).slice(0, 200).join('');
+    if (!targetProjectId || !normalizedSessionId || chatRenamingSessionId) {
+      return;
+    }
+    setRenameError('');
+    setChatRenamingSessionId(normalizedSessionId);
+    try {
+      const result = await service.renameProjectSession(targetProjectId, normalizedSessionId, normalizedTitle);
+      if (!result.ok) {
+        throw new Error('session.rename returned ok=false');
+      }
+      const session = result.session ?? {sessionId: result.sessionId || normalizedSessionId, title: normalizedTitle};
+      rememberChatSessionSummary(targetProjectId, session);
+      const runtimeKey = buildChatRuntimeKey(targetProjectId, session.sessionId);
+      workspaceStore.rememberChatSession(
+        targetProjectId,
+        mergeKnownChatSessionForProject(targetProjectId, session),
+        {turnIndex: chatFinishedCursorRef.current[runtimeKey] ?? 0},
+      );
+      setProjectSessionActionMenu(null);
+      setRenameTarget(null);
+      setRenameTitleDraft('');
+      setRenameError('');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setRenameError(message);
+      setError(message);
+    } finally {
+      setChatRenamingSessionId('');
+    }
+  };
+
+  const requestRenameProjectSession = (targetProjectId: string, session: RegistrySessionSummary) => {
+    const normalizedSessionId = session.sessionId.trim();
+    if (!targetProjectId || !normalizedSessionId || chatRenamingSessionId) {
+      return;
+    }
+    const title = resolveSessionDisplayTitle(session);
+    setProjectSessionActionMenu(null);
+    setRenameError('');
+    setRenameTitleDraft(title);
+    setRenameTarget({
+      projectId: targetProjectId,
+      sessionId: normalizedSessionId,
+      title,
+    });
+  };
+
   const requestArchiveProjectSession = (targetProjectId: string, session: RegistrySessionSummary) => {
     const normalizedSessionId = session.sessionId.trim();
     if (!targetProjectId || !normalizedSessionId || session.running || chatArchivingSessionId) {
@@ -8062,6 +8114,7 @@ function App() {
     const sessionActionDisabled = !!session.running ||
       chatReloadingSessionId === sessionId ||
       chatArchivingSessionId === sessionId;
+    const renameActionDisabled = chatRenamingSessionId === sessionId;
     return (
       <div className="project-session-action-strip">
         <button
@@ -8084,6 +8137,27 @@ function App() {
             }`}
           />
           <span className="project-session-action-label">Reload</span>
+        </button>
+        <button
+          type="button"
+          className="project-session-action-btn rename"
+          title="Rename session"
+          aria-label="Rename session"
+          disabled={renameActionDisabled}
+          onPointerDown={event => event.stopPropagation()}
+          onClick={event => {
+            event.stopPropagation();
+            requestRenameProjectSession(targetProjectId, session);
+          }}
+        >
+          <span
+            className={`codicon ${
+              chatRenamingSessionId === sessionId
+                ? 'codicon-loading codicon-modifier-spin'
+                : 'codicon-edit'
+            }`}
+          />
+          <span className="project-session-action-label">Rename</span>
         </button>
         <button
           type="button"
@@ -9779,17 +9853,6 @@ function App() {
         ), 'paintcan')}
         {renderSettingsSection('Chat', (
         <>
-        <label className="settings-row sidebar-setting-row">
-          <span>
-            <span className="codicon codicon-lightbulb settings-row-icon" aria-hidden="true" />
-            Use Latest Prompt Title
-          </span>
-          <input
-            type="checkbox"
-            checked={useLatestPromptTitle}
-            onChange={e => setUseLatestPromptTitle(e.target.checked)}
-          />
-        </label>
         <label className="settings-row sidebar-setting-row">
           <span>
             <span className="codicon codicon-tools settings-row-icon" aria-hidden="true" />
@@ -12533,6 +12596,101 @@ function App() {
       </div>
     </div>
   ) : null;
+  const renameBusy = !!renameTarget && chatRenamingSessionId === renameTarget.sessionId;
+  const submitRenameTarget = () => {
+    if (!renameTarget || renameBusy) {
+      return;
+    }
+    handleRenameProjectSession(
+      renameTarget.projectId,
+      renameTarget.sessionId,
+      renameTitleDraft,
+    ).catch(() => undefined);
+  };
+  const appRenameDialog = renameTarget ? (
+    <div
+      className="app-confirm-backdrop"
+      role="presentation"
+      onPointerDown={() => {
+        if (!renameBusy) {
+          setRenameError('');
+          setRenameTarget(null);
+          setRenameTitleDraft('');
+        }
+      }}
+    >
+      <div
+        className="app-confirm-dialog app-rename-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="app-rename-title"
+        onPointerDown={event => event.stopPropagation()}
+      >
+        <div className="app-confirm-icon">
+          <span className="codicon codicon-edit" />
+        </div>
+        <div className="app-confirm-content">
+          <div id="app-rename-title" className="app-confirm-title">
+            Rename session
+          </div>
+          <div className="app-confirm-name">{renameTarget.title || renameTarget.sessionId}</div>
+          <input
+            className="app-rename-input"
+            type="text"
+            value={renameTitleDraft}
+            maxLength={200}
+            autoFocus
+            disabled={renameBusy}
+            onChange={event => setRenameTitleDraft(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                submitRenameTarget();
+              }
+              if (event.key === 'Escape' && !renameBusy) {
+                setRenameError('');
+                setRenameTarget(null);
+                setRenameTitleDraft('');
+              }
+            }}
+          />
+          <div className="app-confirm-copy">Saving an empty title restores the automatic first prompt title.</div>
+          {renameError ? (
+            <div className="app-confirm-error">{renameError}</div>
+          ) : null}
+        </div>
+        <div className="app-confirm-actions">
+          <button
+            type="button"
+            className="app-confirm-btn secondary"
+            disabled={renameBusy}
+            onClick={() => {
+              setRenameError('');
+              setRenameTarget(null);
+              setRenameTitleDraft('');
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="app-confirm-btn primary"
+            disabled={renameBusy}
+            onClick={submitRenameTarget}
+          >
+            <span
+              className={`codicon ${
+                renameBusy
+                  ? 'codicon-loading codicon-modifier-spin'
+                  : 'codicon-check'
+              }`}
+            />
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
   const registryDebugPanel = isWide && registryDebug && registryDebugPanelOpen ? (
     <RegistryDebugPanel
       records={registryDebugRecords}
@@ -12567,6 +12725,7 @@ function App() {
         onCloseDrawer={() => setDrawerOpen(false)}
       />
       {registryDebugPanel}
+      {appRenameDialog}
       {appConfirmDialog}
     </>
   );

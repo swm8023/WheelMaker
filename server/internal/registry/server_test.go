@@ -784,6 +784,43 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 	mustWriteJSON(t, client, testEnvelope{
 		RequestID: 4,
 		Type:      "request",
+		Method:    "session.rename",
+		ProjectID: "hub-a:server",
+		Payload: map[string]any{
+			"sessionId": "sess-1",
+			"title":     "Renamed session",
+		},
+	})
+
+	forwardedRename := mustReadEnvelope(t, hub)
+	if forwardedRename.Method != "session.rename" {
+		t.Fatalf("forwarded.method=%q, want session.rename", forwardedRename.Method)
+	}
+	if forwardedRename.ProjectID != "hub-a:server" {
+		t.Fatalf("forwarded.projectId=%q, want hub-a:server", forwardedRename.ProjectID)
+	}
+	forwardRenamePayload := forwardedRename.Payload
+	if forwardRenamePayload["sessionId"] != "sess-1" || forwardRenamePayload["title"] != "Renamed session" {
+		t.Fatalf("forwarded rename payload=%v", forwardRenamePayload)
+	}
+
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: forwardedRename.RequestID,
+		Type:      "response",
+		Method:    "session.rename",
+		ProjectID: forwardedRename.ProjectID,
+		Payload: map[string]any{
+			"ok": true,
+		},
+	})
+	renameResp := mustReadEnvelope(t, client)
+	if renameResp.Type != "response" || renameResp.Method != "session.rename" {
+		t.Fatalf("unexpected session.rename response: %#v", renameResp)
+	}
+
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 5,
+		Type:      "request",
 		Method:    "session.archive",
 		ProjectID: "hub-a:server",
 		Payload: map[string]any{
@@ -818,7 +855,7 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 	}
 
 	mustWriteJSON(t, client, testEnvelope{
-		RequestID: 5,
+		RequestID: 6,
 		Type:      "request",
 		Method:    "session.delete",
 		ProjectID: "hub-a:server",

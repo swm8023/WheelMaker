@@ -8,6 +8,7 @@ describe('registry workspace project-scoped chat service methods', () => {
       sendSessionMessage: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1' }),
       cancelSession: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1' }),
       setSessionConfig: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1', configOptions: [] }),
+      renameSession: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1', session: { sessionId: 's1', title: 'Manual title', updatedAt: '' } }),
     };
 
     Object.assign(service as unknown as { repository: unknown; session: unknown }, {
@@ -30,6 +31,7 @@ describe('registry workspace project-scoped chat service methods', () => {
       configId: 'model',
       value: 'x',
     });
+    await (service as any).renameProjectSession('chat-project', 's1', 'Manual title');
 
     expect(repository.readSession).toHaveBeenCalledWith('chat-project', 's1', 7);
     expect(repository.sendSessionMessage).toHaveBeenCalledWith('chat-project', {
@@ -42,6 +44,7 @@ describe('registry workspace project-scoped chat service methods', () => {
       configId: 'model',
       value: 'x',
     });
+    expect(repository.renameSession).toHaveBeenCalledWith('chat-project', 's1', 'Manual title');
     expect(repository.readSession).not.toHaveBeenCalledWith('workspace-project', 's1', 7);
   });
 

@@ -2514,8 +2514,9 @@ func sessionViewCreatedEvent(sessionID, title string) SessionViewEvent {
 }
 
 type testSessionTitleFacts struct {
-	First string `json:"first"`
-	Last  string `json:"last"`
+	First  string `json:"first"`
+	Last   string `json:"last"`
+	Manual string `json:"manual"`
 }
 
 func decodeSessionTitleFacts(t *testing.T, raw string) testSessionTitleFacts {
@@ -3599,6 +3600,129 @@ func TestSessionViewPersistSessionDoesNotOverrideLatestPromptTitle(t *testing.T)
 	afterFacts := decodeSessionTitleFacts(t, sessionsAfter[0].Title)
 	if afterFacts.First != "Created Title" || afterFacts.Last != "latest prompt title" {
 		t.Fatalf("sessionsAfter title facts = %#v, want first Created Title and last latest prompt title", afterFacts)
+	}
+}
+
+func TestHandleSessionRequestRenameStoresManualTitleWithoutMovingSession(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	olderAt := mustRFC3339Time(t, "2026-05-22T01:00:00Z")
+	newerAt := mustRFC3339Time(t, "2026-05-22T02:00:00Z")
+
+	oldSession := sessionViewCreatedEvent("sess-old", "Original title")
+	oldSession.UpdatedAt = olderAt
+	if err := c.RecordEvent(ctx, oldSession); err != nil {
+		t.Fatalf("RecordEvent old session: %v", err)
+	}
+	newSession := sessionViewCreatedEvent("sess-new", "Newer title")
+	newSession.UpdatedAt = newerAt
+	if err := c.RecordEvent(ctx, newSession); err != nil {
+		t.Fatalf("RecordEvent new session: %v", err)
+	}
+
+	resp, err := c.HandleSessionRequest(ctx, "session.rename", "proj1", json.RawMessage(`{"sessionId":"sess-old","title":"  Manual name  "}`))
+	if err != nil {
+		t.Fatalf("session.rename: %v", err)
+	}
+	body := resp.(map[string]any)
+	if got := body["ok"]; got != true {
+		t.Fatalf("session.rename ok = %#v, want true", got)
+	}
+	if got := body["sessionId"]; got != "sess-old" {
+		t.Fatalf("session.rename sessionId = %#v, want sess-old", got)
+	}
+	session := sessionSummaryMap(t, body["session"])
+	titleFacts := decodeSessionTitleFacts(t, session["title"].(string))
+	if titleFacts.Manual != "Manual name" {
+		t.Fatalf("manual title = %q, want Manual name", titleFacts.Manual)
+	}
+
+	rec, err := c.store.LoadSession(ctx, "proj1", "sess-old")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if !rec.LastActiveAt.Equal(olderAt) {
+		t.Fatalf("LastActiveAt = %s, want %s", rec.LastActiveAt.Format(time.RFC3339), olderAt.Format(time.RFC3339))
+	}
+	sessions, err := c.listSessionViews(ctx)
+	if err != nil {
+		t.Fatalf("listSessionViews: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("sessions len = %d, want 2", len(sessions))
+	}
+	if sessions[0].SessionID != "sess-new" || sessions[1].SessionID != "sess-old" {
+		t.Fatalf("session order = [%s %s], want [sess-new sess-old]", sessions[0].SessionID, sessions[1].SessionID)
+	}
+}
+
+func TestSessionRenameManualTitleSurvivesLaterPromptTitle(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "First title")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if _, err := c.HandleSessionRequest(ctx, "session.rename", "proj1", json.RawMessage(`{"sessionId":"sess-1","title":"Manual title"}`)); err != nil {
+		t.Fatalf("session.rename: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "later prompt", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+
+	summary, err := c.sessionRecorder.ReadSessionSummary(ctx, "sess-1")
+	if err != nil {
+		t.Fatalf("ReadSessionSummary: %v", err)
+	}
+	titleFacts := decodeSessionTitleFacts(t, summary.Title)
+	if titleFacts.Manual != "Manual title" || titleFacts.First != "First title" || titleFacts.Last != "later prompt" {
+		t.Fatalf("title facts = %#v, want manual preserved with latest prompt", titleFacts)
+	}
+}
+
+func TestHandleSessionRequestRenameClearsManualTitleAndNormalizesInput(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "First title")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if _, err := c.HandleSessionRequest(ctx, "session.rename", "proj1", json.RawMessage(`{"sessionId":"sess-1","title":"Manual title"}`)); err != nil {
+		t.Fatalf("session.rename manual: %v", err)
+	}
+	if _, err := c.HandleSessionRequest(ctx, "session.rename", "proj1", json.RawMessage(`{"sessionId":"sess-1","title":" \n\t "}`)); err != nil {
+		t.Fatalf("session.rename clear: %v", err)
+	}
+	summary, err := c.sessionRecorder.ReadSessionSummary(ctx, "sess-1")
+	if err != nil {
+		t.Fatalf("ReadSessionSummary: %v", err)
+	}
+	clearedFacts := decodeSessionTitleFacts(t, summary.Title)
+	if clearedFacts.Manual != "" || clearedFacts.First != "First title" {
+		t.Fatalf("cleared title facts = %#v, want manual cleared and first title kept", clearedFacts)
+	}
+
+	longTitle := strings.Repeat("x", 205)
+	payload, err := json.Marshal(map[string]string{"sessionId": "sess-1", "title": "  alpha\r\nbeta  " + longTitle})
+	if err != nil {
+		t.Fatalf("Marshal payload: %v", err)
+	}
+	if _, err := c.HandleSessionRequest(ctx, "session.rename", "proj1", payload); err != nil {
+		t.Fatalf("session.rename normalized: %v", err)
+	}
+	renamed, err := c.sessionRecorder.ReadSessionSummary(ctx, "sess-1")
+	if err != nil {
+		t.Fatalf("ReadSessionSummary after normalized rename: %v", err)
+	}
+	renamedFacts := decodeSessionTitleFacts(t, renamed.Title)
+	if strings.ContainsAny(renamedFacts.Manual, "\r\n") {
+		t.Fatalf("manual title contains newline: %q", renamedFacts.Manual)
+	}
+	if !strings.HasPrefix(renamedFacts.Manual, "alpha beta") {
+		t.Fatalf("manual title = %q, want newline replaced with space", renamedFacts.Manual)
+	}
+	if len([]rune(renamedFacts.Manual)) != 200 {
+		t.Fatalf("manual title rune len = %d, want 200", len([]rune(renamedFacts.Manual)))
 	}
 }
 

@@ -3426,7 +3426,7 @@ body,
   height: 30px;
   transform: translateY(-50%);
   z-index: 3;
-  width: min(188px, calc(100% - 4px));
+  width: min(258px, calc(100% - 4px));
   display: none;
   align-items: center;
   gap: 4px;
@@ -3477,6 +3477,11 @@ body,
   background: color-mix(in srgb, #2f9e44 18%, transparent);
 }
 
+.project-session-action-btn.rename {
+  color: color-mix(in srgb, #8a63d2 82%, var(--text));
+  background: color-mix(in srgb, #8a63d2 15%, transparent);
+}
+
 .project-session-action-btn.archive {
   color: color-mix(in srgb, #2b6cb0 86%, var(--text));
   background: color-mix(in srgb, #2b6cb0 14%, transparent);
@@ -3489,6 +3494,10 @@ body,
 
 .project-session-action-btn.reload:hover {
   background: color-mix(in srgb, #2f9e44 26%, transparent);
+}
+
+.project-session-action-btn.rename:hover {
+  background: color-mix(in srgb, #8a63d2 24%, transparent);
 }
 
 .project-session-action-btn.archive:hover {
@@ -3547,6 +3556,10 @@ body,
   min-width: 0;
 }
 
+.app-rename-dialog {
+  width: min(460px, calc(100vw - 28px));
+}
+
 .app-confirm-title {
   color: var(--text);
   font-size: 14px;
@@ -3570,6 +3583,26 @@ body,
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.app-rename-input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--panel-3);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.app-rename-input:focus {
+  border-color: color-mix(in srgb, #8a63d2 58%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, #8a63d2 18%, transparent);
 }
 
 .app-confirm-error {

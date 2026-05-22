@@ -775,6 +775,28 @@ export class RegistryRepository {
     };
   }
 
+  async renameSession(projectId: string, sessionId: string, title: string): Promise<{ok: boolean; sessionId: string; session: RegistrySessionSummary}> {
+    const resp = await this.client.request({
+      method: 'session.rename',
+      projectId,
+      payload: {sessionId, title},
+      timeoutMs: 15000,
+    });
+    const body = (resp.payload ?? {}) as {ok?: boolean; sessionId?: string; session?: unknown};
+    const session = this.normalizeSessionSummary(body.session) ?? {
+      sessionId,
+      title,
+      preview: '',
+      updatedAt: '',
+      messageCount: 0,
+    };
+    return {
+      ok: body.ok ?? false,
+      sessionId: body.sessionId ?? session.sessionId ?? sessionId,
+      session,
+    };
+  }
+
   async setSessionConfig(
     projectId: string,
     payload: {sessionId: string; configId: string; value: string},

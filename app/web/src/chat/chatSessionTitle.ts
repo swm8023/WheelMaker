@@ -1,13 +1,14 @@
 type ChatSessionTitleFacts = {
   first?: unknown;
   last?: unknown;
+  manual?: unknown;
 };
 
 function normalizedText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export function resolveChatSessionTitle(rawTitle: string, useLatestPromptTitle: boolean): string {
+export function resolveChatSessionTitle(rawTitle: string): string {
   const legacyTitle = normalizedText(rawTitle);
   if (!legacyTitle.startsWith('{')) {
     return legacyTitle;
@@ -19,8 +20,8 @@ export function resolveChatSessionTitle(rawTitle: string, useLatestPromptTitle: 
     }
     const first = normalizedText(parsed.first);
     const last = normalizedText(parsed.last);
-    const preferred = useLatestPromptTitle ? last : first;
-    return preferred || first || last || legacyTitle;
+    const manual = normalizedText(parsed.manual);
+    return manual || first || last || legacyTitle;
   } catch {
     return legacyTitle;
   }

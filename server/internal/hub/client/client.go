@@ -553,6 +553,19 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			return nil, err
 		}
 		return map[string]any{"ok": true, "session": summary}, nil
+	case "session.rename":
+		var req struct {
+			SessionID string `json:"sessionId"`
+			Title     string `json:"title"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.rename payload: %w", err)
+		}
+		summary, err := c.sessionRecorder.RenameSessionTitle(ctx, req.SessionID, req.Title)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true, "sessionId": summary.SessionID, "session": summary}, nil
 	case "session.new":
 		var req struct {
 			AgentType string `json:"agentType"`

@@ -48,8 +48,9 @@ type sessionViewSummary struct {
 }
 
 type sessionTitleFacts struct {
-	First string `json:"first"`
-	Last  string `json:"last"`
+	First  string `json:"first"`
+	Last   string `json:"last"`
+	Manual string `json:"manual,omitempty"`
 }
 
 type sessionSyncProjection struct {
@@ -440,6 +441,27 @@ func (r *SessionRecorder) MarkSessionRead(ctx context.Context, sessionID string,
 		return summary, nil
 	}
 	return r.sessionViewSummaryFromRecord(*rec), nil
+}
+
+func (r *SessionRecorder) RenameSessionTitle(ctx context.Context, sessionID string, title string) (sessionViewSummary, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return sessionViewSummary{}, fmt.Errorf("sessionId is required")
+	}
+	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
+	if err != nil {
+		return sessionViewSummary{}, err
+	}
+	if rec == nil {
+		return sessionViewSummary{}, fmt.Errorf("session not found: %s", sessionID)
+	}
+	rec.Title = updateSessionManualTitleFacts(rec.Title, title)
+	if err := r.store.SaveSession(ctx, rec); err != nil {
+		return sessionViewSummary{}, err
+	}
+	summary := r.sessionViewSummaryFromRecord(*rec)
+	r.publishSessionUpdated(summary)
+	return summary, nil
 }
 
 func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event parsedSessionViewEvent) error {
@@ -846,6 +868,29 @@ func updateSessionTitleFacts(rawTitle, promptTitle string) string {
 	return sessionTitleFactsJSON(facts)
 }
 
+func updateSessionManualTitleFacts(rawTitle, manualTitle string) string {
+	facts, ok := sessionTitleFactsFromJSON(rawTitle)
+	if !ok {
+		legacyTitle := strings.TrimSpace(rawTitle)
+		facts = sessionTitleFacts{
+			First: legacyTitle,
+			Last:  legacyTitle,
+		}
+	}
+	facts.Manual = normalizeManualSessionTitle(manualTitle)
+	return sessionTitleFactsJSON(facts)
+}
+
+func normalizeManualSessionTitle(title string) string {
+	title = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(title)
+	title = strings.TrimSpace(title)
+	runes := []rune(title)
+	if len(runes) > 200 {
+		title = string(runes[:200])
+	}
+	return title
+}
+
 func sessionTitleFactsFromJSON(rawTitle string) (sessionTitleFacts, bool) {
 	rawTitle = strings.TrimSpace(rawTitle)
 	if rawTitle == "" || !strings.HasPrefix(rawTitle, "{") {
@@ -857,12 +902,14 @@ func sessionTitleFactsFromJSON(rawTitle string) (sessionTitleFacts, bool) {
 	}
 	facts.First = strings.TrimSpace(facts.First)
 	facts.Last = strings.TrimSpace(facts.Last)
+	facts.Manual = normalizeManualSessionTitle(facts.Manual)
 	return facts, true
 }
 
 func sessionTitleFactsJSON(facts sessionTitleFacts) string {
 	facts.First = strings.TrimSpace(facts.First)
 	facts.Last = strings.TrimSpace(facts.Last)
+	facts.Manual = normalizeManualSessionTitle(facts.Manual)
 	raw, err := json.Marshal(facts)
 	if err != nil {
 		return ""

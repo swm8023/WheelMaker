@@ -17,7 +17,7 @@ describe('agent package update settings UI source structure', () => {
     expect(chatStart).toBeGreaterThanOrEqual(0);
     expect(codeDisplayStart).toBeGreaterThan(chatStart);
     const chatSection = mainTsx.slice(chatStart, codeDisplayStart);
-    expect(chatSection).toContain('Use Latest Prompt Title');
+    expect(chatSection).not.toContain('Use Latest Prompt Title');
     expect(chatSection).toContain('Hide Tool Calls');
     expect(chatSection).not.toContain('Token Stats');
     expect(chatSection).not.toContain('CC Switch');

@@ -50,6 +50,8 @@ describe('web chat integration', () => {
     expect(repositoryTs).toContain('payload: title?.trim() ? {agentType, title: title.trim()} : {agentType}');
     expect(repositoryTs).toContain("method: 'session.send'");
     expect(repositoryTs).toContain("method: 'session.markRead'");
+    expect(repositoryTs).toContain("method: 'session.rename'");
+    expect(repositoryTs).toContain('async renameSession(projectId: string, sessionId: string, title: string)');
     expect(repositoryTs).not.toContain('turnId = typeof input.turnId');
     expect(repositoryTs).not.toContain("method: 'chat.permission.respond'");
     expect(workspaceServiceTs).toContain('async listSessions(');
@@ -59,6 +61,7 @@ describe('web chat integration', () => {
     expect(workspaceServiceTs).toContain('async sendSessionMessage(');
     expect(workspaceServiceTs).toContain('async markSessionRead(');
     expect(workspaceServiceTs).toContain('async markProjectSessionRead(');
+    expect(workspaceServiceTs).toContain('async renameProjectSession(projectId: string, sessionId: string, title: string)');
     expect(workspaceServiceTs).not.toContain('async respondToSessionPermission(');
     expect(workspaceServiceTs).toContain('private eventListeners = new Set');
     expect(workspaceServiceTs).toContain('private closeListeners = new Set');
@@ -275,11 +278,10 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('<div className="mobile-settings-title">{mobileSettingsTitle}</div>');
     expect(mainTsx).toContain('className="mobile-settings-group"');
     const chatSettingsStart = mainTsx.indexOf("renderSettingsSection('Chat'");
-    const latestTitleSettingStart = mainTsx.indexOf('Use Latest Prompt Title', chatSettingsStart);
     const hideToolCallsSettingStart = mainTsx.indexOf('Hide Tool Calls', chatSettingsStart);
     expect(chatSettingsStart).toBeGreaterThanOrEqual(0);
-    expect(latestTitleSettingStart).toBeGreaterThan(chatSettingsStart);
-    expect(hideToolCallsSettingStart).toBeGreaterThan(latestTitleSettingStart);
+    expect(mainTsx).not.toContain('Use Latest Prompt Title');
+    expect(hideToolCallsSettingStart).toBeGreaterThan(chatSettingsStart);
     expect(mainTsx).not.toContain('className="sidebar-footer"');
     expect(mainTsx).toContain('className="floating-control-stack"');
     expect(mainTsx).toContain('className="floating-nav-group"');
@@ -453,16 +455,16 @@ describe('web chat integration', () => {
     expect(chatProjectNameBlock).toContain('projects.find(item => item.projectId === selectedProjectId)?.name');
     expect(chatProjectNameBlock).toContain('breadcrumbProjectName');
     expect(mainTsx).toContain("import { resolveChatSessionTitle } from './chat/chatSessionTitle';");
-    expect(mainTsx).toContain('const [useLatestPromptTitle, setUseLatestPromptTitle] = useState(');
+    expect(mainTsx).not.toContain('const [useLatestPromptTitle, setUseLatestPromptTitle] = useState(');
     expect(mainTsx).toContain('const selectedChatDisplayTitle = useMemo(');
-    expect(mainTsx).toContain("resolveChatSessionTitle(selectedChatSession?.title ?? '', useLatestPromptTitle)");
+    expect(mainTsx).toContain("resolveChatSessionTitle(selectedChatSession?.title ?? '')");
     expect(mainTsx).toContain('resolveSessionDisplayTitle(session)');
     expect(mainTsx).not.toContain('session.title || session.sessionId');
     expect(mainTsx).not.toContain('selectedChatSession?.title ||');
     expect(mainTsx).toContain("() => selectedChatDisplayTitle || 'No Selected Session'");
-    expect(mainTsx).toContain('checked={useLatestPromptTitle}');
-    expect(mainTsx).toContain('onChange={e => setUseLatestPromptTitle(e.target.checked)}');
-    expect(mainTsx).toContain('Use Latest Prompt Title');
+    expect(mainTsx).not.toContain('checked={useLatestPromptTitle}');
+    expect(mainTsx).not.toContain('onChange={e => setUseLatestPromptTitle(e.target.checked)}');
+    expect(mainTsx).not.toContain('Use Latest Prompt Title');
     expect(mainTsx).not.toContain('className="chat-title-option"');
     expect(mainTsx).toContain('renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)');
     expect(mainTsx).toContain('renderBreadcrumbTitle(breadcrumbProjectName, fileBreadcrumbLabel)');
@@ -953,6 +955,10 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("const [confirmError, setConfirmError] = useState('');");
     expect(mainTsx).toContain('const handleArchiveProjectSession = async (targetProjectId: string, sessionId: string) => {');
     expect(mainTsx).toContain('const result = await service.archiveProjectSession(targetProjectId, normalizedSessionId);');
+    expect(mainTsx).toContain('const handleRenameProjectSession = async (targetProjectId: string, sessionId: string, title: string) => {');
+    expect(mainTsx).toContain('const result = await service.renameProjectSession(targetProjectId, normalizedSessionId, normalizedTitle);');
+    expect(mainTsx).toContain('className="app-rename-input"');
+    expect(mainTsx).toContain('maxLength={200}');
     expect(mainTsx).toContain('const message = err instanceof Error ? err.message : String(err);');
     expect(mainTsx).toContain('setConfirmError(message);');
     expect(mainTsx).toContain('const appConfirmDialog = confirmTarget ? (');
@@ -963,10 +969,13 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const renderProjectSessionActionStrip = (targetProjectId: string, session: RegistrySessionSummary) => {');
     expect(mainTsx).toContain('className="project-session-action-strip"');
     expect(mainTsx).toContain('className="project-session-action-btn reload"');
+    expect(mainTsx).toContain('className="project-session-action-btn rename"');
     expect(mainTsx).toContain('className="project-session-action-btn archive"');
     expect(mainTsx).not.toContain('className="project-session-action-btn delete"');
     expect(mainTsx).toContain('const sessionActionDisabled = !!session.running ||');
+    expect(mainTsx).toContain('const renameActionDisabled = chatRenamingSessionId === sessionId;');
     expect(mainTsx).toContain('className="project-session-action-label">Reload</span>');
+    expect(mainTsx).toContain('className="project-session-action-label">Rename</span>');
     expect(mainTsx).toContain('className="project-session-action-label">Archive</span>');
     expect(mainTsx).not.toContain('className="project-session-action-label">Delete</span>');
     expect(mainTsx).toContain("if (target?.closest('.project-session-action-btn')) {");
@@ -1060,6 +1069,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.project-session-row-wrap {');
     expect(stylesCss).toContain('.project-session-action-strip {');
     expect(stylesCss).toContain('.project-session-action-btn.reload {');
+    expect(stylesCss).toContain('.project-session-action-btn.rename {');
     expect(stylesCss).toContain('.project-session-action-btn.archive {');
     expect(stylesCss).not.toContain('.project-session-action-btn.delete {');
     expect(stylesCss).toContain('.app-confirm-backdrop {');
@@ -1116,7 +1126,7 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.wide-session-row::after');
     expect(stylesCss).not.toContain('.project-session-row-wrap.actions-open .wide-session-row {');
     expect(stylesCss).toMatch(
-      /\.project-session-action-strip \{[^}]*top: 50%;[^}]*height: 30px;[^}]*transform: translateY\(-50%\);[^}]*width: min\(188px, calc\(100% - 4px\)\);[^}]*\}/,
+      /\.project-session-action-strip \{[^}]*top: 50%;[^}]*height: 30px;[^}]*transform: translateY\(-50%\);[^}]*width: min\(258px, calc\(100% - 4px\)\);[^}]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.project-session-action-strip \{[^}]*display: none;[^}]*\}/,
