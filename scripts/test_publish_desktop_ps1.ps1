@@ -26,7 +26,11 @@ function Assert-NotContains {
 
 Assert-Contains "publish_desktop.ps1" $script "WHEELMAKER_WEB_TARGET"
 Assert-Contains "publish_desktop.ps1" $script "server\cmd\wheelmaker-desktop\winres\icon.png"
-Assert-Contains "publish_desktop.ps1" $script "Restore-DesktopWebRootPlaceholder"
+Assert-Contains "publish_desktop.ps1" $script "New-DesktopWebBuildRoot"
+Assert-Contains "publish_desktop.ps1" $script "New-DesktopWebOverlay"
+Assert-Contains "publish_desktop.ps1" $script "Get-DesktopRelativePath"
+Assert-Contains "publish_desktop.ps1" $script "Remove-DesktopWebBuildRoot"
+Assert-Contains "publish_desktop.ps1" $script "-overlay"
 Assert-Contains "publish_desktop.ps1" $script "go-winres@v0.3.3"
 Assert-Contains "publish_desktop.ps1" $script "--icon"
 Assert-Contains "publish_desktop.ps1" $script "desktop_windows.syso"
@@ -44,6 +48,10 @@ Assert-NotContains "publish_desktop.ps1" $script "app\web\public\icons\icon.svg"
 Assert-NotContains "publish_desktop.ps1" $script "Get-EdgeExecutable"
 Assert-NotContains "publish_desktop.ps1" $script "Restart-Services"
 Assert-NotContains "publish_desktop.ps1" $script "update-now.signal"
+Assert-NotContains "publish_desktop.ps1" $script "Reset-DesktopWebRoot"
+Assert-NotContains "publish_desktop.ps1" $script "Restore-DesktopWebRootPlaceholder"
+Assert-NotContains "publish_desktop.ps1" $script "GetRelativePath"
+Assert-NotContains "publish_desktop.ps1" $script 'WHEELMAKER_WEB_TARGET = $script:DesktopWebRoot'
 Assert-Contains "publish-desktop.bat" $bat "scripts\publish_desktop.ps1"
 
 $desktopIconPath = Join-Path $repoRoot "server\cmd\wheelmaker-desktop\winres\icon.png"
