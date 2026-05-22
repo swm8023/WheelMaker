@@ -465,14 +465,9 @@ Optional skips:
 - `-SkipWebPublish`
 - `-SkipRestart`
 
-There are two updater trigger paths:
+The updater trigger path is:
 
 - `update-publish.bat` / `update-publish.sh` writes a `full-update` signal. The updater runs pull, deps, build, install, Web publish, release manifest write, then restarts Hub and Monitor.
-- `scripts\signal_update_now.ps1` writes a plain local refresh signal. The updater skips pull/deps and refreshes the current checkout, including build, install, Web publish, release manifest write, and Hub/Monitor restart.
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/signal_update_now.ps1 -DelaySeconds 30
-```
 
 ### 8. Quick validation checklist
 
@@ -631,7 +626,6 @@ npm run build:web:release
 Script overview:
 
 - `scripts\refresh_server.ps1` — service-first build and deployment
-- `scripts\signal_update_now.ps1` — async local refresh trigger
 - `update-publish.bat` / `update-publish.sh` — async full update and Web publish trigger
 - `app\scripts\export_web_release.ps1` — export Web assets to `~\.wheelmaker\web`
 
