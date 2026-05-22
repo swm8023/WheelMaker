@@ -1,15 +1,44 @@
 # Registry 端口中转设计规格
 
 Date: 2026-05-22
-Status: Draft
+Status: ready-for-agent
 
-父级 PRD：`docs/superpowers/specs/2026-05-22-registry-port-relay-prd.md`
+## 问题陈述
+
+WheelMaker 需要让 App 或浏览器访问某个 Hub 机器上的第三方本地 Web 页面。该页面由第三方服务提供，通常运行在 Hub 本机或 Hub 可访问的固定地址上，并且页面本身只是静态壳，主要能力通过 WebSocket 提供。
+
+直接在 App 中打开 `127.0.0.1:<port>` 不成立，因为 App/WebView 中的 `127.0.0.1` 指向手机或当前浏览器机器，而不是目标 Hub。要求支持 Machine B 这类只主动连接 Registry、没有公网入口的 Hub，因此不能要求外部客户端直接访问 Hub 的本机端口。
+
+目标是让 Registry 充当一个运行态中转站：App 在设置页面打开一个全局单例端口映射，指定 Registry 监听端口、目标 Hub、目标 host/port 和 6 位访问码。之后 App 或浏览器访问 Registry 上的这个端口，就能通过 Hub 主动建立的数据 tunnel 访问目标第三方页面。
 
 ## 目标
 
 让 App 或浏览器通过 Registry 上的一个用户配置端口访问目标 Hub 上的第三方本地 Web 服务。第三方页面使用根路径 `/`、普通 HTTP 静态资源和 WebSocket，不要求 path-prefix 改造。
 
 该功能必须支持目标 Hub 在 NAT 或内网之后的场景：外部客户端只访问 Registry，Hub 通过现有标准 Registry 连接接收控制命令，并主动建立到 Registry relay 端口的数据 tunnel。
+
+## 用户故事
+
+1. 作为 WheelMaker 用户，我想在 App 设置页面打开端口中转，这样可以访问目标 Hub 上的第三方本地 Web 页面。
+2. 作为 WheelMaker 用户，我想选择目标 Hub，这样可以访问没有公网入口但已经连上 Registry 的机器。
+3. 作为 WheelMaker 用户，我想设置 Registry 监听端口，这样可以用固定端口在 App 或浏览器里打开页面。
+4. 作为 WheelMaker 用户，我想设置目标 host 和目标 port，这样 relay 能映射到 Hub 可访问的固定服务地址。
+5. 作为 WheelMaker 用户，我想一次只启用一个 mapping，这样当前 relay 端口的目标明确，不会出现多页面互相抢路径。
+6. 作为 WheelMaker 用户，我想在设置页生成一个 6 位数字访问码，这样可以把访问地址临时分享给自己当前设备，而不需要改配置文件。
+7. 作为 WheelMaker 用户，我希望每次开启、切换目标或重新生成访问码后旧访问码立即失效，这样旧链接不会长期可用。
+8. 作为 WheelMaker 用户，我希望设置页显示 `Disabled`、`Opening`、`Up`、`Error` 状态，这样能判断 tunnel 是否真正建立成功。
+9. 作为 WheelMaker 用户，我希望点击 Open 后 App 内和浏览器都访问同一个 relay 地址，这样不用为 App 和 Web 分别设计入口。
+10. 作为 WheelMaker 用户，我希望第三方页面可以使用根路径 `/`、绝对静态资源路径和自己的 WebSocket 路径，这样不需要改造第三方静态壳。
+11. 作为 WheelMaker 用户，我希望 HTTP 页面和 WebSocket 服务使用同一个 Registry relay 端口，这样第三方页面按普通浏览器访问模型运行。
+12. 作为 WheelMaker 用户，我希望第三方 WebSocket 的文本帧、二进制帧都能转发，这样不要求第三方协议必须是 JSON。
+13. 作为 WheelMaker 用户，我希望 Hub 侧请求带浏览器风格 `User-Agent`，这样依赖 User-Agent 判断的第三方本地服务可以正常响应。
+14. 作为 WheelMaker 用户，我希望关闭 relay 时当前访问立即断开，这样本地服务不会继续暴露。
+15. 作为 WheelMaker 用户，我希望切换 Hub 或目标端口时旧 tunnel 被关闭，新 tunnel 成功后状态更新，这样不会把请求转到旧目标。
+16. 作为 WheelMaker 开发者，我希望端口中转逻辑集中在一个 server 包中，这样自定义 frame、stream 复用和认证逻辑有清晰边界。
+17. 作为 WheelMaker 开发者，我希望现有 Registry JSON envelope 继续只做控制面，这样不会把不透明 HTTP/WS 数据塞进业务协议。
+18. 作为 WheelMaker 开发者，我希望 relay 数据面使用自定义二进制 frame，这样可以高效传输 HTTP body 和 WebSocket binary frame。
+19. 作为 WheelMaker 开发者，我希望一条 active tunnel 内复用多个 stream，这样页面加载多个静态资源和 WebSocket 时不会串行阻塞。
+20. 作为 WheelMaker 开发者，我希望 App 只通过受控 control method 修改全局 relay slot，这样普通数据端口访问者不能修改映射。
 
 ## 非目标
 
@@ -523,6 +552,23 @@ App 测试：
 - 状态 `Disabled/Opening/Up/Error` 展示。
 - Open URL 从 registry address 和 listen port 推导。
 - 页面刷新后无法恢复明文访问码时要求 regenerate。
+
+## 验收标准
+
+1. 用户可以在 Settings 中打开 Port Relay 页面。
+2. 用户可以选择在线 Hub、设置 listen port、target host、target port，并生成 6 位访问码。
+3. 启用 relay 后，Registry 通过现有控制连接通知目标 Hub 建立数据 tunnel。
+4. Tunnel 建立成功后，设置页显示 `Up` 和可访问地址。
+5. 浏览器访问 relay 端口时，未认证用户看到访问码登录页。
+6. 输入正确访问码后，浏览器能加载 Hub 目标端口上的 `GET /` 页面。
+7. 页面发起 `GET /assets/...` 等资源请求时，能通过同一 active tunnel 成功加载。
+8. 页面发起 `ws://host:<listenPort>/ws` 或同源 WebSocket 时，能连接到 Hub 目标服务的对应 WS path。
+9. WebSocket text frame 能双向转发。
+10. WebSocket binary frame 能双向转发。
+11. Hub 侧目标服务能看到浏览器风格 `User-Agent`。
+12. 关闭 relay 后，relay 端口不可继续访问目标服务，既有 stream 被关闭。
+13. 切换 Hub 或 target port 后，旧 tunnel 不再接收新请求。
+14. Machine B 只主动连接 Registry 时，仍能作为 relay 目标 Hub 被访问。
 
 ## 实施顺序
 
