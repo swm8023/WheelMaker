@@ -219,8 +219,8 @@ body,
 .desktop-titlebar-source-select {
   align-self: center;
   height: 24px;
-  max-width: 116px;
-  margin-right: 6px;
+  min-width: 0;
+  max-width: min(320px, 100%);
   border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   border-radius: 4px;
   background: color-mix(in srgb, var(--panel-2) 82%, transparent);
@@ -228,6 +228,7 @@ body,
   font: inherit;
   font-size: 12px;
   padding: 0 18px 0 8px;
+  flex: 0 1 auto;
 }
 
 .desktop-titlebar-button {

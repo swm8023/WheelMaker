@@ -13,6 +13,12 @@ function invokeDesktopAction(action: (() => Promise<void> | void) | undefined) {
   void action?.();
 }
 
+function isDesktopTitleBarInteractiveTarget(target: EventTarget | null) {
+  const targetElement = target as { closest?: (selector: string) => Element | null } | null;
+  return typeof targetElement?.closest === 'function'
+    && Boolean(targetElement.closest('button, select, [data-desktop-titlebar-interactive]'));
+}
+
 export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
   const bridge = getDesktopWindowBridge();
   const suppressNextDoubleClickRef = useRef(false);
@@ -36,8 +42,7 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
     if (event.button !== 0) {
       return;
     }
-    const target = event.target as { closest?: (selector: string) => Element | null } | null;
-    if (typeof target?.closest === 'function' && target.closest('button')) {
+    if (isDesktopTitleBarInteractiveTarget(event.target)) {
       return;
     }
     event.preventDefault();
@@ -49,7 +54,11 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
     invokeDesktopAction(bridge.startDrag);
   };
 
-  const handleDragDoubleClick = () => {
+  const handleDragDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (isDesktopTitleBarInteractiveTarget(event.target)) {
+      suppressNextDoubleClickRef.current = false;
+      return;
+    }
     if (suppressNextDoubleClickRef.current) {
       suppressNextDoubleClickRef.current = false;
       return;
@@ -65,6 +74,8 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
     window.location.reload();
   };
   const displayTitle = webSourceState?.displayTitle || title;
+  const hasRemoteWebSource = Boolean(webSourceState?.remoteUrl && webSourceState.remoteHost && bridge.setWebSourcePreference);
+  const remoteSourceLabel = webSourceState?.remoteHost || webSourceState?.displaySource || 'Auto';
 
   return (
     <div className="desktop-titlebar" data-desktop-titlebar={true}>
@@ -75,21 +86,24 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
         onMouseDown={handleDragMouseDown}
       >
         <img className="desktop-titlebar-icon" src="/icons/icon.svg" alt="" draggable={false} />
-        <span className="desktop-titlebar-title" title={webSourceState?.remoteUrl || displayTitle}>{displayTitle}</span>
-      </div>
-      <div className="desktop-titlebar-controls">
-        {webSourceState && bridge.setWebSourcePreference ? (
+        {hasRemoteWebSource ? (
           <select
             className="desktop-titlebar-source-select"
             aria-label="Desktop web source"
-            title={webSourceState.remoteUrl || webSourceState.displaySource}
-            value={webSourceState.preference}
+            data-desktop-titlebar-interactive={true}
+            title={webSourceState?.remoteUrl || displayTitle}
+            value="current"
             onChange={handleWebSourcePreferenceChange}
           >
-            <option value="auto">Auto</option>
+            <option value="current" hidden>{displayTitle}</option>
+            <option value="auto">{remoteSourceLabel}</option>
             <option value="embedded">Embedded</option>
           </select>
-        ) : null}
+        ) : (
+          <span className="desktop-titlebar-title" title={displayTitle}>{displayTitle}</span>
+        )}
+      </div>
+      <div className="desktop-titlebar-controls">
         <button
           type="button"
           className="desktop-titlebar-button"

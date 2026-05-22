@@ -20,18 +20,18 @@ describe('desktop title bar', () => {
     expect(renderer!.toJSON()).toBeNull();
   });
 
-  test('renders themed native window controls inside the desktop runtime', async () => {
+  test('renders source selector in the title text position when a remote URL is available', async () => {
     const startDrag = jest.fn();
     const minimize = jest.fn();
     const toggleMaximize = jest.fn();
     const close = jest.fn();
     const getWebSourceState = jest.fn(async () => ({
       preference: 'auto',
-      actualSource: 'embedded',
-      displayTitle: 'WheelMaker - Embedded',
-      displaySource: 'Embedded',
-      remoteUrl: '',
-      remoteHost: '',
+      actualSource: 'remote',
+      displayTitle: 'WheelMaker - example.com',
+      displaySource: 'example.com',
+      remoteUrl: 'https://example.com/',
+      remoteHost: 'example.com',
     }));
     const setWebSourcePreference = jest.fn(async () => ({
       preference: 'embedded',
@@ -62,10 +62,16 @@ describe('desktop title bar', () => {
 
     const root = renderer!.root;
     expect(root.findByProps({'data-desktop-titlebar': true})).toBeDefined();
-    expect(root.findByProps({className: 'desktop-titlebar-title'}).props.children).toBe('WheelMaker - Embedded');
     expect(root.findByType('img').props.src).toBe('/icons/icon.svg');
+    expect(root.findAllByProps({className: 'desktop-titlebar-title'})).toHaveLength(0);
     const select = root.findByProps({className: 'desktop-titlebar-source-select'});
-    expect(select.props.value).toBe('auto');
+    expect(select.props['data-desktop-titlebar-interactive']).toBe(true);
+    expect(select.props.title).toBe('https://example.com/');
+    expect(select.findAllByType('option').filter(option => !option.props.hidden).map(option => option.props.children)).toEqual([
+      'example.com',
+      'Embedded',
+    ]);
+    expect(select.props.value).toBe('current');
     await ReactTestRenderer.act(async () => {
       await select.props.onChange({target: {value: 'embedded'}});
     });
@@ -73,6 +79,7 @@ describe('desktop title bar', () => {
     expect(reload).toHaveBeenCalled();
 
     const dragRegion = root.findByProps({'data-desktop-titlebar-drag-region': true});
+    expect(root.findByProps({className: 'desktop-titlebar-controls'}).findAllByType('select')).toHaveLength(0);
     expect(dragRegion.props.onPointerDown).toBeUndefined();
     const preventDefault = jest.fn();
     dragRegion.props.onMouseDown({
@@ -83,7 +90,20 @@ describe('desktop title bar', () => {
     });
     expect(preventDefault).toHaveBeenCalled();
     expect(startDrag).toHaveBeenCalled();
-    dragRegion.props.onDoubleClick();
+    const selectMouseDownPreventDefault = jest.fn();
+    dragRegion.props.onMouseDown({
+      button: 0,
+      detail: 1,
+      target: { closest: (selector: string) => selector.includes('[data-desktop-titlebar-interactive]') ? {} : null },
+      preventDefault: selectMouseDownPreventDefault,
+    });
+    expect(selectMouseDownPreventDefault).not.toHaveBeenCalled();
+    expect(startDrag).toHaveBeenCalledTimes(1);
+    dragRegion.props.onDoubleClick({
+      target: { closest: (selector: string) => selector.includes('[data-desktop-titlebar-interactive]') ? {} : null },
+    });
+    expect(toggleMaximize).not.toHaveBeenCalled();
+    dragRegion.props.onDoubleClick({ target: { closest: () => null } });
     expect(toggleMaximize).toHaveBeenCalledTimes(1);
     const doubleClickPreventDefault = jest.fn();
     dragRegion.props.onMouseDown({
@@ -95,7 +115,7 @@ describe('desktop title bar', () => {
     expect(doubleClickPreventDefault).toHaveBeenCalled();
     expect(startDrag).toHaveBeenCalledTimes(1);
     expect(toggleMaximize).toHaveBeenCalledTimes(2);
-    dragRegion.props.onDoubleClick();
+    dragRegion.props.onDoubleClick({ target: { closest: () => null } });
     expect(toggleMaximize).toHaveBeenCalledTimes(2);
 
     const buttons = root.findAllByType('button');
@@ -112,5 +132,31 @@ describe('desktop title bar', () => {
     expect(minimize).toHaveBeenCalled();
     expect(toggleMaximize).toHaveBeenCalledTimes(3);
     expect(close).toHaveBeenCalled();
+  });
+
+  test('renders plain embedded title text when no remote URL is available', async () => {
+    const getWebSourceState = jest.fn(async () => ({
+      preference: 'auto',
+      actualSource: 'embedded',
+      displayTitle: 'WheelMaker - Embedded',
+      displaySource: 'Embedded',
+      remoteUrl: '',
+      remoteHost: '',
+    }));
+    (global as typeof globalThis & { window?: unknown }).window = {
+      WheelMakerDesktop: {
+        enabled: true,
+        getWebSourceState,
+      },
+    };
+
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<DesktopTitleBar title="WheelMaker" />);
+    });
+
+    const root = renderer!.root;
+    expect(root.findByProps({className: 'desktop-titlebar-title'}).props.children).toBe('WheelMaker - Embedded');
+    expect(root.findAllByProps({className: 'desktop-titlebar-source-select'})).toHaveLength(0);
   });
 });
