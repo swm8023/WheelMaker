@@ -4,6 +4,8 @@ Status: ready-for-agent
 
 父级 PRD：`docs/superpowers/specs/2026-05-22-registry-port-relay-prd.md`
 
+技术设计规格：`docs/superpowers/specs/2026-05-22-registry-port-relay-design.md`
+
 这组本地 issue 将 Registry 端口中转功能拆成可交给 AFK agent 执行的竖切任务。目标是在 App 设置页启用一个 Registry 全局单例 relay slot，指定 listen port、目标 Hub、目标 host/port 和 6 位访问码；Registry 使用现有 `/ws` 作为控制面，通知目标 Hub 主动连接 relay 数据端口；App 或浏览器访问该 relay 端口时，HTTP 与 WebSocket 都通过自定义 tunnel 转发到目标 Hub 上的第三方本地服务。
 
 核心约束：
