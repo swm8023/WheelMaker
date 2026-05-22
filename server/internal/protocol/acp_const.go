@@ -108,8 +108,6 @@ func ParseACPProvider(name string) (ACPProvider, bool) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case string(ACPProviderCodex):
 		return ACPProviderCodex, true
-	case "codexapp":
-		return ACPProviderCodex, true
 	case string(ACPProviderClaude):
 		return ACPProviderClaude, true
 	case string(ACPProviderCopilot):

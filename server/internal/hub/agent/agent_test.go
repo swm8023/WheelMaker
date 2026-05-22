@@ -275,12 +275,8 @@ func TestParseACPProviderCodexAliases(t *testing.T) {
 	if provider != protocol.ACPProviderCodex {
 		t.Fatalf("provider=%q, want %q", provider, protocol.ACPProviderCodex)
 	}
-	provider, ok = protocol.ParseACPProvider("codexapp")
-	if !ok {
-		t.Fatal("ParseACPProvider(codexapp) returned ok=false")
-	}
-	if provider != protocol.ACPProviderCodex {
-		t.Fatalf("codexapp alias provider=%q, want %q", provider, protocol.ACPProviderCodex)
+	if _, ok := protocol.ParseACPProvider("codexapp"); ok {
+		t.Fatal("ParseACPProvider accepted removed codexapp alias")
 	}
 	if _, ok := protocol.ParseACPProvider("codex-app"); ok {
 		t.Fatal("ParseACPProvider accepted legacy codex-app alias")
@@ -301,6 +297,9 @@ func TestParseACPProviderCodexAliases(t *testing.T) {
 
 func TestProviderPresetByNameRejectsRemovedProvider(t *testing.T) {
 	removedProviderName := strings.Join([]string{"my", "flicker"}, "")
+	if _, ok := providerPresetByName("codexapp"); ok {
+		t.Fatal("providerPresetByName accepted removed codexapp alias")
+	}
 	if _, ok := providerPresetByName(removedProviderName); ok {
 		t.Fatal("providerPresetByName accepted removed provider")
 	}

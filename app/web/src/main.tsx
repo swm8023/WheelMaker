@@ -630,8 +630,7 @@ const AGENT_TAG_VARIANT_INDEX: Record<string, number> = {
 };
 
 function normalizeAgentTypeName(value?: string | null): string {
-  const normalized = (value || '').trim();
-  return normalized.toLowerCase() === 'codexapp' ? 'codex' : normalized;
+  return (value || '').trim();
 }
 
 function tagVariantClass(prefix: string, value: string): string {

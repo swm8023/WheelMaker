@@ -1185,15 +1185,16 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('wideProjectActionMenuRef.current?.contains(target)');
   });
 
-  test('normalizes legacy codexapp agent names before rendering project actions', () => {
+  test('does not rewrite removed codexapp agent names in web payloads', () => {
     const projectRoot = path.join(__dirname, '..');
     const repositoryTs = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'services', 'registryRepository.ts'), 'utf8');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
 
     expect(repositoryTs).toContain('function normalizeAgentType(agentType: unknown): string | undefined');
-    expect(repositoryTs).toContain("return normalized.toLowerCase() === 'codexapp' ? 'codex' : normalized;");
+    expect(repositoryTs).not.toContain("return normalized.toLowerCase() === 'codexapp' ? 'codex' : normalized;");
     expect(repositoryTs).toContain('agentType: normalizeAgentType(input.agentType),');
     expect(repositoryTs).toContain('.map(item => normalizeAgentType(item))');
+    expect(mainTsx).not.toContain("return normalized.toLowerCase() === 'codexapp' ? 'codex' : normalized;");
     expect(mainTsx).not.toContain('codexapp: 3');
   });
 });

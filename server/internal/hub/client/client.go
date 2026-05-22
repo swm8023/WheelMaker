@@ -242,6 +242,9 @@ func sanitizePreferenceConfigOptions(options []PreferenceConfigOption) []Prefere
 
 func (c *Client) createSessionState(ctx context.Context, agentType, title string) (*createdSessionState, error) {
 	agentType = normalizeAgentType(agentType)
+	if _, ok := acp.ParseACPProvider(agentType); !ok {
+		return nil, fmt.Errorf("no agent registered for %q", agentType)
+	}
 	creator := c.registry.CreatorByName(agentType)
 	if creator == nil {
 		fallback := ""

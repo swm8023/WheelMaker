@@ -69,7 +69,7 @@ function normalizeAgentType(agentType: unknown): string | undefined {
   if (!normalized) {
     return undefined;
   }
-  return normalized.toLowerCase() === 'codexapp' ? 'codex' : normalized;
+  return normalized;
 }
 
 function normalizeAgentTypes(agentTypes: unknown): string[] {

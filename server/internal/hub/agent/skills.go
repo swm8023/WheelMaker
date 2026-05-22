@@ -26,7 +26,7 @@ func ListProviderSkills(ctx context.Context, providerName, cwd string) ([]SkillD
 
 func providerPresetByName(name string) (ACPProviderPreset, bool) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case CodexProviderPreset.Name, "codexapp":
+	case CodexProviderPreset.Name:
 		return CodexProviderPreset, true
 	case ClaudeACPProviderPreset.Name:
 		return ClaudeACPProviderPreset, true
