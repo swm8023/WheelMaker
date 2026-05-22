@@ -23,15 +23,15 @@ WheelMaker/
 
 ### Issue tracker
 
-Issues live as local markdown files under `docs/issues/`. See `docs/agents/issue-tracker.md`.
+Issue 以本地 markdown 文件形式存放在 `docs/issues/`。详见 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
-The repo uses the default five-label triage vocabulary. See `docs/agents/triage-labels.md`.
+仓库使用默认的五类 triage 标签词表。详见 `docs/agents/triage-labels.md`。
 
 ### Domain docs
 
-This is a single-context repo using root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+这是 single-context 仓库，使用根目录 `CONTEXT.md` 和 `docs/adr/`。详见 `docs/agents/domain.md`。
 
 ## Completion Gate (Highest Priority)
 Before the final user-facing completion message in any implementation task, execute this exact tail sequence:

@@ -1,22 +1,22 @@
-# Domain Docs
+# 领域文档
 
-How the engineering skills should consume this repo's domain documentation when exploring the codebase.
+工程技能探索代码库时，应按本文档读取本仓库的领域文档。
 
-## Layout
+## 布局
 
-This is a single-context repo.
+这是 single-context 仓库。
 
-- Read `CONTEXT.md` at the repo root for project vocabulary and domain language.
-- Read relevant ADRs under `docs/adr/` before proposing changes that touch architecture or durable protocol decisions.
+- 读取仓库根目录的 `CONTEXT.md`，了解项目词表和领域语言。
+- 在提出涉及架构或持久协议决策的改动前，读取 `docs/adr/` 下相关的 ADR。
 
-If a file is missing, proceed silently. Do not suggest creating new domain docs upfront; create or update them only when a task resolves new terminology or architectural decisions.
+如果某个文件不存在，静默继续。不要预先建议创建新的领域文档；只有当任务明确沉淀了新术语或架构决策时，才创建或更新相关文档。
 
-## Use The Glossary's Vocabulary
+## 使用词表中的语言
 
-When output names a domain concept in an issue title, refactor proposal, hypothesis, or test name, use the term as defined in `CONTEXT.md`. Avoid drifting to synonyms the glossary explicitly avoids.
+当 issue 标题、重构建议、假设或测试名称需要命名领域概念时，使用 `CONTEXT.md` 中定义的术语。避免漂移到词表明确不推荐的同义词。
 
-If the concept needed is not in the glossary yet, note the gap for a future domain-doc update instead of inventing new public terminology casually.
+如果需要的概念尚未进入词表，记录这个缺口供后续更新领域文档；不要随意创造新的公开术语。
 
-## Flag ADR Conflicts
+## 标出 ADR 冲突
 
-If proposed work contradicts an existing ADR, surface it explicitly rather than silently overriding the decision.
+如果计划中的工作与现有 ADR 冲突，必须明确指出，不要静默覆盖已有决策。

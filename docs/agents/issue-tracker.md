@@ -1,20 +1,20 @@
-# Issue Tracker: Local Markdown
+# Issue Tracker：本地 Markdown
 
-Issues and PRDs for this repo live as markdown files under `docs/issues/`.
+本仓库的 issue 和 PRD 以 markdown 文件形式存放在 `docs/issues/`。
 
-## Conventions
+## 约定
 
-- One feature per directory: `docs/issues/<feature-slug>/`
-- The PRD copy or parent reference is `docs/issues/<feature-slug>/PRD.md` when needed.
-- Implementation issues live under `docs/issues/<feature-slug>/issues/`.
-- Issue files are numbered from `01`, using `NN-<slug>.md`.
-- Triage state is recorded as a `Status:` line near the top of each issue file.
-- Comments and conversation history append to the bottom of the file under a `## Comments` heading.
+- 每个功能一个目录：`docs/issues/<feature-slug>/`
+- 需要 PRD 副本或父级引用时，放在 `docs/issues/<feature-slug>/PRD.md`。
+- 实现 issue 放在 `docs/issues/<feature-slug>/issues/` 下。
+- issue 文件从 `01` 开始编号，命名为 `NN-<slug>.md`。
+- triage 状态写在每个 issue 文件顶部附近的 `Status:` 行。
+- 评论和对话历史追加到文件底部的 `## 评论` 标题下。
 
-## When a skill says "publish to the issue tracker"
+## 当技能要求“发布到 issue tracker”
 
-Create a new markdown issue file under `docs/issues/<feature-slug>/issues/`, creating the directory if needed.
+在 `docs/issues/<feature-slug>/issues/` 下创建新的 markdown issue 文件；目录不存在时先创建目录。
 
-## When a skill says "fetch the relevant ticket"
+## 当技能要求“读取相关 ticket”
 
-Read the referenced markdown file. The user will normally pass the path or issue number directly.
+读取被引用的 markdown 文件。用户通常会直接给出路径或 issue 编号。

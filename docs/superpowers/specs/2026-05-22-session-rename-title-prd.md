@@ -1,103 +1,103 @@
-# Session Rename Title PRD
+# Session 标题重命名 PRD
 
 Status: ready-for-agent
 
-## Problem Statement
+## 问题陈述
 
-WheelMaker currently derives chat session titles from prompt title facts. Users cannot correct, shorten, or reset a session title from the web UI. The current `Use Latest Prompt Title` option also makes title behavior less predictable because one global setting can change how every session label is displayed.
+WheelMaker 当前从 prompt title facts 推导 chat session 标题。用户无法在 Web UI 中修正、缩短或重置 session 标题。现有 `Use Latest Prompt Title` 选项也让标题行为不够可预测，因为一个全局设置会改变所有 session label 的显示方式。
 
-Users need a simple session-level rename action. A manually renamed session must keep that title until the user clears it, even if later prompts or agent-side title updates arrive.
+用户需要一个简单的 session 级 rename action。手动重命名过的 session 必须保持该标题，直到用户主动清除；即使后续 prompt 或 agent-side title update 到达，也不能覆盖它。
 
-## Solution
+## 方案
 
-Add a frontend rename action for each session. The action opens a single-line dialog prefilled with the current displayed title. Saving a non-empty value stores a manual title. Saving an empty or whitespace-only value clears the manual title and restores the automatic first-prompt title.
+为每个 session 增加前端 rename action。该 action 打开一个单行 dialog，并预填当前显示标题。保存非空值会存储手动标题。保存空值或全空白值会清除手动标题，并恢复自动 first-prompt title。
 
-The backend exposes a new `session.rename` request and stores manual title state inside the existing session title facts JSON. No SQLite schema migration is required. The display-title rule becomes deterministic:
+后端暴露新的 `session.rename` 请求，并把手动标题状态存入现有 session title facts JSON。不需要 SQLite schema migration。显示标题规则变为确定性顺序：
 
-1. Use `manual` when present.
-2. Otherwise use `first`.
-3. Otherwise use `last` or legacy raw title when needed.
+1. 有 `manual` 时使用 `manual`。
+2. 否则使用 `first`。
+3. 否则在需要时使用 `last` 或 legacy raw title。
 
-The global `Use Latest Prompt Title` setting is removed. Unrenamed sessions use the first prompt title by default.
+移除全局 `Use Latest Prompt Title` 设置。未重命名 session 默认使用 first prompt title。
 
-## User Stories
+## 用户故事
 
-1. As a WheelMaker web user, I want to rename a session from the session list, so that I can recognize it later without relying on the first generated prompt title.
-2. As a WheelMaker web user, I want the rename action near existing session actions, so that I do not need to search through settings or another screen.
-3. As a WheelMaker web user, I want a focused rename dialog, so that I can edit the title without navigating away from the chat.
-4. As a WheelMaker web user, I want the rename dialog to show the current displayed title, so that I can make a small edit instead of retyping it.
-5. As a WheelMaker web user, I want Save and Cancel actions, so that I can either commit or abandon title edits explicitly.
-6. As a WheelMaker web user, I want an empty saved title to clear my manual rename, so that I can return a session to automatic naming.
-7. As a WheelMaker web user, I want whitespace-only input to behave like empty input, so that accidental spaces do not create invisible titles.
-8. As a WheelMaker web user, I want renamed sessions to keep their manual title after new prompts, so that later prompt titles do not undo my organization.
-9. As a WheelMaker web user, I want renamed sessions to keep their manual title after agent-side title events, so that provider updates do not override my choice.
-10. As a WheelMaker web user, I want unrenamed sessions to use the first prompt title, so that old sessions have stable names.
-11. As a WheelMaker web user, I want the latest-prompt title setting removed, so that session title behavior is consistent.
-12. As a WheelMaker web user, I want to rename a running session, so that I can label it while the agent is still working.
-13. As a WheelMaker web user, I want renaming to update the session row without moving the row, so that the list does not jump unexpectedly.
-14. As a WheelMaker web user, I want renaming to work on desktop and mobile layouts, so that the feature is available wherever the session action strip appears.
-15. As a WheelMaker web user, I want long titles to be bounded, so that accidental paste input cannot break the UI.
-16. As a WheelMaker web user, I want pasted multiline text normalized into a single-line title, so that session labels remain list-friendly.
-17. As a WheelMaker web user, I want rename failures to leave the old title visible, so that the UI does not imply a change that was not saved.
-18. As a WheelMaker web user, I want title changes from another client to appear through normal session updates, so that multiple open clients converge.
-19. As a WheelMaker developer, I want one backend title-facts module to own title parsing and priority rules, so that automatic and manual title behavior stays testable.
-20. As a WheelMaker developer, I want one frontend title resolver to mirror backend display semantics, so that list labels and selected-session labels do not diverge.
-21. As a WheelMaker developer, I want no database schema change for this feature, so that existing hubs can upgrade without startup migration risk.
-22. As a WheelMaker developer, I want `session.rename` to be a registry-routed session request, so that local and remote hub behavior uses the same contract.
+1. 作为 WheelMaker web 用户，我想从 session list 重命名 session，这样以后识别它时不必依赖首次生成的 prompt 标题。
+2. 作为 WheelMaker web 用户，我希望 rename action 放在现有 session action 附近，这样不需要去 settings 或另一个页面寻找。
+3. 作为 WheelMaker web 用户，我希望有一个聚焦的 rename dialog，这样不用离开 chat 就能编辑标题。
+4. 作为 WheelMaker web 用户，我希望 rename dialog 显示当前标题，这样可以小幅修改而不是重新输入。
+5. 作为 WheelMaker web 用户，我希望有 Save 和 Cancel action，这样可以明确提交或放弃标题编辑。
+6. 作为 WheelMaker web 用户，我希望保存空标题能清除手动 rename，这样可以让 session 回到自动命名。
+7. 作为 WheelMaker web 用户，我希望全空白输入按空输入处理，这样误输入空格不会创建不可见标题。
+8. 作为 WheelMaker web 用户，我希望重命名后的 session 在新 prompt 后仍保留手动标题，这样后续 prompt 标题不会破坏我的组织方式。
+9. 作为 WheelMaker web 用户，我希望重命名后的 session 在 agent-side title event 后仍保留手动标题，这样 provider 更新不会覆盖我的选择。
+10. 作为 WheelMaker web 用户，我希望未重命名 session 使用 first prompt title，这样旧 session 标题稳定。
+11. 作为 WheelMaker web 用户，我希望移除 latest-prompt title 设置，这样 session 标题行为一致。
+12. 作为 WheelMaker web 用户，我希望能重命名运行中的 session，这样 agent 仍在工作时也能给它标注。
+13. 作为 WheelMaker web 用户，我希望 rename 更新 session 行但不移动该行，这样列表不会意外跳动。
+14. 作为 WheelMaker web 用户，我希望 rename 在 desktop 和 mobile layout 都可用，这样 session action strip 出现的地方都有该功能。
+15. 作为 WheelMaker web 用户，我希望长标题有边界限制，这样误粘贴不会破坏 UI。
+16. 作为 WheelMaker web 用户，我希望粘贴的多行文本归一化成单行标题，这样 session label 仍适合列表展示。
+17. 作为 WheelMaker web 用户，我希望 rename 失败时保留旧标题可见，这样 UI 不会暗示未保存成功的变化。
+18. 作为 WheelMaker web 用户，我希望其他 client 的标题变更通过正常 session update 呈现，这样多个打开的 client 能收敛。
+19. 作为 WheelMaker 开发者，我希望一个后端 title-facts 模块拥有标题解析和优先级规则，这样自动标题和手动标题行为可测试。
+20. 作为 WheelMaker 开发者，我希望一个前端 title resolver 镜像后端显示语义，这样 list label 和 selected-session label 不会分叉。
+21. 作为 WheelMaker 开发者，我希望该功能不改数据库 schema，这样现有 hub 可以升级且没有启动迁移风险。
+22. 作为 WheelMaker 开发者，我希望 `session.rename` 是 registry-routed session request，这样 local 和 remote hub 使用同一份契约。
 
-## Implementation Decisions
+## 实现决策
 
-- The public request method is `session.rename`.
-- The request payload contains `sessionId` and `title`.
-- The success response returns `ok: true`, the `sessionId`, and the updated session summary.
-- The registry method whitelist accepts `session.rename`.
-- The backend stores manual title state by extending the existing session title facts object with `manual`.
-- The backend does not add, remove, or migrate SQLite columns for this feature.
-- The backend title facts helper becomes the authoritative deep module for parsing, updating automatic facts, setting manual facts, clearing manual facts, and resolving display title.
-- Automatic title events continue to update automatic facts, but they must preserve any existing manual title.
-- Manual title has the highest display priority.
-- Empty or whitespace-only rename input clears the manual title.
-- Title normalization happens at input boundaries: trim outer whitespace, replace newlines with spaces, collapse unsafe multiline content into one line, and enforce a 200-character maximum.
-- Rename is allowed while a session is running.
-- Rename must not update session activity ordering, last-active timestamps, turn cursors, read cursors, or archived state.
-- Rename is WheelMaker display metadata only. It does not propagate to Codex, Claude, ACP, or provider-native thread title state.
-- Frontend title resolution removes the global latest-prompt toggle and always uses the deterministic title priority.
-- The `Use Latest Prompt Title` setting is removed from UI state, persistence writes, and settings rendering.
-- Existing persisted `Use Latest Prompt Title` values can be ignored; no client-side migration is needed.
-- The session action strip gains a Rename action that is enabled even when Reload and Archive are disabled for running sessions.
-- The rename dialog is a compact single-line modal using the existing confirmation/dialog style where practical.
-- The frontend service layer exposes a rename method that calls `session.rename` through the existing registry repository path.
-- The UI applies the server-returned session summary after save and also accepts later `registry.session.updated` events as the source of convergence.
+- 公共请求 method 是 `session.rename`。
+- 请求 payload 包含 `sessionId` 和 `title`。
+- 成功响应返回 `ok: true`、`sessionId` 和更新后的 session summary。
+- Registry method whitelist 接受 `session.rename`。
+- 后端通过给现有 session title facts object 扩展 `manual` 字段来存储手动标题状态。
+- 后端不为该功能新增、删除或迁移 SQLite column。
+- 后端 title facts helper 成为权威 deep module，负责解析、更新 automatic facts、设置 manual facts、清除 manual facts、解析 display title。
+- 自动 title event 继续更新 automatic facts，但必须保留已存在的手动标题。
+- 手动标题拥有最高显示优先级。
+- 空值或全空白 rename 输入会清除手动标题。
+- 标题归一化发生在输入边界：trim 外层空白、把换行替换为空格、把不安全的多行内容折叠成一行，并强制 200 字符上限。
+- 运行中的 session 允许 Rename。
+- Rename 不得更新 session 活动排序、last-active timestamp、turn cursor、read cursor 或 archived state。
+- Rename 只属于 WheelMaker 显示元数据，不传播到 Codex、Claude、ACP 或 provider-native thread title state。
+- 前端标题解析移除全局 latest-prompt toggle，并始终使用确定性标题优先级。
+- 从 UI state、persistence write 和 settings rendering 中移除 `Use Latest Prompt Title` 设置。
+- 已存在的持久化 `Use Latest Prompt Title` 值可以忽略；不需要客户端迁移。
+- session action strip 增加 Rename action；即使运行中 session 的 Reload 和 Archive 被禁用，Rename 仍可用。
+- rename dialog 是紧凑的单行 modal，尽量复用现有 confirmation/dialog 风格。
+- 前端 service layer 暴露 rename method，通过现有 registry repository 路径调用 `session.rename`。
+- UI 在保存后应用服务端返回的 session summary，并接受后续 `registry.session.updated` event 作为收敛来源。
 
-## Testing Decisions
+## 测试决策
 
-- Tests should assert externally visible behavior, not internal helper call order.
-- Backend request tests should cover `session.rename` with a non-empty manual title.
-- Backend request tests should cover empty or whitespace-only rename clearing the manual title.
-- Backend request tests should cover automatic prompt or agent title updates after manual rename without overriding manual title.
-- Backend request tests should cover rename while a session is running.
-- Backend request tests should cover rename not changing list ordering or last-active timestamps.
-- Backend request tests should cover input normalization and the 200-character limit.
-- Registry tests should cover forwarding `session.rename` through the same route as other session requests.
-- Frontend title resolver tests should cover `manual > first > last > legacy raw`.
-- Frontend repository and workspace service tests should cover the `session.rename` request method and payload.
-- Frontend UI tests should cover the Rename action presence in the session action strip.
-- Frontend UI tests should cover the removal of `Use Latest Prompt Title` from settings and persistence expectations.
-- Existing session archive, reload, config, and sync tests are prior art for request routing and session summary assertions.
+- 测试应断言外部可见行为，而不是内部 helper 调用顺序。
+- 后端请求测试应覆盖带非空手动标题的 `session.rename`。
+- 后端请求测试应覆盖空值或全空白 rename 清除手动标题。
+- 后端请求测试应覆盖手动 rename 后，自动 prompt 或 agent title update 不覆盖手动标题。
+- 后端请求测试应覆盖运行中 session 的 rename。
+- 后端请求测试应覆盖 rename 不改变 list ordering 或 last-active timestamp。
+- 后端请求测试应覆盖输入归一化和 200 字符限制。
+- Registry 测试应覆盖 `session.rename` 通过与其他 session request 相同的路径转发。
+- 前端 title resolver 测试应覆盖 `manual > first > last > legacy raw`。
+- 前端 repository 和 workspace service 测试应覆盖 `session.rename` request method 和 payload。
+- 前端 UI 测试应覆盖 session action strip 中存在 Rename action。
+- 前端 UI 测试应覆盖从 settings 和 persistence 期望中移除 `Use Latest Prompt Title`。
+- 现有 session archive、reload、config 和 sync 测试是 request routing 与 session summary 断言的先例。
 
-## Out of Scope
+## 非目标
 
-- Renaming provider-native Codex, Claude, ACP, or app-server thread titles.
-- Adding a database column or schema migration for manual titles.
-- Supporting per-client title preferences.
-- Supporting title history, undo, or audit logs.
-- Supporting bulk rename or project-level rename rules.
-- Changing session sorting, filtering, archive behavior, reload behavior, or read cursor behavior.
-- Adding a latest-prompt-title display mode under a different setting name.
-- Building a separate title editing screen outside the existing session list workflow.
+- 重命名 provider-native Codex、Claude、ACP 或 app-server thread title。
+- 为手动标题添加数据库 column 或 schema migration。
+- 支持 per-client title preference。
+- 支持标题历史、undo 或 audit log。
+- 支持批量 rename 或 project-level rename rule。
+- 改变 session sorting、filtering、archive behavior、reload behavior 或 read cursor behavior。
+- 用另一个设置名添加 latest-prompt-title display mode。
+- 在现有 session list workflow 之外构建独立标题编辑页面。
 
-## Further Notes
+## 补充说明
 
-The key product rule is that manual title state is user-owned WheelMaker metadata. Automatic title data can still be recorded for fallback display, but it must never win over `manual` until the user explicitly clears the manual title.
+关键产品规则是：手动标题状态是用户拥有的 WheelMaker metadata。自动标题数据仍可记录用于 fallback display，但在用户明确清除手动标题之前，绝不能优先于 `manual`。
 
-No external issue tracker is configured in this repository. This PRD is stored as a local `ready-for-agent` proposal under the existing Superpowers specs directory.
+本仓库未配置外部 issue tracker。该 PRD 作为本地 `ready-for-agent` 方案存放在现有 Superpowers specs 目录下。
