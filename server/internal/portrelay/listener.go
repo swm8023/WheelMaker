@@ -23,9 +23,10 @@ type relayListener struct {
 }
 
 func newRelayListener(port int, handler http.Handler) (*relayListener, error) {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("start relay listener on port %d: %w", port, err)
+		return nil, fmt.Errorf("start relay listener on %s: %w", addr, err)
 	}
 	srv := &http.Server{Handler: handler}
 	listener := &relayListener{port: port, srv: srv, ln: ln}

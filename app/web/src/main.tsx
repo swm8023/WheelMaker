@@ -17,6 +17,7 @@ import 'katex/dist/katex.min.css';
 declare const require: (id: string) => any;
 
 import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
+import { resolvePortRelayOpenUrl } from './portRelayUrl';
 import { initializePWAFoundation } from './pwa';
 import { DesktopTitleBar } from './shell/DesktopTitleBar';
 import { submitDesktopRemoteWebCandidate } from './shell/desktop/webSource';
@@ -511,25 +512,6 @@ function generatePortRelayAccessCode(): string {
     return String(value % 1_000_000).padStart(6, '0');
   }
   return String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
-}
-
-function buildPortRelayOpenUrl(registryAddress: string, portRelayListenPort: string | number): string {
-  const port = String(portRelayListenPort).trim();
-  if (!port) return '';
-  const rawAddress = (registryAddress || getDefaultRegistryAddress()).trim();
-  const addressWithScheme = /^[a-z]+:\/\//i.test(rawAddress) ? rawAddress : `http://${rawAddress}`;
-  try {
-    const url = new URL(addressWithScheme);
-    if (url.protocol === 'ws:') url.protocol = 'http:';
-    if (url.protocol === 'wss:') url.protocol = 'https:';
-    url.port = port;
-    url.pathname = '/';
-    url.search = '';
-    url.hash = '';
-    return url.toString();
-  } catch {
-    return `http://127.0.0.1:${port}/`;
-  }
 }
 
 function agentPackageActionForPackage(pkg: RegistryNpmPackage): 'install' | 'update' | 'uninstall' | null {
@@ -7298,12 +7280,16 @@ function App() {
   }, [applyPortRelaySnapshot, portRelaySnapshot.enabled]);
 
   const openPortRelay = useCallback(() => {
-    const openUrl = buildPortRelayOpenUrl(address, portRelayListenPort);
+    const openUrl = resolvePortRelayOpenUrl({
+      relayUrl: portRelaySnapshot.relayUrl,
+      registryAddress: address,
+      listenPort: portRelayListenPort,
+    });
     if (!openUrl) {
       return;
     }
     window.open(openUrl, '_blank', 'noopener,noreferrer');
-  }, [address, portRelayListenPort]);
+  }, [address, portRelayListenPort, portRelaySnapshot.relayUrl]);
 
   const updateHubCards = useMemo(() => {
     const hubIds = new Set<string>([
@@ -9985,7 +9971,11 @@ function App() {
   const renderPortRelaySettingsDetail = (options?: SettingsDetailShellOptions) => {
     const hubIds = deriveRegistryHubIds(registryHubs);
     const selectedHubId = portRelayHubId || hubIds[0] || '';
-    const openUrl = buildPortRelayOpenUrl(address, portRelayListenPort);
+    const openUrl = resolvePortRelayOpenUrl({
+      relayUrl: portRelaySnapshot.relayUrl,
+      registryAddress: address,
+      listenPort: portRelayListenPort,
+    });
     const statusClass = String(portRelaySnapshot.status || 'Disabled').toLowerCase();
     return renderSettingsDetailShell(
       'Port Relay',

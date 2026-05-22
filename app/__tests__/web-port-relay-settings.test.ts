@@ -27,7 +27,9 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).toContain('service.disablePortRelay');
     expect(mainTsx).toContain('service.regeneratePortRelayAccessCode');
     expect(mainTsx).toContain('generatePortRelayAccessCode');
-    expect(mainTsx).toContain('buildPortRelayOpenUrl(address, portRelayListenPort)');
+    expect(mainTsx).toContain("import { resolvePortRelayOpenUrl } from './portRelayUrl';");
+    expect(mainTsx).toContain('resolvePortRelayOpenUrl({');
+    expect(mainTsx).toContain('relayUrl: portRelaySnapshot.relayUrl');
     expect(mainTsx).toContain('window.open(openUrl, \'_blank\', \'noopener,noreferrer\')');
 
     expect(stylesCss).toContain('.port-relay-panel');
