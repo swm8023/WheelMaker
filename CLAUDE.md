@@ -19,6 +19,20 @@ WheelMaker/
 - 禁止无意义的 `strings.TrimSpace`：仅允许在明确的输入边界归一化场景使用，禁止在内部链路重复清洗
 - 当用户要求“更新发布工程”或同义表达时，Windows 调用根目录 `update-publish.bat`，macOS/Linux 调用根目录 `update-publish.sh`，通过 `WheelMakerUpdater` 异步执行完整更新发布；不要调用需要管理员交互/服务重建的 `deploy.bat` 或 `deploy.sh`
 
+## Agent skills
+
+### Issue tracker
+
+Issues live as local markdown files under `docs/issues/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The repo uses the default five-label triage vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repo using root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+
 ## Completion Gate (Highest Priority)
 Before the final user-facing completion message in any implementation task, execute this exact tail sequence:
 1. `git add -A`
