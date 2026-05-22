@@ -2,6 +2,7 @@
 
 Status: ready-for-agent
 Type: AFK
+Category: enhancement
 
 ## 父级
 
