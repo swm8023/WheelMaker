@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 describe('web hide tool calls setting', () => {
-  test('persists a default-off setting and skips tool entries only while rendering chat', () => {
+  test('persists a default-on setting and skips tool entries only while rendering chat', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const workspacePersistence = fs.readFileSync(
@@ -12,7 +12,7 @@ describe('web hide tool calls setting', () => {
 
     expect(workspacePersistence).toContain('hideToolCalls: boolean;');
     expect(workspacePersistence).toContain("hideToolCalls: 'hideToolCalls',");
-    expect(workspacePersistence).toContain('hideToolCalls: false,');
+    expect(workspacePersistence).toContain('hideToolCalls: true,');
     expect(workspacePersistence).toContain(
       "hideToolCalls: typeof input.hideToolCalls === 'boolean' ? input.hideToolCalls : base.hideToolCalls",
     );
@@ -21,6 +21,9 @@ describe('web hide tool calls setting', () => {
     );
 
     expect(mainTsx).toContain('const [hideToolCalls, setHideToolCalls] = useState(');
+    expect(mainTsx).toContain(
+      "typeof persistedGlobal.hideToolCalls === 'boolean'\n      ? persistedGlobal.hideToolCalls\n      : true",
+    );
     expect(mainTsx).toContain("renderSettingsSection('Chat'");
     const chatSettingsStart = mainTsx.indexOf("renderSettingsSection('Chat'");
     const hideToolCallsSettingStart = mainTsx.indexOf('Hide Tool Calls', chatSettingsStart);

@@ -2353,7 +2353,7 @@ function App() {
   const [hideToolCalls, setHideToolCalls] = useState(
     typeof persistedGlobal.hideToolCalls === 'boolean'
       ? persistedGlobal.hideToolCalls
-      : false,
+      : true,
   );
   const [registryDebug, setRegistryDebug] = useState(
     typeof persistedGlobal.registryDebug === 'boolean'

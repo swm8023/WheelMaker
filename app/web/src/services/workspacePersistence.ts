@@ -164,7 +164,7 @@ function defaultGlobalState(): PersistedGlobalState {
     chatFont: DEFAULT_CHAT_FONT,
     wrapLines: false,
     showLineNumbers: true,
-    hideToolCalls: false,
+    hideToolCalls: true,
     registryDebug: false,
     localHubReadEnabled: true,
     gestureNavigation: false,
