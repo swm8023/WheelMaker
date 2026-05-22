@@ -1203,6 +1203,94 @@ func TestCmdSkillsForwardsByHubIDWithoutProjectID(t *testing.T) {
 	}
 }
 
+func TestHubCommandForwardRequestsToDifferentHubsDoNotBlockBehindSlowHub(t *testing.T) {
+	s := New(Config{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	hubA := dialReportedHub(t, ts.URL+"/ws", "hub-a")
+	defer hubA.Close()
+	hubB := dialReportedHub(t, ts.URL+"/ws", "hub-b")
+	defer hubB.Close()
+
+	client := dialWS(t, ts.URL+"/ws")
+	defer client.Close()
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-web",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.3",
+			"role":            "client",
+		},
+	})
+	_ = mustReadEnvelope(t, client)
+
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "cmd.skills",
+		Payload: map[string]any{
+			"action": "update",
+			"hubId":  "hub-a",
+			"scope":  "hub",
+		},
+	})
+	_ = hubA.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	forwardedA := mustReadEnvelope(t, hubA)
+	if forwardedA.Type != "request" || forwardedA.Method != "cmd.skills" {
+		t.Fatalf("forwardedA=%#v, want cmd.skills request", forwardedA)
+	}
+
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 3,
+		Type:      "request",
+		Method:    "cmd.update",
+		Payload: map[string]any{
+			"action": "query",
+			"hubId":  "hub-b",
+		},
+	})
+	_ = hubB.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	forwardedB := mustReadEnvelope(t, hubB)
+	if forwardedB.Type != "request" || forwardedB.Method != "cmd.update" {
+		t.Fatalf("forwardedB=%#v, want cmd.update request", forwardedB)
+	}
+
+	mustWriteJSON(t, hubB, testEnvelope{
+		RequestID: forwardedB.RequestID,
+		Type:      "response",
+		Method:    "cmd.update",
+		Payload: map[string]any{
+			"ok":     true,
+			"hubId":  "hub-b",
+			"status": "up_to_date",
+		},
+	})
+	mustWriteJSON(t, hubA, testEnvelope{
+		RequestID: forwardedA.RequestID,
+		Type:      "response",
+		Method:    "cmd.skills",
+		Payload: map[string]any{
+			"ok":    true,
+			"hubId": "hub-a",
+		},
+	})
+	responses := map[int64]testEnvelope{}
+	for len(responses) < 2 {
+		resp := mustReadEnvelope(t, client)
+		responses[resp.RequestID] = resp
+	}
+	if responses[2].Type != "response" || responses[2].Method != "cmd.skills" {
+		t.Fatalf("client response 2=%#v, want cmd.skills response", responses[2])
+	}
+	if responses[3].Type != "response" || responses[3].Method != "cmd.update" {
+		t.Fatalf("client response 3=%#v, want cmd.update response", responses[3])
+	}
+}
+
 func TestCmdPrefixIsNotAllowedByWildcard(t *testing.T) {
 	s := New(Config{})
 	ts := httptest.NewServer(s.Handler())
@@ -1300,6 +1388,38 @@ func dialWS(t *testing.T, rawURL string) *websocket.Conn {
 		t.Fatalf("dial ws: %v", err)
 	}
 	return conn
+}
+
+func dialReportedHub(t *testing.T, rawURL string, hubID string) *websocket.Conn {
+	t.Helper()
+	hub := dialWS(t, rawURL)
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wheelmaker-hub",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.3",
+			"role":            "hub",
+			"hubId":           hubID,
+		},
+	})
+	initResp := mustReadEnvelope(t, hub)
+	principal, _ := initResp.Payload["principal"].(map[string]any)
+	connectionEpoch, _ := principal["connectionEpoch"].(float64)
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "registry.reportProjects",
+		Payload: map[string]any{
+			"hubId":           hubID,
+			"connectionEpoch": int64(connectionEpoch),
+			"projects":        []map[string]any{},
+		},
+	})
+	_ = mustReadEnvelope(t, hub)
+	return hub
 }
 
 func mustWriteJSON(t *testing.T, ws *websocket.Conn, v any) {

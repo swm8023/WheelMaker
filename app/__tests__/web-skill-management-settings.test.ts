@@ -67,6 +67,14 @@ describe('skill management settings UI source structure', () => {
     expect(mainTsx).toContain('codicon-trash');
   });
 
+  test('keeps Skills pending and polling scoped to the affected hub', () => {
+    expect(mainTsx).toContain('isSkillActionPendingForHub(skillsPendingKey, hubId)');
+    expect(mainTsx).toContain('skillOperationPollHubIdsRef');
+    expect(mainTsx).toContain('scheduleSkillOperationPoll(hubId)');
+    expect(mainTsx).not.toContain('options.operationRunning === true || !!skillsPendingKey');
+    expect(mainTsx).not.toContain('refreshSkillManagementRef.current?.().catch(() => undefined)');
+  });
+
   test('expands skill install controls inline with select all', () => {
     expect(mainTsx).toContain('sameSkillInstallTarget');
     expect(mainTsx).toContain('toggleAllSkillSourceCandidates');

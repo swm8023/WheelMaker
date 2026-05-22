@@ -1,6 +1,7 @@
 import {
   deriveSkillHubIds,
   groupSkillsByCategory,
+  isSkillActionPendingForHub,
   parseSkillSourceInput,
   skillScopeLabel,
   sortSkillProjects,
@@ -31,6 +32,14 @@ describe('skill management view helpers', () => {
   test('formats scope labels', () => {
     expect(skillScopeLabel({scope: 'hub', hubId: 'hub-a'})).toBe('Hub: hub-a');
     expect(skillScopeLabel({scope: 'project', hubId: 'hub-a', projectName: 'WheelMaker'})).toBe('Project: WheelMaker');
+  });
+
+  test('matches pending skill actions by hub only', () => {
+    const pendingKey = 'hub-a:project:WheelMaker:diagnose:skillUninstall';
+
+    expect(isSkillActionPendingForHub(pendingKey, 'hub-a')).toBe(true);
+    expect(isSkillActionPendingForHub(pendingKey, 'hub-b')).toBe(false);
+    expect(isSkillActionPendingForHub('', 'hub-a')).toBe(false);
   });
 
   test('parses pasted skills add commands without accepting agent flags', () => {

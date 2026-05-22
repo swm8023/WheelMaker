@@ -98,6 +98,16 @@ describe('agent package update settings UI source structure', () => {
     expect(stylesCss).toContain('.agent-package-action-btn');
   });
 
+  test('does not use one hub package operation to disable every hub action', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    expect(mainTsx).toContain('const pending = agentPackageActionPendingKey === pendingKey || operation?.running === true;');
+    expect(mainTsx).toContain('disabled={pending}');
+    expect(mainTsx).not.toContain('agentPackageAnyOperationRunning');
+    expect(mainTsx).not.toContain('disabled={pending || agentPackageAnyOperationRunning}');
+  });
+
   test('makes WheelMaker release identity and SHA rows visually distinct', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');

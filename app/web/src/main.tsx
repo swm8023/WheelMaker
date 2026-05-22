@@ -125,6 +125,7 @@ import {
 import {
   deriveSkillHubIds,
   groupSkillsByCategory,
+  isSkillActionPendingForHub,
   parseSkillSourceInput,
   skillOperationStatusLabel,
   skillScopeLabel,
@@ -2537,7 +2538,8 @@ function App() {
   const [skillsError, setSkillsError] = useState('');
   const [skillsPendingKey, setSkillsPendingKey] = useState('');
   const skillOperationPollTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-  const refreshSkillManagementRef = useRef<(() => Promise<void>) | null>(null);
+  const skillOperationPollHubIdsRef = useRef<Set<string>>(new Set());
+  const refreshSkillManagementHubRef = useRef<((hubId: string) => Promise<void>) | null>(null);
   const [skillInstallTarget, setSkillInstallTarget] = useState<SkillInstallTarget | null>(null);
   const [skillSourceInput, setSkillSourceInput] = useState('');
   const [skillSourceCandidates, setSkillSourceCandidates] = useState<RegistrySkillSourceCandidate[]>([]);
@@ -7106,11 +7108,6 @@ function App() {
     });
   }, [agentPackageHubs]);
 
-  const agentPackageAnyOperationRunning = useMemo(
-    () => agentPackageHubCards.some(card => card.operation?.running),
-    [agentPackageHubCards],
-  );
-
   const refreshWheelMakerUpdateHub = useCallback(async (hubId: string) => {
     setWheelMakerUpdateHubs(prev => ({
       ...prev,
@@ -7306,15 +7303,23 @@ function App() {
       window.clearTimeout(skillOperationPollTimerRef.current);
       skillOperationPollTimerRef.current = null;
     }
+    skillOperationPollHubIdsRef.current.clear();
   }, []);
 
-  const scheduleSkillOperationPoll = useCallback(() => {
+  const scheduleSkillOperationPoll = useCallback((hubIds: string | string[]) => {
+    const ids = Array.isArray(hubIds) ? hubIds : [hubIds];
+    ids
+      .map(hubId => hubId.trim())
+      .filter(Boolean)
+      .forEach(hubId => skillOperationPollHubIdsRef.current.add(hubId));
     if (skillOperationPollTimerRef.current) {
       return;
     }
     skillOperationPollTimerRef.current = window.setTimeout(() => {
       skillOperationPollTimerRef.current = null;
-      refreshSkillManagementRef.current?.().catch(() => undefined);
+      const pendingHubIds = Array.from(skillOperationPollHubIdsRef.current);
+      skillOperationPollHubIdsRef.current.clear();
+      Promise.all(pendingHubIds.map(hubId => refreshSkillManagementHubRef.current?.(hubId))).catch(() => undefined);
     }, 1000);
   }, []);
 
@@ -7339,7 +7344,7 @@ function App() {
         },
       }));
       if (result.operation?.running) {
-        scheduleSkillOperationPoll();
+        scheduleSkillOperationPoll(hubId);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -7413,8 +7418,11 @@ function App() {
         });
         return next;
       });
-      if (responses.some(entry => !('error' in entry) && entry.result.operation?.running)) {
-        scheduleSkillOperationPoll();
+      const runningHubIds = responses
+        .filter((entry): entry is {hubId: string; result: RegistrySkillCommandResponse} => !('error' in entry) && entry.result.operation?.running === true)
+        .map(entry => entry.hubId);
+      if (runningHubIds.length > 0) {
+        scheduleSkillOperationPoll(runningHubIds);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -7424,7 +7432,7 @@ function App() {
     }
   }, [clearSkillOperationPollTimer, scheduleSkillOperationPoll]);
 
-  refreshSkillManagementRef.current = refreshSkillManagement;
+  refreshSkillManagementHubRef.current = refreshSkillManagementHub;
 
   useEffect(() => () => {
     clearSkillOperationPollTimer();
@@ -9251,7 +9259,8 @@ function App() {
   ) => {
     const groups = groupSkillsByCategory(skills);
     const disabled = options.disabled === true;
-    const actionDisabled = disabled || options.actionsDisabled === true || options.operationRunning === true || !!skillsPendingKey;
+    const hubActionPending = isSkillActionPendingForHub(skillsPendingKey, hubId);
+    const actionDisabled = disabled || options.actionsDisabled === true || options.operationRunning === true || hubActionPending;
     const skillCount = skills.length;
     const scopeKind = options.scope === 'hub' ? 'Hub' : 'Project';
     return (
@@ -9539,7 +9548,7 @@ function App() {
                           <button
                             type="button"
                             className={`agent-package-action-btn ${action === 'uninstall' ? 'danger' : ''}`}
-                            disabled={pending || agentPackageAnyOperationRunning}
+                            disabled={pending}
                             onClick={() => requestAgentPackageAction(action, card.hubId, pkg)}
                           >
                             {pending ? 'Running...' : agentPackageActionLabel(action)}

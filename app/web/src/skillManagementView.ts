@@ -159,3 +159,9 @@ export function skillScopeLabel(input: {scope: RegistrySkillScope; hubId: string
   if (input.scope === 'project') return `Project: ${input.projectName || ''}`.trim();
   return `Hub: ${input.hubId}`;
 }
+
+export function isSkillActionPendingForHub(pendingKey: string, hubId: string): boolean {
+  const normalizedHubId = (hubId || '').trim();
+  if (!pendingKey || !normalizedHubId) return false;
+  return pendingKey.split(':', 1)[0] === normalizedHubId;
+}
