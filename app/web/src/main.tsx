@@ -8389,25 +8389,6 @@ function App() {
           >
             <button
               type="button"
-              className="project-session-menu-btn reload"
-              role="menuitem"
-              disabled={sessionActionDisabled}
-              onClick={event => {
-                event.stopPropagation();
-                handleReloadProjectSession(targetProjectId, sessionId).catch(() => undefined);
-              }}
-            >
-              <span
-                className={`codicon ${
-                  chatReloadingSessionId === sessionId
-                    ? 'codicon-loading codicon-modifier-spin'
-                    : 'codicon-refresh'
-                }`}
-              />
-              <span className="project-session-menu-label">Reload</span>
-            </button>
-            <button
-              type="button"
               className="project-session-menu-btn rename"
               role="menuitem"
               disabled={renameActionDisabled}
@@ -8445,6 +8426,25 @@ function App() {
               <span className="project-session-menu-label">Archive</span>
             </button>
             <div className="project-session-menu-separator" aria-hidden="true" />
+            <button
+              type="button"
+              className="project-session-menu-btn reload"
+              role="menuitem"
+              disabled={sessionActionDisabled}
+              onClick={event => {
+                event.stopPropagation();
+                handleReloadProjectSession(targetProjectId, sessionId).catch(() => undefined);
+              }}
+            >
+              <span
+                className={`codicon ${
+                  chatReloadingSessionId === sessionId
+                    ? 'codicon-loading codicon-modifier-spin'
+                    : 'codicon-refresh'
+                }`}
+              />
+              <span className="project-session-menu-label">Reload</span>
+            </button>
             <button
               type="button"
               className="project-session-menu-btn delete"
