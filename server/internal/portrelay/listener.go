@@ -317,7 +317,7 @@ func copyWebSocketResponseHeaders(headers map[string][]string) http.Header {
 	dst := http.Header{}
 	for name, values := range headers {
 		canonical := http.CanonicalHeaderKey(name)
-		if isHopByHopHeader(canonical) || strings.EqualFold(canonical, "Content-Length") || strings.EqualFold(canonical, "Sec-Websocket-Extensions") {
+		if isHopByHopHeader(canonical) || isWebSocketDialerHeader(canonical) || strings.EqualFold(canonical, "Content-Length") {
 			continue
 		}
 		for _, value := range values {
