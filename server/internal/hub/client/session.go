@@ -1079,8 +1079,7 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 		return
 	}
 
-	agentBlocks := normalizePromptBlocksForAgent(s.agentType, blocks)
-	updates, err := s.promptStream(ctx, agentBlocks)
+	updates, err := s.promptStream(ctx, blocks)
 	if err != nil {
 		if isAgentExitError(err) && !s.agentProcessAlive() {
 			_ = s.resetDeadConnection(err)
@@ -1203,53 +1202,6 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 
 	if !hasIMEmitter && buf.Len() > 0 {
 		s.reply(buf.String())
-	}
-}
-
-func normalizePromptBlocksForAgent(agentType string, blocks []acp.ContentBlock) []acp.ContentBlock {
-	if len(blocks) == 0 {
-		return nil
-	}
-	if !agentPrefersRemoteImageURI(agentType) {
-		return blocks
-	}
-	var out []acp.ContentBlock
-	for i, block := range blocks {
-		remoteURI, ok := remoteImageURI(block.URI)
-		if block.Type != acp.ContentBlockTypeImage || strings.TrimSpace(block.Data) == "" || !ok {
-			continue
-		}
-		if out == nil {
-			out = append([]acp.ContentBlock(nil), blocks...)
-		}
-		out[i].Data = ""
-		out[i].URI = remoteURI
-	}
-	if out == nil {
-		return blocks
-	}
-	return out
-}
-
-func agentPrefersRemoteImageURI(agentType string) bool {
-	switch strings.ToLower(strings.TrimSpace(agentType)) {
-	case string(acp.ACPProviderClaude):
-		return true
-	default:
-		return false
-	}
-}
-
-func remoteImageURI(uri string) (string, bool) {
-	trimmed := strings.TrimSpace(uri)
-	normalized := strings.ToLower(trimmed)
-	switch {
-	case strings.HasPrefix(normalized, "http://"):
-		return "http://" + trimmed[len("http://"):], true
-	case strings.HasPrefix(normalized, "https://"):
-		return "https://" + trimmed[len("https://"):], true
-	default:
-		return "", false
 	}
 }
 

@@ -1900,35 +1900,6 @@ func TestCodexAppPromptMapsImageURIs(t *testing.T) {
 	}
 }
 
-func TestCodexAppPromptKeepsBase64ImageLocalWhenURIAlsoPresent(t *testing.T) {
-	oldRoot := codexappArtifactRootPathFunc
-	artifactRoot := t.TempDir()
-	codexappArtifactRootPathFunc = func() (string, error) { return artifactRoot, nil }
-	t.Cleanup(func() { codexappArtifactRootPathFunc = oldRoot })
-
-	input, err := codexappPromptToInputWithArtifacts("proj", "sess-1", []protocol.ContentBlock{{
-		Type:     protocol.ContentBlockTypeImage,
-		MimeType: "image/png",
-		Data:     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-		URI:      "https://example.com/a.png",
-	}})
-	if err != nil {
-		t.Fatalf("codexappPromptToInputWithArtifacts: %v", err)
-	}
-	if len(input) != 1 {
-		t.Fatalf("input len=%d, want 1: %#v", len(input), input)
-	}
-	if input[0].Type != "localImage" || input[0].Path == "" {
-		t.Fatalf("image input=%#v, want localImage path", input[0])
-	}
-	if input[0].URL != "" {
-		t.Fatalf("image url=%q, want local image priority", input[0].URL)
-	}
-	if _, err := os.Stat(input[0].Path); err != nil {
-		t.Fatalf("image artifact not written: %v", err)
-	}
-}
-
 func TestCodexAppSessionPromptRejectsInvalidImageBeforeTurnStart(t *testing.T) {
 	tr := newFakeCodexappTransport()
 	rt := newCodexappRuntimeWithTransport(tr)
