@@ -1687,7 +1687,21 @@ body,
 
 .port-relay-panel {
   display: grid;
-  gap: 12px;
+  gap: 10px;
+}
+
+.port-relay-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+}
+
+.port-relay-status-section {
+  padding-bottom: 9px;
 }
 
 .port-relay-header,
@@ -1744,6 +1758,29 @@ body,
   white-space: nowrap;
 }
 
+.port-relay-target-row {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.port-relay-target-value {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 6px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel-3) 72%, transparent);
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .port-relay-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1774,6 +1811,10 @@ body,
   flex: 1 1 auto;
   font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
   letter-spacing: 0;
+}
+
+.port-relay-code-section {
+  padding: 8px;
 }
 
 .port-relay-actions {

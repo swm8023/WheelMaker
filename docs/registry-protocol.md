@@ -1688,6 +1688,7 @@ App 侧不使用 `query`。如果 `operation.running=true`，继续定时发 `sc
 约束：
 
 - `accessCode` 必须是 6 位数字。
+- `targetHost` 必须严格等于 `127.0.0.1`；Registry 和 Hub 都必须拒绝 `localhost`、`0.0.0.0`、`::1` 以及其他 loopback 写法。
 - `listenPort` 与 `targetPort` 必须在 `1..65535`。
 - `listenPort` 不允许等于 Registry 标准 `/ws` 端口。
 - `hubId` 必须指向已连接且在线的 Hub。
@@ -1737,11 +1738,12 @@ App 侧不使用 `query`。如果 `operation.running=true`，继续定时发 `sc
 Relay data plane 监听在 `listenPort` 上，同一端口处理普通 HTTP 与 WebSocket upgrade。保留内部路径：
 
 - `GET /__wheelmaker/relay/hub`：Hub 主动建立 tunnel，使用 `relayId` 和 `nonce` 校验。
-- `POST /__wheelmaker/relay/login`：访问码登录，设置 `wm_port_relay` HttpOnly cookie。
+- `GET /__wheelmaker/relay/login`：显示访问码登录页，不暴露 Hub、target host 或 target port。
+- `POST /__wheelmaker/relay/login`：访问码登录，设置 `wm_port_relay` HttpOnly cookie，成功后 303 跳回同站相对 `next`，失败后 303 跳回登录页并显示错误。
 - `GET /__wheelmaker/relay/logout`：清除 cookie。
 - `GET /__wheelmaker/relay/status`：只读状态。
 
-其他路径必须先通过 data-plane cookie 认证；认证通过后，HTTP 请求和 WebSocket text/binary frame 通过 Hub 主动建立的 binary tunnel 转发到 `targetHost:targetPort`。Hub 侧目标请求固定设置浏览器风格 `User-Agent`。
+其他路径必须先通过 data-plane cookie 认证；未认证访问会 303 跳转到登录页，并将原同站相对路径写入 `next`。认证通过后，HTTP 请求和 WebSocket text/binary frame 通过 Hub 主动建立的 binary tunnel 转发到所选 Hub 机器上的 `127.0.0.1:targetPort`。Hub 侧目标请求固定设置浏览器风格 `User-Agent`。
 
 ### 5.14 Chat / Session 透传方法
 

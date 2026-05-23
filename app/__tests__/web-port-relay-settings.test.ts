@@ -30,7 +30,7 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).toContain("import { resolvePortRelayOpenUrl } from './portRelayUrl';");
     expect(mainTsx).toContain('resolvePortRelayOpenUrl({');
     expect(mainTsx).toContain('relayUrl: portRelaySnapshot.relayUrl');
-    expect(mainTsx).toContain('window.open(openUrl, \'_blank\', \'noopener,noreferrer\')');
+    expect(mainTsx).not.toContain('window.open(openUrl, \'_blank\', \'noopener,noreferrer\')');
 
     expect(stylesCss).toContain('.port-relay-panel');
     expect(stylesCss).toContain('.port-relay-form-grid');
@@ -97,5 +97,24 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).toContain('{mobilePortRelayFrameOpen ? null : gestureNavigation ? (');
     expect(mainTsx).toContain('drawerOpen={mobilePortRelayFrameOpen ? false : drawerOpen}');
     expect(mainTsx).toContain('const portRelayMobileFrameOverlay = mobilePortRelayFrameOpen');
+  });
+
+  test('keeps relay settings focused on hub local port mapping', () => {
+    expect(mainTsx).toContain("const [portRelayTargetPort, setPortRelayTargetPort] = useState('80');");
+    expect(mainTsx).not.toContain('const [portRelayTargetHost, setPortRelayTargetHost]');
+    expect(mainTsx).not.toContain('setPortRelayTargetHost(snapshot.targetHost)');
+    expect(mainTsx).toContain("targetHost: '127.0.0.1',");
+    expect(mainTsx).toContain("const portRelayTargetDisplay = selectedHubId ? `${selectedHubId} -> 127.0.0.1:${portRelayTargetPort || '80'}` : 'No hub';");
+    expect(mainTsx).toContain('<span>Hub Local Port</span>');
+    expect(mainTsx).toContain('<span>Target</span>');
+    expect(mainTsx).toContain('{portRelayTargetDisplay}');
+    expect(mainTsx).not.toContain('<span>Target Host</span>');
+    expect(mainTsx).not.toContain('onClick={openPortRelay}');
+    expect(mainTsx).toContain("if (settingsDetailView !== 'portRelay' || portRelayAccessCode) {");
+    expect(mainTsx).toContain('setPortRelayAccessCode(generatePortRelayAccessCode());');
+
+    expect(stylesCss).toContain('.port-relay-section');
+    expect(stylesCss).toContain('.port-relay-target-row');
+    expect(stylesCss).toContain('.port-relay-target-value');
   });
 });

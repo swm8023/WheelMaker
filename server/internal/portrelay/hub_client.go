@@ -25,8 +25,12 @@ func NewHubClient() *HubClient {
 }
 
 func (c *HubClient) Open(payload rp.RelayOpenPayload) error {
+	payload.TargetHost = strings.TrimSpace(payload.TargetHost)
 	if strings.TrimSpace(payload.RelayID) == "" || strings.TrimSpace(payload.RelayURL) == "" || strings.TrimSpace(payload.Nonce) == "" {
 		return fmt.Errorf("invalid relay.open payload")
+	}
+	if payload.TargetHost != relayTargetHost {
+		return fmt.Errorf("targetHost must be 127.0.0.1")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.mu.Lock()

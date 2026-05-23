@@ -24,6 +24,7 @@ const (
 	internalStatusPath = "/__wheelmaker/relay/status"
 
 	relayCookieName   = "wm_port_relay"
+	relayTargetHost   = "127.0.0.1"
 	defaultTunnelWait = 2 * time.Second
 	defaultStreamWait = 10 * time.Second
 
@@ -127,6 +128,9 @@ func (c *Controller) Enable(ctx context.Context, payload rp.RelayEnablePayload, 
 	}
 	if payload.TargetHost == "" {
 		return c.Status(), relayError(rp.CodeInvalidArgument, "targetHost is required", nil)
+	}
+	if payload.TargetHost != relayTargetHost {
+		return c.Status(), relayError(rp.CodeInvalidArgument, "targetHost must be 127.0.0.1", nil)
 	}
 	if !validPort(payload.ListenPort) || !validPort(payload.TargetPort) {
 		return c.Status(), relayError(rp.CodeInvalidArgument, "listenPort and targetPort must be in 1..65535", nil)

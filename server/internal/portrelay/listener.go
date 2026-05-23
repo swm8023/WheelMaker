@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -70,7 +72,7 @@ func (c *Controller) handleDataPlane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !c.authenticated(r, slot) {
-		writeLoginPage(w)
+		http.Redirect(w, r, relayLoginLocation(requestNextPath(r), false), http.StatusSeeOther)
 		return
 	}
 	tunnel, snapshot := c.activeTunnel()
@@ -106,8 +108,8 @@ func (c *Controller) handleHubTunnel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Controller) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeLoginPage(w)
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	slot := c.currentSlot()
@@ -115,16 +117,24 @@ func (c *Controller) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "relay disabled", http.StatusServiceUnavailable)
 		return
 	}
+	if r.Method == http.MethodGet {
+		writeLoginPage(w, loginPageOptions{
+			InvalidCode: r.URL.Query().Get("error") == "1",
+			Next:        safeRelayNext(r.URL.Query().Get("next")),
+		})
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
+	next := safeRelayNext(r.Form.Get("next"))
 	if r.Form.Get("code") != slot.AccessCode {
-		http.Error(w, "invalid access code", http.StatusUnauthorized)
+		http.Redirect(w, r, relayLoginLocation(next, true), http.StatusSeeOther)
 		return
 	}
 	c.setAuthCookie(w, slot)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
 func (c *Controller) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -256,10 +266,143 @@ func (c *Controller) currentSlot() relaySlot {
 	return c.slot
 }
 
-func writeLoginPage(w http.ResponseWriter) {
+type loginPageOptions struct {
+	InvalidCode bool
+	Next        string
+}
+
+func writeLoginPage(w http.ResponseWriter, options loginPageOptions) {
+	next := safeRelayNext(options.Next)
+	errorClass := ""
+	if options.InvalidCode {
+		errorClass = " show"
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = w.Write([]byte(`<!doctype html><html><body><form method="post" action="/__wheelmaker/relay/login"><input name="code" inputmode="numeric" autocomplete="one-time-code" /><button type="submit">Open</button></form></body></html>`))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(fmt.Sprintf(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WheelMaker Port Relay</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%%; min-height: 100%%; margin: 0; }
+    body {
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #101316;
+      color: #f2f5f8;
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(100%%, 360px);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 8px;
+      background: #171b20;
+      padding: 22px;
+      box-shadow: 0 18px 54px rgba(0, 0, 0, 0.34);
+    }
+    h1 { margin: 0 0 14px; font-size: 18px; line-height: 1.25; font-weight: 600; }
+    form { display: grid; gap: 12px; }
+    label { display: grid; gap: 6px; color: #aeb7c2; font-size: 12px; }
+    input {
+      width: 100%%;
+      height: 42px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 6px;
+      background: #0f1216;
+      color: #ffffff;
+      padding: 0 12px;
+      font: 600 18px/1.2 "SFMono-Regular", Consolas, monospace;
+      letter-spacing: 0.18em;
+      outline: none;
+    }
+    input:focus { border-color: #6aa6ff; box-shadow: 0 0 0 3px rgba(106, 166, 255, 0.18); }
+    button {
+      height: 40px;
+      border: 0;
+      border-radius: 6px;
+      background: #2f81f7;
+      color: #ffffff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .error {
+      display: none;
+      margin: 0;
+      color: #ff9b96;
+      font-size: 12px;
+    }
+    .error.show { display: block; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>WheelMaker Port Relay</h1>
+    <form method="post" action="%s" autocomplete="off">
+      <input type="hidden" name="next" value="%s">
+      <label>
+        <span>Access code</span>
+        <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" autofocus>
+      </label>
+      <p class="error%s">Invalid access code</p>
+      <button type="submit">Open</button>
+    </form>
+  </main>
+</body>
+</html>`, internalLoginPath, html.EscapeString(next), errorClass)))
+}
+
+func relayLoginLocation(next string, invalidCode bool) string {
+	values := url.Values{}
+	if invalidCode {
+		values.Set("error", "1")
+	}
+	if safe := safeRelayNext(next); safe != "/" {
+		values.Set("next", safe)
+	}
+	if encoded := values.Encode(); encoded != "" {
+		return internalLoginPath + "?" + encoded
+	}
+	return internalLoginPath
+}
+
+func requestNextPath(r *http.Request) string {
+	if r == nil || r.URL == nil {
+		return "/"
+	}
+	next := r.URL.EscapedPath()
+	if next == "" {
+		next = "/"
+	}
+	if r.URL.RawQuery != "" {
+		next += "?" + r.URL.RawQuery
+	}
+	return next
+}
+
+func safeRelayNext(value string) string {
+	if value == "" {
+		return "/"
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.IsAbs() || u.Host != "" || !strings.HasPrefix(u.Path, "/") {
+		return "/"
+	}
+	if u.Path == internalLoginPath || strings.HasPrefix(u.Path, "/__wheelmaker/relay/") {
+		return "/"
+	}
+	out := u.EscapedPath()
+	if out == "" {
+		out = "/"
+	}
+	if u.RawQuery != "" {
+		out += "?" + u.RawQuery
+	}
+	return out
 }
 
 type requestMeta struct {

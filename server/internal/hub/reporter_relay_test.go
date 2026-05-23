@@ -93,18 +93,21 @@ func TestReporterPortRelayHTTPAndWebSocketSmoke(t *testing.T) {
 	}
 
 	relayBase := "http://127.0.0.1:" + strconv.Itoa(relayPort)
-	unauthResp, err := http.Get(relayBase + "/")
-	if err != nil {
-		t.Fatalf("unauth relay get: %v", err)
-	}
-	if unauthResp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("unauth status=%d, want 401", unauthResp.StatusCode)
-	}
-	_ = unauthResp.Body.Close()
-
 	jarClient := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
+	unauthResp, err := jarClient.Get(relayBase + "/")
+	if err != nil {
+		t.Fatalf("unauth relay get: %v", err)
+	}
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauth status=%d, want 303", unauthResp.StatusCode)
+	}
+	if got := unauthResp.Header.Get("Location"); got != "/__wheelmaker/relay/login" {
+		t.Fatalf("unauth Location=%q, want login page", got)
+	}
+	_ = unauthResp.Body.Close()
+
 	loginResp, err := jarClient.Post(relayBase+"/__wheelmaker/relay/login", "application/x-www-form-urlencoded", strings.NewReader("code=483921"))
 	if err != nil {
 		t.Fatalf("login relay: %v", err)

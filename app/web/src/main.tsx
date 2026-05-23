@@ -2688,8 +2688,7 @@ function App() {
   const [portRelayError, setPortRelayError] = useState('');
   const [portRelayListenPort, setPortRelayListenPort] = useState('28810');
   const [portRelayHubId, setPortRelayHubId] = useState('');
-  const [portRelayTargetHost, setPortRelayTargetHost] = useState('127.0.0.1');
-  const [portRelayTargetPort, setPortRelayTargetPort] = useState('');
+  const [portRelayTargetPort, setPortRelayTargetPort] = useState('80');
   const [portRelayAccessCode, setPortRelayAccessCode] = useState('');
   const [portRelayFrameOpen, setPortRelayFrameOpen] = useState(false);
   const portRelayReady = portRelaySnapshot.enabled && portRelaySnapshot.status === 'Up';
@@ -7483,9 +7482,6 @@ function App() {
     if (snapshot.hubId) {
       setPortRelayHubId(snapshot.hubId);
     }
-    if (snapshot.targetHost) {
-      setPortRelayTargetHost(snapshot.targetHost);
-    }
     if (typeof snapshot.targetPort === 'number') {
       setPortRelayTargetPort(String(snapshot.targetPort));
     }
@@ -7521,6 +7517,13 @@ function App() {
     refreshPortRelayStatus().catch(() => undefined);
   }, [settingsDetailView, refreshPortRelayStatus]);
 
+  useEffect(() => {
+    if (settingsDetailView !== 'portRelay' || portRelayAccessCode) {
+      return;
+    }
+    setPortRelayAccessCode(generatePortRelayAccessCode());
+  }, [portRelayAccessCode, settingsDetailView]);
+
   const enablePortRelay = useCallback(async () => {
     const listenPort = Number(portRelayListenPort);
     const targetPort = Number(portRelayTargetPort);
@@ -7544,7 +7547,7 @@ function App() {
       const snapshot = await service.enablePortRelay({
         listenPort,
         hubId: portRelayHubId,
-        targetHost: portRelayTargetHost || '127.0.0.1',
+        targetHost: '127.0.0.1',
         targetPort,
         accessCode,
       });
@@ -7554,7 +7557,7 @@ function App() {
     } finally {
       setPortRelayLoading(false);
     }
-  }, [applyPortRelaySnapshot, portRelayAccessCode, portRelayHubId, portRelayListenPort, portRelayTargetHost, portRelayTargetPort]);
+  }, [applyPortRelaySnapshot, portRelayAccessCode, portRelayHubId, portRelayListenPort, portRelayTargetPort]);
 
   const disablePortRelay = useCallback(async () => {
     setPortRelayLoading(true);
@@ -7586,18 +7589,6 @@ function App() {
       setPortRelayLoading(false);
     }
   }, [applyPortRelaySnapshot, portRelaySnapshot.enabled]);
-
-  const openPortRelay = useCallback(() => {
-    const openUrl = portRelayFrameUrl || resolvePortRelayOpenUrl({
-      relayUrl: portRelaySnapshot.relayUrl,
-      registryAddress: address,
-      listenPort: portRelayListenPort,
-    });
-    if (!openUrl) {
-      return;
-    }
-    window.open(openUrl, '_blank', 'noopener,noreferrer');
-  }, [address, portRelayFrameUrl, portRelayListenPort, portRelaySnapshot.relayUrl]);
 
   const updateHubCards = useMemo(() => {
     const hubIds = new Set<string>([
@@ -10314,73 +10305,72 @@ function App() {
   const renderPortRelaySettingsDetail = (options?: SettingsDetailShellOptions) => {
     const hubIds = deriveRegistryHubIds(registryHubs);
     const selectedHubId = portRelayHubId || hubIds[0] || '';
-    const openUrl = resolvePortRelayOpenUrl({
-      relayUrl: portRelaySnapshot.relayUrl,
-      registryAddress: address,
-      listenPort: portRelayListenPort,
-    });
     const statusClass = String(portRelaySnapshot.status || 'Disabled').toLowerCase();
+    const portRelayTargetDisplay = selectedHubId ? `${selectedHubId} -> 127.0.0.1:${portRelayTargetPort || '80'}` : 'No hub';
     return renderSettingsDetailShell(
       'Port Relay',
       <div className="port-relay-panel">
-        <div className="port-relay-header">
-          <span className={`port-relay-status-pill ${statusClass}`}>{portRelaySnapshot.status}</span>
-          {portRelaySnapshot.relayUrl ? <span className="port-relay-url">{portRelaySnapshot.relayUrl}</span> : null}
+        <div className="port-relay-section port-relay-status-section">
+          <div className="port-relay-header">
+            <span className={`port-relay-status-pill ${statusClass}`}>{portRelaySnapshot.status}</span>
+            {portRelaySnapshot.relayUrl ? <span className="port-relay-url">{portRelaySnapshot.relayUrl}</span> : null}
+          </div>
+          <div className="port-relay-target-row">
+            <span>Target</span>
+            <code className="port-relay-target-value">{portRelayTargetDisplay}</code>
+          </div>
         </div>
         {portRelayError || portRelaySnapshot.error ? (
           <div className="settings-metadata-error">{portRelayError || portRelaySnapshot.error}</div>
         ) : null}
-        <div className="port-relay-form-grid">
-          <label>
-            <span>Listen Port</span>
-            <input
-              value={portRelayListenPort}
-              inputMode="numeric"
-              onChange={event => setPortRelayListenPort(event.target.value.replace(/[^\d]/g, '').slice(0, 5))}
-            />
-          </label>
-          <label>
-            <span>Hub</span>
-            <select
-              value={selectedHubId}
-              onChange={event => setPortRelayHubId(event.target.value)}
-            >
-              {hubIds.length === 0 ? <option value="">No hub</option> : null}
-              {hubIds.map(hubId => (
-                <option key={hubId} value={hubId}>{hubId}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Target Host</span>
-            <input
-              value={portRelayTargetHost}
-              onChange={event => setPortRelayTargetHost(event.target.value)}
-            />
-          </label>
-          <label>
-            <span>Target Port</span>
-            <input
-              value={portRelayTargetPort}
-              inputMode="numeric"
-              onChange={event => setPortRelayTargetPort(event.target.value.replace(/[^\d]/g, '').slice(0, 5))}
-            />
-          </label>
+        <div className="port-relay-section">
+          <div className="port-relay-form-grid">
+            <label>
+              <span>Listen Port</span>
+              <input
+                value={portRelayListenPort}
+                inputMode="numeric"
+                onChange={event => setPortRelayListenPort(event.target.value.replace(/[^\d]/g, '').slice(0, 5))}
+              />
+            </label>
+            <label>
+              <span>Hub</span>
+              <select
+                value={selectedHubId}
+                onChange={event => setPortRelayHubId(event.target.value)}
+              >
+                {hubIds.length === 0 ? <option value="">No hub</option> : null}
+                {hubIds.map(hubId => (
+                  <option key={hubId} value={hubId}>{hubId}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Hub Local Port</span>
+              <input
+                value={portRelayTargetPort}
+                inputMode="numeric"
+                onChange={event => setPortRelayTargetPort(event.target.value.replace(/[^\d]/g, '').slice(0, 5))}
+              />
+            </label>
+          </div>
         </div>
-        <div className="port-relay-code-row">
-          <input
-            value={portRelayAccessCode || 'Regenerate required'}
-            readOnly
-            aria-label="Port relay access code"
-          />
-          <button
-            type="button"
-            className="settings-detail-action-btn"
-            onClick={() => regeneratePortRelayAccessCode().catch(() => undefined)}
-            disabled={portRelayLoading}
-          >
-            Generate
-          </button>
+        <div className="port-relay-section port-relay-code-section">
+          <div className="port-relay-code-row">
+            <input
+              value={portRelayAccessCode}
+              readOnly
+              aria-label="Port relay access code"
+            />
+            <button
+              type="button"
+              className="settings-detail-action-btn"
+              onClick={() => regeneratePortRelayAccessCode().catch(() => undefined)}
+              disabled={portRelayLoading}
+            >
+              Generate
+            </button>
+          </div>
         </div>
         <div className="port-relay-actions">
           <button
@@ -10398,14 +10388,6 @@ function App() {
             disabled={portRelayLoading || !portRelaySnapshot.enabled}
           >
             Disable
-          </button>
-          <button
-            type="button"
-            className="settings-detail-action-btn"
-            onClick={openPortRelay}
-            disabled={!portRelaySnapshot.enabled || !openUrl}
-          >
-            Open
           </button>
         </div>
       </div>,

@@ -1,9 +1,15 @@
 package portrelay
 
 import (
+	"context"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
+
+	rp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
 func TestRelayListenerBindsLoopbackOnly(t *testing.T) {
@@ -114,4 +120,124 @@ func TestCopyWebSocketResponseHeadersKeepsSubprotocolAndDropsExtensions(t *testi
 	if got := dst.Get("Content-Length"); got != "" {
 		t.Fatalf("Content-Length=%q, want empty", got)
 	}
+}
+
+func TestRelayEnableAllowsOnlyExactLoopbackTargetHost(t *testing.T) {
+	c := NewController(ControllerConfig{
+		RegistryAddr: "127.0.0.1:9630",
+		ForwardHubRequest: func(context.Context, string, string, any) ControlResult {
+			t.Fatal("ForwardHubRequest must not be called for invalid targetHost")
+			return ControlResult{}
+		},
+	})
+	for _, targetHost := range []string{"localhost", "0.0.0.0", "::1", "127.0.0.2", "127.1.2.3"} {
+		t.Run(targetHost, func(t *testing.T) {
+			_, errPayload := c.Enable(context.Background(), rp.RelayEnablePayload{
+				ListenPort: reserveRelayTestPort(t),
+				HubID:      "hub-local",
+				TargetHost: targetHost,
+				TargetPort: 80,
+				AccessCode: "123456",
+			}, "127.0.0.1:9630", false)
+			if errPayload == nil || errPayload.Code != rp.CodeInvalidArgument {
+				t.Fatalf("Enable targetHost=%q err=%#v, want invalid_argument", targetHost, errPayload)
+			}
+			if !strings.Contains(errPayload.Message, "127.0.0.1") {
+				t.Fatalf("Enable targetHost=%q message=%q, want explicit loopback constraint", targetHost, errPayload.Message)
+			}
+		})
+	}
+}
+
+func TestRelayLoginFlowUsesSafeRelativeNextAndHidesMappingInfo(t *testing.T) {
+	c := NewController(ControllerConfig{})
+	c.mu.Lock()
+	c.slot = relaySlot{
+		Enabled:              true,
+		Status:               rp.RelayStatusOpening,
+		HubID:                "private-hub",
+		TargetHost:           "127.0.0.1",
+		TargetPort:           5173,
+		AccessCode:           "123456",
+		AccessCodeGeneration: 1,
+	}
+	c.mu.Unlock()
+
+	pageReq := httptest.NewRequest(http.MethodGet, internalLoginPath+"?error=1&next=%2Fconsole%3Ftab%3Drelay", nil)
+	pageResp := httptest.NewRecorder()
+	c.handleLogin(pageResp, pageReq)
+	if pageResp.Code != http.StatusOK {
+		t.Fatalf("login page status=%d, want 200", pageResp.Code)
+	}
+	body := pageResp.Body.String()
+	for _, want := range []string{"WheelMaker Port Relay", "Invalid access code", `maxlength="6"`, `name="next" value="/console?tab=relay"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("login page missing %q:\n%s", want, body)
+		}
+	}
+	for _, leaked := range []string{"private-hub", "5173", "127.0.0.1"} {
+		if strings.Contains(body, leaked) {
+			t.Fatalf("login page leaked mapping value %q:\n%s", leaked, body)
+		}
+	}
+
+	badForm := url.Values{"code": {"000000"}, "next": {"/console?tab=relay"}}
+	badReq := httptest.NewRequest(http.MethodPost, internalLoginPath, strings.NewReader(badForm.Encode()))
+	badReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	badResp := httptest.NewRecorder()
+	c.handleLogin(badResp, badReq)
+	if badResp.Code != http.StatusSeeOther {
+		t.Fatalf("bad login status=%d, want 303", badResp.Code)
+	}
+	if got := badResp.Header().Get("Location"); got != internalLoginPath+"?error=1&next=%2Fconsole%3Ftab%3Drelay" {
+		t.Fatalf("bad login Location=%q", got)
+	}
+
+	goodForm := url.Values{"code": {"123456"}, "next": {"https://evil.example/steal"}}
+	goodReq := httptest.NewRequest(http.MethodPost, internalLoginPath, strings.NewReader(goodForm.Encode()))
+	goodReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	goodResp := httptest.NewRecorder()
+	c.handleLogin(goodResp, goodReq)
+	if goodResp.Code != http.StatusSeeOther {
+		t.Fatalf("good login status=%d, want 303", goodResp.Code)
+	}
+	if got := goodResp.Header().Get("Location"); got != "/" {
+		t.Fatalf("good login unsafe next Location=%q, want /", got)
+	}
+	if got := goodResp.Header().Get("Set-Cookie"); !strings.Contains(got, relayCookieName+"=") {
+		t.Fatalf("good login missing relay auth cookie: %q", got)
+	}
+}
+
+func TestUnauthenticatedRelayRequestRedirectsToLoginWithNext(t *testing.T) {
+	c := NewController(ControllerConfig{})
+	c.mu.Lock()
+	c.slot = relaySlot{
+		Enabled:              true,
+		Status:               rp.RelayStatusOpening,
+		AccessCode:           "123456",
+		AccessCodeGeneration: 1,
+	}
+	c.mu.Unlock()
+
+	req := httptest.NewRequest(http.MethodGet, "/console?tab=relay", nil)
+	resp := httptest.NewRecorder()
+	c.handleDataPlane(resp, req)
+
+	if resp.Code != http.StatusSeeOther {
+		t.Fatalf("unauthenticated status=%d, want 303", resp.Code)
+	}
+	if got := resp.Header().Get("Location"); got != internalLoginPath+"?next=%2Fconsole%3Ftab%3Drelay" {
+		t.Fatalf("unauthenticated Location=%q", got)
+	}
+}
+
+func reserveRelayTestPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve relay test port: %v", err)
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
 }
