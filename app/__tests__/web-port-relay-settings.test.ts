@@ -68,4 +68,23 @@ describe('port relay settings UI source structure', () => {
     expect(stylesCss).toContain('.port-relay-frame');
     expect(stylesCss).toContain('.port-relay-floating-bubble');
   });
+
+  test('keeps the mobile relay iframe locked to the visible viewport', () => {
+    const mobileSurfaceStart = stylesCss.indexOf('.port-relay-frame-surface.mobile');
+    const mobileSurfaceEnd = stylesCss.indexOf('.port-relay-frame {', mobileSurfaceStart);
+    const mobileSurfaceCss = stylesCss.slice(mobileSurfaceStart, mobileSurfaceEnd);
+
+    expect(mobileSurfaceCss).toContain('width: 100dvw;');
+    expect(mobileSurfaceCss).toContain('height: 100dvh;');
+    expect(mobileSurfaceCss).toContain('max-width: 100dvw;');
+    expect(mobileSurfaceCss).toContain('overflow: clip;');
+    expect(mobileSurfaceCss).toContain('overscroll-behavior: none;');
+    expect(mobileSurfaceCss).toContain('touch-action: pan-y;');
+
+    const iframeStart = stylesCss.indexOf('.port-relay-frame {');
+    const iframeEnd = stylesCss.indexOf('.floating-control-stack-layer', iframeStart);
+    const iframeCss = stylesCss.slice(iframeStart, iframeEnd);
+
+    expect(iframeCss).toContain('max-width: 100%;');
+  });
 });
