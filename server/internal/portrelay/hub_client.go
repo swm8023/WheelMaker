@@ -189,6 +189,9 @@ func (t *hubTunnel) handleWebSocket(ctx context.Context, streamID uint32, meta r
 	targetURL := buildTargetURL("ws", t.payload.TargetHost, t.payload.TargetPort, meta.Path, meta.RawQuery)
 	headers := http.Header{}
 	applyTargetHeaders(headers, meta.Headers)
+	if origin := targetOriginForURL(targetURL); origin != "" {
+		headers.Set("Origin", origin)
+	}
 	headers.Set("User-Agent", firstNonEmpty(t.payload.UserAgent, BrowserUserAgent))
 	ws, resp, err := websocket.DefaultDialer.DialContext(ctx, targetURL, headers)
 	if err != nil {
@@ -286,13 +289,40 @@ func buildTargetURL(scheme string, host string, port int, path string, rawQuery 
 func applyTargetHeaders(dst http.Header, src map[string][]string) {
 	for name, values := range src {
 		canonical := http.CanonicalHeaderKey(name)
-		if isHopByHopHeader(canonical) {
+		if isHopByHopHeader(canonical) || isBrowserContextHeader(canonical) {
 			continue
 		}
 		for _, value := range values {
 			dst.Add(canonical, value)
 		}
 	}
+}
+
+func isBrowserContextHeader(name string) bool {
+	switch http.CanonicalHeaderKey(name) {
+	case "Origin", "Referer":
+		return true
+	default:
+		return false
+	}
+}
+
+func targetOriginForURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	scheme := u.Scheme
+	switch scheme {
+	case "ws":
+		scheme = "http"
+	case "wss":
+		scheme = "https"
+	}
+	if scheme == "" {
+		return ""
+	}
+	return scheme + "://" + u.Host
 }
 
 func filterResponseHeaders(src http.Header) map[string][]string {

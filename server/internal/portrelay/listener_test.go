@@ -49,3 +49,20 @@ func TestFilterRequestHeadersDropsConditionalCacheHeaders(t *testing.T) {
 		t.Fatalf("filterRequestHeaders dropped Accept: %#v", filtered)
 	}
 }
+
+func TestCopyResponseHeadersDropsContentLength(t *testing.T) {
+	src := map[string][]string{
+		"Content-Length": {"1234"},
+		"Content-Type":   {"application/javascript"},
+	}
+	dst := http.Header{}
+
+	copyResponseHeaders(dst, src)
+
+	if got := dst.Get("Content-Length"); got != "" {
+		t.Fatalf("copyResponseHeaders forwarded Content-Length=%q", got)
+	}
+	if got := dst.Get("Content-Type"); got != "application/javascript" {
+		t.Fatalf("copyResponseHeaders Content-Type=%q, want application/javascript", got)
+	}
+}

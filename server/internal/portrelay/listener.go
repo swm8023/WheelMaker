@@ -301,7 +301,7 @@ func filterRequestHeaders(headers http.Header) map[string][]string {
 func copyResponseHeaders(dst http.Header, headers map[string][]string) {
 	for name, values := range headers {
 		canonical := http.CanonicalHeaderKey(name)
-		if isHopByHopHeader(canonical) {
+		if isHopByHopHeader(canonical) || strings.EqualFold(canonical, "Content-Length") {
 			continue
 		}
 		for _, value := range values {
