@@ -74,6 +74,8 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
     window.location.reload();
   };
   const displayTitle = webSourceState?.displayTitle || title;
+  const titlePrefix = `${title} - `;
+  const actualSourceLabel = webSourceState?.displaySource || '';
   const hasRemoteWebSource = Boolean(webSourceState?.remoteUrl && webSourceState.remoteHost && bridge.setWebSourcePreference);
   const remoteSourceLabel = webSourceState?.remoteHost || webSourceState?.displaySource || 'Auto';
 
@@ -86,19 +88,26 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
         onMouseDown={handleDragMouseDown}
       >
         <img className="desktop-titlebar-icon" src="/icons/icon.svg" alt="" draggable={false} />
-        {hasRemoteWebSource ? (
-          <select
-            className="desktop-titlebar-source-select"
-            aria-label="Desktop web source"
-            data-desktop-titlebar-interactive={true}
-            title={webSourceState?.remoteUrl || displayTitle}
-            value="current"
-            onChange={handleWebSourcePreferenceChange}
-          >
-            <option value="current" hidden>{displayTitle}</option>
-            <option value="auto">{remoteSourceLabel}</option>
-            <option value="embedded">Embedded</option>
-          </select>
+        {webSourceState ? (
+          <span className="desktop-titlebar-title-group">
+            <span className="desktop-titlebar-app-title" title={displayTitle}>{titlePrefix}</span>
+            {hasRemoteWebSource ? (
+              <select
+                className="desktop-titlebar-source-select"
+                aria-label="Desktop web source"
+                data-desktop-titlebar-interactive={true}
+                title={webSourceState.remoteUrl || actualSourceLabel}
+                value="current"
+                onChange={handleWebSourcePreferenceChange}
+              >
+                <option value="current" hidden>{actualSourceLabel}</option>
+                <option value="auto">{remoteSourceLabel}</option>
+                <option value="embedded">Embedded</option>
+              </select>
+            ) : (
+              <span className="desktop-titlebar-source-label" title={actualSourceLabel}>{actualSourceLabel}</span>
+            )}
+          </span>
         ) : (
           <span className="desktop-titlebar-title" title={displayTitle}>{displayTitle}</span>
         )}

@@ -64,9 +64,11 @@ describe('desktop title bar', () => {
     expect(root.findByProps({'data-desktop-titlebar': true})).toBeDefined();
     expect(root.findByType('img').props.src).toBe('/icons/icon.svg');
     expect(root.findAllByProps({className: 'desktop-titlebar-title'})).toHaveLength(0);
+    expect(root.findByProps({className: 'desktop-titlebar-app-title'}).props.children).toBe('WheelMaker - ');
     const select = root.findByProps({className: 'desktop-titlebar-source-select'});
     expect(select.props['data-desktop-titlebar-interactive']).toBe(true);
     expect(select.props.title).toBe('https://example.com/');
+    expect(select.findAllByType('option').find(option => option.props.value === 'current')?.props.children).toBe('example.com');
     expect(select.findAllByType('option').filter(option => !option.props.hidden).map(option => option.props.children)).toEqual([
       'example.com',
       'Embedded',
@@ -156,7 +158,8 @@ describe('desktop title bar', () => {
     });
 
     const root = renderer!.root;
-    expect(root.findByProps({className: 'desktop-titlebar-title'}).props.children).toBe('WheelMaker - Embedded');
+    expect(root.findByProps({className: 'desktop-titlebar-app-title'}).props.children).toBe('WheelMaker - ');
+    expect(root.findByProps({className: 'desktop-titlebar-source-label'}).props.children).toBe('Embedded');
     expect(root.findAllByProps({className: 'desktop-titlebar-source-select'})).toHaveLength(0);
   });
 });
