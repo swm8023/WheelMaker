@@ -13047,25 +13047,6 @@ function App() {
           >
             Cancel
           </button>
-          {archiveTarget ? (
-            <button
-              type="button"
-              className="app-confirm-btn secondary danger"
-              disabled={confirmBusy}
-              onClick={() => {
-                setConfirmError('');
-                setConfirmTarget({
-                  kind: 'delete',
-                  projectId: archiveTarget.projectId,
-                  sessionId: archiveTarget.sessionId,
-                  title: archiveTarget.title,
-                });
-              }}
-            >
-              <span className="codicon codicon-trash" />
-              Delete
-            </button>
-          ) : null}
           <button
             type="button"
             className={confirmPrimaryClassName}

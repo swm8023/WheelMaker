@@ -980,6 +980,13 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("kind: 'delete'");
     expect(mainTsx).toContain('className="app-confirm-error"');
     expect(mainTsx).not.toContain('Sessions with fewer than 3 turns are permanently removed.');
+    const confirmDialogStart = mainTsx.indexOf('const appConfirmDialog = confirmTarget ? (');
+    const confirmDialogEnd = mainTsx.indexOf('const renameBusy =', confirmDialogStart);
+    expect(confirmDialogStart).toBeGreaterThanOrEqual(0);
+    expect(confirmDialogEnd).toBeGreaterThan(confirmDialogStart);
+    const confirmDialog = mainTsx.slice(confirmDialogStart, confirmDialogEnd);
+    expect(confirmDialog).not.toContain('{archiveTarget ? (');
+    expect(confirmDialog).not.toContain('projectId: archiveTarget.projectId');
     expect(mainTsx).toContain('const renderProjectSessionActionMenu = (targetProjectId: string, session: RegistrySessionSummary) => {');
     expect(mainTsx).not.toContain('className="project-session-more-btn"');
     expect(mainTsx).not.toContain('const openProjectSessionActionMenu = (');
