@@ -641,6 +641,17 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			return nil, err
 		}
 		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
+	case "session.delete":
+		var req struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.delete payload: %w", err)
+		}
+		if err := c.DeleteSession(ctx, req.SessionID); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
 	case "session.token.providers":
 		return map[string]any{
 			"providers": []map[string]any{

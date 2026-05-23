@@ -5614,11 +5614,23 @@ func TestHandleSessionRequestMarkReadRequiresSessionID(t *testing.T) {
 	}
 }
 
-func TestHandleSessionRequestSessionDeleteIsUnsupported(t *testing.T) {
+func TestHandleSessionRequestSessionDeleteRemovesActiveSession(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
 
+	oldCleanup := cleanupSessionArtifacts
+	var cleanupCalls []struct{ projectName, agentType, sessionID string }
+	cleanupSessionArtifacts = func(projectName, agentType, sessionID string) error {
+		cleanupCalls = append(cleanupCalls, struct{ projectName, agentType, sessionID string }{projectName, agentType, sessionID})
+		return nil
+	}
+	t.Cleanup(func() { cleanupSessionArtifacts = oldCleanup })
+
 	now := time.Now().UTC()
+	addRuntimeSession(c, "sess-1", "Delete Target", "claude", now, now)
+	c.mu.Lock()
+	c.routeMap["im:app:delete"] = "sess-1"
+	c.mu.Unlock()
 	if err := c.store.SaveSession(ctx, &SessionRecord{
 		ID:              "sess-1",
 		ProjectName:     "proj1",
@@ -5633,17 +5645,31 @@ func TestHandleSessionRequestSessionDeleteIsUnsupported(t *testing.T) {
 		t.Fatalf("SaveSession: %v", err)
 	}
 
-	_, err := c.HandleSessionRequest(ctx, "session.delete", "proj1", json.RawMessage(`{"sessionId":"sess-1"}`))
-	if err == nil || !strings.Contains(err.Error(), "unsupported session method") {
-		t.Fatalf("HandleSessionRequest(session.delete) err = %v, want unsupported method", err)
+	resp, err := c.HandleSessionRequest(ctx, "session.delete", "proj1", json.RawMessage(`{"sessionId":"sess-1"}`))
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.delete): %v", err)
+	}
+	body, ok := resp.(map[string]any)
+	if !ok || body["ok"] != true || body["sessionId"] != "sess-1" {
+		t.Fatalf("unexpected session.delete response body: %#v", resp)
 	}
 
 	storedSession, err := c.store.LoadSession(ctx, "proj1", "sess-1")
 	if err != nil {
-		t.Fatalf("LoadSession after unsupported delete: %v", err)
+		t.Fatalf("LoadSession after delete: %v", err)
 	}
-	if storedSession == nil {
-		t.Fatal("unsupported session.delete removed the session")
+	if storedSession != nil {
+		t.Fatalf("session still exists after delete: %+v", storedSession)
+	}
+	c.mu.Lock()
+	_, inMemory := c.sessions["sess-1"]
+	_, routeMapped := c.routeMap["im:app:delete"]
+	c.mu.Unlock()
+	if inMemory || routeMapped {
+		t.Fatalf("session still active after delete inMemory=%v routeMapped=%v", inMemory, routeMapped)
+	}
+	if len(cleanupCalls) != 1 || cleanupCalls[0].projectName != "proj1" || cleanupCalls[0].agentType != "claude" || cleanupCalls[0].sessionID != "sess-1" {
+		t.Fatalf("cleanup calls=%#v, want claude session cleanup", cleanupCalls)
 	}
 }
 
@@ -5849,7 +5875,7 @@ func TestHandleSessionRequestSessionArchiveFillsMissingTurnsWithGap(t *testing.T
 }
 
 func TestHandleSessionRequestSessionMutationsRejectRunningSession(t *testing.T) {
-	for _, method := range []string{"session.archive", "session.reload"} {
+	for _, method := range []string{"session.archive", "session.delete", "session.reload"} {
 		t.Run(method, func(t *testing.T) {
 			c := newSessionViewTestClient(t)
 			c.SetSessionHistoryRoot(filepath.Join(t.TempDir(), "db", "session"))

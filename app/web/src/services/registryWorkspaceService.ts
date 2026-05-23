@@ -426,6 +426,13 @@ export class RegistryWorkspaceService {
     return this.repository.archiveSession(projectId, sessionId);
   }
 
+  async deleteProjectSession(projectId: string, sessionId: string): Promise<{ok: boolean; sessionId: string}> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.deleteSession(projectId, sessionId);
+  }
+
   async renameSession(sessionId: string, title: string): Promise<{ok: boolean; sessionId: string; session: RegistrySessionSummary}> {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');

@@ -52,6 +52,8 @@ describe('web chat integration', () => {
     expect(repositoryTs).toContain("method: 'session.markRead'");
     expect(repositoryTs).toContain("method: 'session.rename'");
     expect(repositoryTs).toContain('async renameSession(projectId: string, sessionId: string, title: string)');
+    expect(repositoryTs).toContain("method: 'session.delete'");
+    expect(repositoryTs).toContain('async deleteSession(projectId: string, sessionId: string)');
     expect(repositoryTs).not.toContain('turnId = typeof input.turnId');
     expect(repositoryTs).not.toContain("method: 'chat.permission.respond'");
     expect(workspaceServiceTs).toContain('async listSessions(');
@@ -62,6 +64,7 @@ describe('web chat integration', () => {
     expect(workspaceServiceTs).toContain('async markSessionRead(');
     expect(workspaceServiceTs).toContain('async markProjectSessionRead(');
     expect(workspaceServiceTs).toContain('async renameProjectSession(projectId: string, sessionId: string, title: string)');
+    expect(workspaceServiceTs).toContain('async deleteProjectSession(projectId: string, sessionId: string)');
     expect(workspaceServiceTs).not.toContain('async respondToSessionPermission(');
     expect(workspaceServiceTs).toContain('private eventListeners = new Set');
     expect(workspaceServiceTs).toContain('private closeListeners = new Set');
@@ -894,7 +897,7 @@ describe('web chat integration', () => {
     expect(mobileSheetEnd).toBeGreaterThan(mobileSheetStart);
     const mobileSheet = mainTsx.slice(mobileSheetStart, mobileSheetEnd);
     expect(mobileSheet).not.toContain('className="project-wrap"');
-    expect(mobileSheet).toContain('renderProjectSessionActionStrip(targetProjectId, session)');
+    expect(mobileSheet).toContain('renderProjectSessionActionMenu(targetProjectId, session, false)');
     expect(mobileSheet).toContain('onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}');
     expect(mobileSheet).not.toContain('chat-session-swipe-row');
     expect(mobileSheet).toContain("tagVariantClass('wide-project-hub', projectItem.hubId || 'local')");
@@ -947,8 +950,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("tagVariantClass('wide-session-agent', sessionAgent)");
     expect(mainTsx).toContain('const [projectSessionActionMenu, setProjectSessionActionMenu] = useState<ProjectSessionActionMenuState | null>(null);');
     expect(mainTsx).toContain('const PROJECT_SESSION_LONG_PRESS_MS = 450;');
-    expect(mainTsx).not.toContain('const handleDeleteProjectSession = async (targetProjectId: string, sessionId: string) => {');
-    expect(mainTsx).not.toContain('service.deleteProjectSession(');
+    expect(mainTsx).toContain('const handleDeleteProjectSession = async (targetProjectId: string, sessionId: string) => {');
+    expect(mainTsx).toContain('const result = await service.deleteProjectSession(targetProjectId, normalizedSessionId);');
     expect(mainTsx).toContain('const handleReloadProjectSession = async (targetProjectId: string, sessionId: string) => {');
     expect(mainTsx).toContain('const result = await service.reloadProjectSession(targetProjectId, normalizedSessionId);');
     expect(mainTsx).toContain('const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);');
@@ -964,30 +967,27 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const appConfirmDialog = confirmTarget ? (');
     expect(mainTsx).toContain('className="app-confirm-backdrop"');
     expect(mainTsx).toContain('Archived sessions leave the chat list.');
+    expect(mainTsx).toContain('This permanently deletes the session data from the Hub.');
+    expect(mainTsx).toContain("kind: 'delete'");
     expect(mainTsx).toContain('className="app-confirm-error"');
     expect(mainTsx).not.toContain('Sessions with fewer than 3 turns are permanently removed.');
-    expect(mainTsx).toContain('const renderProjectSessionActionStrip = (targetProjectId: string, session: RegistrySessionSummary) => {');
-    expect(mainTsx).toContain('className="project-session-action-strip"');
-    expect(mainTsx).toContain('className="project-session-action-btn reload"');
-    expect(mainTsx).toContain('className="project-session-action-btn rename"');
-    expect(mainTsx).toContain('className="project-session-action-btn archive"');
-    expect(mainTsx).not.toContain('className="project-session-action-btn delete"');
+    expect(mainTsx).toContain('const renderProjectSessionActionMenu = (targetProjectId: string, session: RegistrySessionSummary, showMoreButton = true) => {');
+    expect(mainTsx).toContain('className="project-session-more-btn"');
+    expect(mainTsx).toContain('className="project-session-action-menu"');
+    expect(mainTsx).toContain('className="project-session-menu-btn reload"');
+    expect(mainTsx).toContain('className="project-session-menu-btn rename"');
+    expect(mainTsx).toContain('className="project-session-menu-btn archive"');
+    expect(mainTsx).toContain('className="project-session-menu-btn delete"');
     expect(mainTsx).toContain('const sessionActionDisabled = !!session.running ||');
     expect(mainTsx).toContain('const renameActionDisabled = chatRenamingSessionId === sessionId;');
-    expect(mainTsx).toContain('className="project-session-action-label">Reload</span>');
-    expect(mainTsx).toContain('className="project-session-action-label">Rename</span>');
-    expect(mainTsx).toContain('className="project-session-action-label">Archive</span>');
-    expect(mainTsx).not.toContain('className="project-session-action-label">Delete</span>');
-    expect(mainTsx).toContain("if (target?.closest('.project-session-action-btn')) {");
-    expect(mainTsx).not.toContain("target?.closest('.project-session-row-wrap')");
-    expect(mainTsx).toContain('renderProjectSessionActionStrip(targetProjectId, session)');
+    expect(mainTsx).toContain('className="project-session-menu-label">Reload</span>');
+    expect(mainTsx).toContain('className="project-session-menu-label">Rename</span>');
+    expect(mainTsx).toContain('className="project-session-menu-label">Archive</span>');
+    expect(mainTsx).toContain('className="project-session-menu-label">Delete</span>');
+    expect(mainTsx).toContain("if (target?.closest('.project-session-action-menu') || target?.closest('.project-session-more-btn')) {");
+    expect(mainTsx).toContain('renderProjectSessionActionMenu(targetProjectId, session)');
     expect(mainTsx).toContain('onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}');
-    const actionStripStart = mainTsx.indexOf('const renderProjectSessionActionStrip = (targetProjectId: string, session: RegistrySessionSummary) => {');
-    const actionStripEnd = mainTsx.indexOf('const refreshProject = async', actionStripStart);
-    expect(actionStripStart).toBeGreaterThanOrEqual(0);
-    expect(actionStripEnd).toBeGreaterThan(actionStripStart);
-    const actionStrip = mainTsx.slice(actionStripStart, actionStripEnd);
-    expect(actionStrip).not.toContain('return null;');
+    expect(mainTsx).toContain('onContextMenu={event => openProjectSessionContextMenu(targetProjectId, session.sessionId, event)}');
     expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
     expect(mainTsx).toContain("tab === 'chat' ? renderWideProjectSessionNav() : renderSidebarMain(false)");
     expect(mainTsx).toContain('const wideSidebarMain = sidebarSettingsOpen');
@@ -1067,15 +1067,16 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.wide-project-action-title {');
     expect(stylesCss).toContain('.wide-session-row {');
     expect(stylesCss).toContain('.project-session-row-wrap {');
-    expect(stylesCss).toContain('.project-session-action-strip {');
-    expect(stylesCss).toContain('.project-session-action-btn.reload {');
-    expect(stylesCss).toContain('.project-session-action-btn.rename {');
-    expect(stylesCss).toContain('.project-session-action-btn.archive {');
-    expect(stylesCss).not.toContain('.project-session-action-btn.delete {');
+    expect(stylesCss).toContain('.project-session-more-btn {');
+    expect(stylesCss).toContain('.project-session-action-menu {');
+    expect(stylesCss).toContain('.project-session-menu-btn.reload {');
+    expect(stylesCss).toContain('.project-session-menu-btn.rename {');
+    expect(stylesCss).toContain('.project-session-menu-btn.archive {');
+    expect(stylesCss).toContain('.project-session-menu-btn.delete {');
     expect(stylesCss).toContain('.app-confirm-backdrop {');
     expect(stylesCss).toContain('.app-confirm-dialog {');
     expect(stylesCss).toContain('.app-confirm-error {');
-    expect(stylesCss).toContain('.project-session-action-label {');
+    expect(stylesCss).toContain('.project-session-menu-label {');
     expect(stylesCss).toContain('.wide-session-agent-tag {');
     expect(stylesCss).toContain('.wide-session-agent-0 {');
     expect(stylesCss).toContain('.wide-session-time {');
@@ -1125,25 +1126,21 @@ describe('web chat integration', () => {
     expect(wideProjectSessionListBlock).toContain('margin-top: -2px;');
     expect(stylesCss).not.toContain('.wide-session-row::after');
     expect(stylesCss).not.toContain('.project-session-row-wrap.actions-open .wide-session-row {');
+    expect(stylesCss).not.toContain('.project-session-action-strip');
     expect(stylesCss).toMatch(
-      /\.project-session-action-strip \{[^}]*top: 50%;[^}]*height: 30px;[^}]*transform: translateY\(-50%\);[^}]*width: min\(258px, calc\(100% - 4px\)\);[^}]*\}/,
+      /\.project-session-more-btn \{[^}]*width: 22px;[^}]*height: 22px;[^}]*opacity: 0;[^}]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.project-session-action-strip \{[^}]*display: none;[^}]*\}/,
+      /\.project-session-row-wrap:hover \.project-session-more-btn,[\s\S]*\.project-session-row-wrap\.actions-open \.project-session-more-btn \{[\s\S]*opacity: 0\.85;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.project-session-row-wrap\.actions-open \.project-session-action-strip \{[\s\S]*display: inline-flex;[\s\S]*\}/,
-    );
-    expect(stylesCss).not.toContain('.project-session-row-wrap:hover .project-session-action-strip');
-    expect(stylesCss).not.toContain('.project-session-row-wrap:focus-within .project-session-action-strip');
-    expect(stylesCss).toMatch(
-      /\.project-session-action-btn \{[^}]*height: 28px;[^}]*gap: 5px;[^}]*padding: 0 8px;[^}]*\}/,
+      /\.project-session-action-menu \{[^}]*position: absolute;[^}]*right: 4px;[^}]*min-width: 148px;[^}]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.project-session-action-btn\.reload \{[^}]*background: color-mix\(in srgb, #2f9e44 18%, transparent\);[^}]*\}/,
+      /\.project-session-menu-btn \{[^}]*height: 30px;[^}]*gap: 8px;[^}]*padding: 0 9px;[^}]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.project-session-action-btn\.archive \{[^}]*background: color-mix\(in srgb, #2b6cb0 14%, transparent\);[^}]*\}/,
+      /\.project-session-menu-btn\.delete \{[^}]*color: #fca5a5;[^}]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.wide-session-title \{[\s\S]*font-weight: 400;[\s\S]*\}/,

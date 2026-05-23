@@ -227,6 +227,12 @@ type ConfirmTarget =
       sessionId: string;
       title: string;
     }
+  | {
+      kind: 'delete';
+      projectId: string;
+      sessionId: string;
+      title: string;
+    }
   | {kind: 'clearCache'}
   | {
       kind: 'npmPackage';
@@ -2692,6 +2698,7 @@ function App() {
   const [chatShowScrollToBottom, setChatShowScrollToBottom] = useState(false);
   const [chatReloadingSessionId, setChatReloadingSessionId] = useState('');
   const [chatArchivingSessionId, setChatArchivingSessionId] = useState('');
+  const [chatDeletingSessionId, setChatDeletingSessionId] = useState('');
   const [chatRenamingSessionId, setChatRenamingSessionId] = useState('');
   const [renameTarget, setRenameTarget] = useState<RenameSessionTarget | null>(null);
   const [renameTitleDraft, setRenameTitleDraft] = useState('');
@@ -5063,7 +5070,7 @@ function App() {
     if (!projectSessionActionMenu) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (target?.closest('.project-session-action-btn')) {
+      if (target?.closest('.project-session-action-menu') || target?.closest('.project-session-more-btn')) {
         return;
       }
       setProjectSessionActionMenu(null);
@@ -5071,6 +5078,31 @@ function App() {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [projectSessionActionMenu]);
+  const openProjectSessionActionMenu = (
+    targetProjectId: string,
+    sessionId: string,
+  ) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!targetProjectId || !normalizedSessionId) {
+      return;
+    }
+    setProjectSessionActionMenu(current =>
+      current?.projectId === targetProjectId && current.sessionId === normalizedSessionId
+        ? null
+        : {projectId: targetProjectId, sessionId: normalizedSessionId},
+    );
+  };
+  const openProjectSessionContextMenu = (
+    targetProjectId: string,
+    sessionId: string,
+    event: React.MouseEvent<HTMLButtonElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    clearProjectSessionLongPress();
+    projectSessionLongPressTargetRef.current = '';
+    openProjectSessionActionMenu(targetProjectId, sessionId);
+  };
   currentProjectRef.current = currentProject;
   projectsRef.current = projects;
   expandedDirsRef.current = expandedDirs;
@@ -6479,6 +6511,34 @@ function App() {
     }
   };
 
+  const handleDeleteProjectSession = async (targetProjectId: string, sessionId: string) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!targetProjectId || !normalizedSessionId || chatDeletingSessionId) {
+      return;
+    }
+    setConfirmError('');
+    setChatDeletingSessionId(normalizedSessionId);
+    try {
+      const result = await service.deleteProjectSession(targetProjectId, normalizedSessionId);
+      if (!result.ok) {
+        throw new Error('session.delete returned ok=false');
+      }
+      removeProjectChatSessionFromState(
+        targetProjectId,
+        result.sessionId || normalizedSessionId,
+      );
+      setProjectSessionActionMenu(null);
+      setConfirmTarget(null);
+      setConfirmError('');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setConfirmError(message);
+      setError(message);
+    } finally {
+      setChatDeletingSessionId('');
+    }
+  };
+
   const handleRenameProjectSession = async (targetProjectId: string, sessionId: string, title: string) => {
     const normalizedSessionId = sessionId.trim();
     const normalizedTitle = Array.from(title.replace(/\r\n|\r|\n/g, ' ').trim()).slice(0, 200).join('');
@@ -6538,6 +6598,21 @@ function App() {
     setConfirmError('');
     setConfirmTarget({
       kind: 'archive',
+      projectId: targetProjectId,
+      sessionId: normalizedSessionId,
+      title: resolveSessionDisplayTitle(session),
+    });
+  };
+
+  const requestDeleteProjectSession = (targetProjectId: string, session: RegistrySessionSummary) => {
+    const normalizedSessionId = session.sessionId.trim();
+    if (!targetProjectId || !normalizedSessionId || session.running || chatDeletingSessionId) {
+      return;
+    }
+    setProjectSessionActionMenu(null);
+    setConfirmError('');
+    setConfirmTarget({
+      kind: 'delete',
       projectId: targetProjectId,
       sessionId: normalizedSessionId,
       title: resolveSessionDisplayTitle(session),
@@ -8265,78 +8340,115 @@ function App() {
     }
   };
 
-  const renderProjectSessionActionStrip = (targetProjectId: string, session: RegistrySessionSummary) => {
+  const renderProjectSessionActionMenu = (targetProjectId: string, session: RegistrySessionSummary, showMoreButton = true) => {
     const sessionId = session.sessionId;
     const sessionActionDisabled = !!session.running ||
       chatReloadingSessionId === sessionId ||
-      chatArchivingSessionId === sessionId;
+      chatArchivingSessionId === sessionId ||
+      chatDeletingSessionId === sessionId;
     const renameActionDisabled = chatRenamingSessionId === sessionId;
+    const actionsOpen = projectSessionActionMenu?.projectId === targetProjectId &&
+      projectSessionActionMenu.sessionId === sessionId;
     return (
-      <div className="project-session-action-strip">
-        <button
-          type="button"
-          className="project-session-action-btn reload"
-          title="Reload session"
-          aria-label="Reload session"
-          disabled={sessionActionDisabled}
-          onPointerDown={event => event.stopPropagation()}
-          onClick={event => {
-            event.stopPropagation();
-            handleReloadProjectSession(targetProjectId, sessionId).catch(() => undefined);
-          }}
-        >
-          <span
-            className={`codicon ${
-              chatReloadingSessionId === sessionId
-                ? 'codicon-loading codicon-modifier-spin'
-                : 'codicon-refresh'
-            }`}
-          />
-          <span className="project-session-action-label">Reload</span>
-        </button>
-        <button
-          type="button"
-          className="project-session-action-btn rename"
-          title="Rename session"
-          aria-label="Rename session"
-          disabled={renameActionDisabled}
-          onPointerDown={event => event.stopPropagation()}
-          onClick={event => {
-            event.stopPropagation();
-            requestRenameProjectSession(targetProjectId, session);
-          }}
-        >
-          <span
-            className={`codicon ${
-              chatRenamingSessionId === sessionId
-                ? 'codicon-loading codicon-modifier-spin'
-                : 'codicon-edit'
-            }`}
-          />
-          <span className="project-session-action-label">Rename</span>
-        </button>
-        <button
-          type="button"
-          className="project-session-action-btn archive"
-          title="Archive session"
-          aria-label="Archive session"
-          disabled={sessionActionDisabled}
-          onPointerDown={event => event.stopPropagation()}
-          onClick={event => {
-            event.stopPropagation();
-            requestArchiveProjectSession(targetProjectId, session);
-          }}
-        >
-          <span
-            className={`codicon ${
-              chatArchivingSessionId === sessionId
-                ? 'codicon-loading codicon-modifier-spin'
-                : 'codicon-archive'
-            }`}
-          />
-          <span className="project-session-action-label">Archive</span>
-        </button>
-      </div>
+      <>
+        {showMoreButton ? (
+          <button
+            type="button"
+            className="project-session-more-btn"
+            title="Session actions"
+            aria-label="Session actions"
+            aria-expanded={actionsOpen}
+            onPointerDown={event => event.stopPropagation()}
+            onClick={event => {
+              event.stopPropagation();
+              openProjectSessionActionMenu(targetProjectId, sessionId);
+            }}
+          >
+            <span className="codicon codicon-kebab-horizontal" />
+          </button>
+        ) : null}
+        {actionsOpen ? (
+          <div className="project-session-action-menu" role="menu">
+            <button
+              type="button"
+              className="project-session-menu-btn reload"
+              role="menuitem"
+              disabled={sessionActionDisabled}
+              onClick={event => {
+                event.stopPropagation();
+                handleReloadProjectSession(targetProjectId, sessionId).catch(() => undefined);
+              }}
+            >
+              <span
+                className={`codicon ${
+                  chatReloadingSessionId === sessionId
+                    ? 'codicon-loading codicon-modifier-spin'
+                    : 'codicon-refresh'
+                }`}
+              />
+              <span className="project-session-menu-label">Reload</span>
+            </button>
+            <button
+              type="button"
+              className="project-session-menu-btn rename"
+              role="menuitem"
+              disabled={renameActionDisabled}
+              onClick={event => {
+                event.stopPropagation();
+                requestRenameProjectSession(targetProjectId, session);
+              }}
+            >
+              <span
+                className={`codicon ${
+                  chatRenamingSessionId === sessionId
+                    ? 'codicon-loading codicon-modifier-spin'
+                    : 'codicon-edit'
+                }`}
+              />
+              <span className="project-session-menu-label">Rename</span>
+            </button>
+            <button
+              type="button"
+              className="project-session-menu-btn archive"
+              role="menuitem"
+              disabled={sessionActionDisabled}
+              onClick={event => {
+                event.stopPropagation();
+                requestArchiveProjectSession(targetProjectId, session);
+              }}
+            >
+              <span
+                className={`codicon ${
+                  chatArchivingSessionId === sessionId
+                    ? 'codicon-loading codicon-modifier-spin'
+                    : 'codicon-archive'
+                }`}
+              />
+              <span className="project-session-menu-label">Archive</span>
+            </button>
+            <div className="project-session-menu-separator" aria-hidden="true" />
+            <button
+              type="button"
+              className="project-session-menu-btn delete"
+              role="menuitem"
+              disabled={sessionActionDisabled}
+              onClick={event => {
+                event.stopPropagation();
+                requestDeleteProjectSession(targetProjectId, session);
+              }}
+            >
+              <span
+                className={`codicon ${
+                  chatDeletingSessionId === sessionId
+                    ? 'codicon-loading codicon-modifier-spin'
+                    : 'codicon-trash'
+                }`}
+              />
+              <span className="project-session-menu-label">Delete</span>
+            </button>
+          </div>
+        ) : null}
+      </>
     );
   };
 
@@ -10576,7 +10688,7 @@ function App() {
                             onPointerUp={finishProjectSessionLongPress}
                             onPointerCancel={finishProjectSessionLongPress}
                             onPointerLeave={finishProjectSessionLongPress}
-                            onContextMenu={event => event.preventDefault()}
+                            onContextMenu={event => openProjectSessionContextMenu(targetProjectId, session.sessionId, event)}
                             onClick={event => {
                               if (consumeProjectSessionLongPressClick(targetProjectId, session.sessionId, event)) {
                                 return;
@@ -10601,7 +10713,7 @@ function App() {
                               {formatCompactRelativeAge(session.updatedAt)}
                             </span>
                           </button>
-                          {renderProjectSessionActionStrip(targetProjectId, session)}
+                          {renderProjectSessionActionMenu(targetProjectId, session, false)}
                         </div>
                       );
                     })}
@@ -10993,7 +11105,7 @@ function App() {
                           onPointerUp={finishProjectSessionLongPress}
                           onPointerCancel={finishProjectSessionLongPress}
                           onPointerLeave={finishProjectSessionLongPress}
-                          onContextMenu={event => event.preventDefault()}
+                          onContextMenu={event => openProjectSessionContextMenu(targetProjectId, session.sessionId, event)}
                           onClick={event => {
                             if (consumeProjectSessionLongPressClick(targetProjectId, session.sessionId, event)) {
                               return;
@@ -11017,7 +11129,7 @@ function App() {
                             {formatCompactRelativeAge(session.updatedAt)}
                           </span>
                         </button>
-                        {renderProjectSessionActionStrip(targetProjectId, session)}
+                        {renderProjectSessionActionMenu(targetProjectId, session)}
                       </div>
                     );
                   })}
@@ -12697,6 +12809,7 @@ function App() {
   ) : null;
 
   const archiveTarget = confirmTarget?.kind === 'archive' ? confirmTarget : null;
+  const deleteTarget = confirmTarget?.kind === 'delete' ? confirmTarget : null;
   const npmPackageTarget = confirmTarget?.kind === 'npmPackage' ? confirmTarget : null;
   const wheelMakerUpdateTarget = confirmTarget?.kind === 'wheelMakerUpdate' ? confirmTarget : null;
   const skillInstallConfirmTarget = confirmTarget?.kind === 'skillInstall' ? confirmTarget : null;
@@ -12717,6 +12830,8 @@ function App() {
     : '';
   const confirmBusy = archiveTarget
     ? chatArchivingSessionId === archiveTarget.sessionId
+    : deleteTarget
+      ? chatDeletingSessionId === deleteTarget.sessionId
     : npmPackageTarget
       ? agentPackageActionPendingKey === npmPackageConfirmPendingKey
     : wheelMakerUpdateTarget
@@ -12726,6 +12841,8 @@ function App() {
       : false;
   const confirmTitle = confirmTarget?.kind === 'clearCache'
     ? 'Clear local cache?'
+    : deleteTarget
+      ? 'Delete session?'
     : npmPackageTarget
       ? `${agentPackageActionLabel(npmPackageTarget.action)} package?`
     : wheelMakerUpdateTarget
@@ -12739,6 +12856,8 @@ function App() {
     : 'Archive session?';
   const confirmName = confirmTarget?.kind === 'clearCache'
     ? 'Token and server address will be preserved.'
+    : deleteTarget
+      ? deleteTarget.title || 'Untitled session'
     : npmPackageTarget
       ? npmPackageTarget.displayName || npmPackageTarget.packageName
     : wheelMakerUpdateTarget
@@ -12752,6 +12871,8 @@ function App() {
     : archiveTarget?.title || 'Untitled session';
   const confirmCopy = confirmTarget?.kind === 'clearCache'
     ? 'The app will reload after local cached workspace data is cleared.'
+    : deleteTarget
+      ? 'This permanently deletes the session data from the Hub.'
     : npmPackageTarget
       ? `Hub: ${npmPackageTarget.hubId}. Package: ${npmPackageTarget.packageName}. Installed: ${npmPackageTarget.installedVersion || '-'}. Target: ${npmPackageTarget.action === 'uninstall' ? 'remove deprecated package' : npmPackageTarget.latestVersion || 'latest'}. Restart WheelMaker or start a new agent session for changes to take effect.`
     : wheelMakerUpdateTarget
@@ -12767,6 +12888,8 @@ function App() {
     : 'Archived sessions leave the chat list.';
   const confirmIcon = confirmTarget?.kind === 'clearCache'
     ? 'codicon-trash'
+    : deleteTarget
+      ? 'codicon-trash'
     : npmPackageTarget
       ? npmPackageTarget.action === 'uninstall' ? 'codicon-trash' : 'codicon-cloud-download'
     : wheelMakerUpdateTarget
@@ -12780,6 +12903,8 @@ function App() {
     : 'codicon-archive';
   const confirmPrimaryLabel = confirmTarget?.kind === 'clearCache'
     ? 'Clear Cache'
+    : deleteTarget
+      ? 'Delete'
     : npmPackageTarget
       ? agentPackageActionLabel(npmPackageTarget.action)
     : wheelMakerUpdateTarget
@@ -12791,10 +12916,10 @@ function App() {
     : skillUpdateConfirmTarget
       ? 'Update'
     : 'Archive';
-  const confirmPrimaryClassName = confirmTarget?.kind === 'clearCache' || npmPackageTarget?.action === 'uninstall' || !!skillUninstallConfirmTarget
+  const confirmPrimaryClassName = confirmTarget?.kind === 'clearCache' || !!deleteTarget || npmPackageTarget?.action === 'uninstall' || !!skillUninstallConfirmTarget
     ? 'app-confirm-btn primary danger'
     : 'app-confirm-btn primary';
-  const confirmIconClassName = confirmTarget?.kind === 'clearCache' || npmPackageTarget?.action === 'uninstall' || !!skillUninstallConfirmTarget
+  const confirmIconClassName = confirmTarget?.kind === 'clearCache' || !!deleteTarget || npmPackageTarget?.action === 'uninstall' || !!skillUninstallConfirmTarget
     ? 'app-confirm-icon danger'
     : 'app-confirm-icon';
   const handleConfirmPrimary = () => {
@@ -12803,6 +12928,13 @@ function App() {
     }
     if (confirmTarget.kind === 'clearCache') {
       clearLocalCache();
+      return;
+    }
+    if (confirmTarget.kind === 'delete') {
+      handleDeleteProjectSession(
+        confirmTarget.projectId,
+        confirmTarget.sessionId,
+      ).catch(() => undefined);
       return;
     }
     if (confirmTarget.kind === 'npmPackage') {
@@ -12865,6 +12997,25 @@ function App() {
           >
             Cancel
           </button>
+          {archiveTarget ? (
+            <button
+              type="button"
+              className="app-confirm-btn secondary danger"
+              disabled={confirmBusy}
+              onClick={() => {
+                setConfirmError('');
+                setConfirmTarget({
+                  kind: 'delete',
+                  projectId: archiveTarget.projectId,
+                  sessionId: archiveTarget.sessionId,
+                  title: archiveTarget.title,
+                });
+              }}
+            >
+              <span className="codicon codicon-trash" />
+              Delete
+            </button>
+          ) : null}
           <button
             type="button"
             className={confirmPrimaryClassName}

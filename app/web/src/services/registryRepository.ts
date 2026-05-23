@@ -810,6 +810,20 @@ export class RegistryRepository {
     };
   }
 
+  async deleteSession(projectId: string, sessionId: string): Promise<{ok: boolean; sessionId: string}> {
+    const resp = await this.client.request({
+      method: 'session.delete',
+      projectId,
+      payload: {sessionId},
+      timeoutMs: 30000,
+    });
+    const body = (resp.payload ?? {}) as {ok?: boolean; sessionId?: string};
+    return {
+      ok: body.ok ?? false,
+      sessionId: body.sessionId ?? sessionId,
+    };
+  }
+
   async renameSession(projectId: string, sessionId: string, title: string): Promise<{ok: boolean; sessionId: string; session: RegistrySessionSummary}> {
     const resp = await this.client.request({
       method: 'session.rename',

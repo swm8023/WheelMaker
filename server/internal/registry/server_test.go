@@ -863,14 +863,31 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 			"sessionId": "sess-1",
 		},
 	})
-	_ = client.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-	deleteResp := mustReadEnvelope(t, client)
-	_ = client.SetReadDeadline(time.Time{})
-	if deleteResp.Type != "error" || deleteResp.Method != "session.delete" {
-		t.Fatalf("unexpected session.delete response: %#v", deleteResp)
+	forwardedDelete := mustReadEnvelope(t, hub)
+	if forwardedDelete.Method != "session.delete" {
+		t.Fatalf("forwarded.method=%q, want session.delete", forwardedDelete.Method)
 	}
-	if deleteResp.Payload["message"] != "unsupported method" {
-		t.Fatalf("session.delete error payload=%#v, want unsupported method", deleteResp.Payload)
+	if forwardedDelete.ProjectID != "hub-a:server" {
+		t.Fatalf("forwarded.projectId=%q, want hub-a:server", forwardedDelete.ProjectID)
+	}
+	forwardDeletePayload := forwardedDelete.Payload
+	if forwardDeletePayload["sessionId"] != "sess-1" {
+		t.Fatalf("forwarded delete payload=%v", forwardDeletePayload)
+	}
+
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: forwardedDelete.RequestID,
+		Type:      "response",
+		Method:    "session.delete",
+		ProjectID: forwardedDelete.ProjectID,
+		Payload: map[string]any{
+			"ok":        true,
+			"sessionId": "sess-1",
+		},
+	})
+	deleteResp := mustReadEnvelope(t, client)
+	if deleteResp.Type != "response" || deleteResp.Method != "session.delete" {
+		t.Fatalf("unexpected session.delete response: %#v", deleteResp)
 	}
 }
 

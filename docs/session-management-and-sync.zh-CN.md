@@ -210,14 +210,14 @@ type Cursor = { turnIndex: number };
 
 `session.archive` 用于把非运行中的普通 session 移出常规会话系统。服务端按 turn 总数决定后续处理：`latestPersistedTurnIndex < 3` 的短会话直接永久删除；`latestPersistedTurnIndex >= 3` 的会话把已完成正文保留到冷归档文件。归档后 v1 不支持恢复、不提供归档列表/读取 API、不进入 monitor，也不提供 Feishu `/archive` 命令。
 
-对外协议只暴露 `session.archive`：
+对外协议暴露 `session.archive` 和 `session.delete`：
 
 - turn 总数 `< 3`：直接删除 `sessions` / `route_bindings` 和原 `db/session/<projectName>/<sessionId>` 目录，不写归档 pack、manifest 或 tombstone。
 - turn 总数 `>= 3`：先写归档 pack 和 manifest，成功后删除 `sessions` / `route_bindings`，再删除原 `db/session/<projectName>/<sessionId>` 目录。
 
-`session.delete` 不是对外协议；旧客户端发送该 method 会得到 unsupported method。内部仍可复用删除 helper 清理 active index、turn 文件和 session artifacts。
+`session.delete` 是硬删除协议：不写归档 pack、manifest 或 tombstone，直接删除 `sessions` / `route_bindings`、原 `db/session/<projectName>/<sessionId>` 目录和相关 artifacts。
 
-`session.archive`、`session.reload` 都必须拒绝运行中的 session。running 判定以服务端内存态为准：如果 session 仍有 active prompt 或 recorder 中存在未 terminal 的 prompt state，则返回错误；客户端的 `running` 字段只用于禁用按钮。
+`session.archive`、`session.delete`、`session.reload` 都必须拒绝运行中的 session。running 判定以服务端内存态为准：如果 session 仍有 active prompt 或 recorder 中存在未 terminal 的 prompt state，则返回错误；客户端的 `running` 字段只用于禁用按钮。
 
 归档目录：
 

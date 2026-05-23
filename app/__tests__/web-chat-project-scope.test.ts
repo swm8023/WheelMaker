@@ -37,7 +37,7 @@ describe('web chat project scoping', () => {
     expect(serviceTs).toContain('return this.repository.archiveSession(projectId, sessionId);');
     expect(serviceTs).toContain('async renameProjectSession(projectId: string, sessionId: string, title: string)');
     expect(serviceTs).toContain('return this.repository.renameSession(projectId, sessionId, title);');
-    expect(serviceTs).not.toContain('async deleteProjectSession(projectId: string, sessionId: string)');
-    expect(serviceTs).not.toContain('return this.repository.deleteSession(projectId, sessionId);');
+    expect(serviceTs).toContain('async deleteProjectSession(projectId: string, sessionId: string)');
+    expect(serviceTs).toContain('return this.repository.deleteSession(projectId, sessionId);');
   });
 });
