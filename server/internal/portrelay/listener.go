@@ -301,7 +301,11 @@ func filterRequestHeaders(headers http.Header) map[string][]string {
 func copyResponseHeaders(dst http.Header, headers map[string][]string) {
 	for name, values := range headers {
 		canonical := http.CanonicalHeaderKey(name)
-		if isHopByHopHeader(canonical) || strings.EqualFold(canonical, "Content-Length") {
+		if isHopByHopHeader(canonical) || isBlockedFrameHeader(canonical) || strings.EqualFold(canonical, "Content-Length") {
+			continue
+		}
+		values = sanitizeResponseHeaderValues(canonical, values)
+		if len(values) == 0 {
 			continue
 		}
 		for _, value := range values {
@@ -328,6 +332,48 @@ func copyWebSocketResponseHeaders(headers map[string][]string) http.Header {
 		}
 	}
 	return dst
+}
+
+func sanitizeResponseHeaderValues(name string, values []string) []string {
+	if !isContentSecurityPolicyHeader(name) {
+		return values
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		next := removeContentSecurityPolicyDirective(value, "frame-ancestors")
+		if next != "" {
+			out = append(out, next)
+		}
+	}
+	return out
+}
+
+func removeContentSecurityPolicyDirective(value string, directiveName string) string {
+	parts := strings.Split(value, ";")
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		directive := strings.TrimSpace(part)
+		if directive == "" {
+			continue
+		}
+		name := directive
+		if idx := strings.IndexAny(directive, " \t\r\n"); idx >= 0 {
+			name = directive[:idx]
+		}
+		if strings.EqualFold(name, directiveName) {
+			continue
+		}
+		kept = append(kept, directive)
+	}
+	return strings.Join(kept, "; ")
+}
+
+func isBlockedFrameHeader(name string) bool {
+	return strings.EqualFold(name, "X-Frame-Options")
+}
+
+func isContentSecurityPolicyHeader(name string) bool {
+	return strings.EqualFold(name, "Content-Security-Policy") || strings.EqualFold(name, "Content-Security-Policy-Report-Only")
 }
 
 func isHopByHopHeader(name string) bool {

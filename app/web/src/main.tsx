@@ -500,6 +500,7 @@ const PROJECT_PIN_LONG_PRESS_MS = 450;
 const PROJECT_SESSION_LONG_PRESS_MS = 450;
 const DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO = 0.45;
 const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;
+const PORT_RELAY_FLOATING_SLOT_STORAGE_KEY = 'wheelmaker:portRelayFloatingSlot';
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
 const DEFAULT_PORT_RELAY_SNAPSHOT: RegistryPortRelaySnapshot = {ok: true, enabled: false, status: 'Disabled'};
 let mermaidRenderSequence = 0;
@@ -625,6 +626,22 @@ function nearestFloatingSlot(
   return slotTops.reduce((best, entry) =>
     Math.abs(entry.top - top) < Math.abs(best.top - top) ? entry : best,
   ).slot;
+}
+
+function isFloatingControlSlot(value: unknown): value is PersistedFloatingControlSlot {
+  return value === 'upper' ||
+    value === 'upper-middle' ||
+    value === 'center' ||
+    value === 'lower-middle';
+}
+
+function readPortRelayFloatingSlot(): PersistedFloatingControlSlot | null {
+  try {
+    const value = window.localStorage.getItem(PORT_RELAY_FLOATING_SLOT_STORAGE_KEY);
+    return isFloatingControlSlot(value) ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 function tabIconClass(tab: GestureNavigationTab): string {
@@ -2558,7 +2575,7 @@ function App() {
         collapsedProjectIds: globalState.collapsedProjectIds ?? globalState.desktopCollapsedProjectIds ?? [],
         desktopSidebarWidth: globalState.desktopSidebarWidth,
         pinnedProjectIds: globalState.pinnedProjectIds ?? [],
-        floatingControlSlot: globalState.floatingControlSlot ?? 'upper-middle',
+        floatingControlSlot: globalState.floatingControlSlot ?? readPortRelayFloatingSlot() ?? 'upper-middle',
       }),
   );
   const tab = workspaceUiState.shared.tab as Tab;
@@ -2679,6 +2696,24 @@ function App() {
   const [portRelayTargetHost, setPortRelayTargetHost] = useState('127.0.0.1');
   const [portRelayTargetPort, setPortRelayTargetPort] = useState('');
   const [portRelayAccessCode, setPortRelayAccessCode] = useState('');
+  const [portRelayFrameOpen, setPortRelayFrameOpen] = useState(false);
+  const portRelayReady = portRelaySnapshot.enabled && portRelaySnapshot.status === 'Up';
+  const portRelayFrameUrl = useMemo(() => {
+    if (!portRelayReady) {
+      return '';
+    }
+    return resolvePortRelayOpenUrl({
+      relayUrl: portRelaySnapshot.relayUrl,
+      registryAddress: address,
+      listenPort: portRelayListenPort,
+    });
+  }, [address, portRelayListenPort, portRelayReady, portRelaySnapshot.relayUrl]);
+
+  useEffect(() => {
+    if (!portRelayReady || !portRelayFrameUrl) {
+      setPortRelayFrameOpen(false);
+    }
+  }, [portRelayFrameUrl, portRelayReady]);
 
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [workspaceProjectMenuOpen, setWorkspaceProjectMenuOpen] = useState(false);
@@ -4531,6 +4566,11 @@ function App() {
       floatingClickCooldownUntilRef.current = cooldownUntil;
       setFloatingControlSlot(nextSlot);
       workspaceStore.rememberGlobalState({ floatingControlSlot: nextSlot });
+      try {
+        window.localStorage.setItem(PORT_RELAY_FLOATING_SLOT_STORAGE_KEY, nextSlot);
+      } catch {
+        // Ignore local storage failures in private or restricted contexts.
+      }
       setFloatingDragState({
         ...current,
         active: false,
@@ -4810,6 +4850,7 @@ function App() {
     };
   }, [cancelGestureNavigation, gestureNavigationExpanded]);
   const handleDesktopActivitySelect = useCallback((nextTab: Tab) => {
+    setPortRelayFrameOpen(false);
     if (sidebarSettingsOpen) {
       setSidebarSettingsOpen(false);
       if (nextTab !== tab) {
@@ -4826,6 +4867,7 @@ function App() {
     setSidebarCollapsed(false);
   }, [sidebarSettingsOpen, tab, setSidebarSettingsOpen, setSidebarCollapsed, setTab]);
   const handleDesktopSettingsSelect = useCallback(() => {
+    setPortRelayFrameOpen(false);
     if (sidebarSettingsOpen && (
       settingsDetailView === 'update' ||
       settingsDetailView === 'skills' ||
@@ -4845,6 +4887,9 @@ function App() {
     }
   }, [sidebarSettingsOpen, settingsDetailView, setSidebarSettingsOpen, setSidebarCollapsed]);
   const openSettingsDetail = useCallback((detail: Exclude<SettingsDetailView, null>) => {
+    if (detail !== 'portRelay') {
+      setPortRelayFrameOpen(false);
+    }
     setSidebarSettingsOpen(true);
     setSidebarCollapsed(false);
     if (detail === 'tokenStats') {
@@ -4858,6 +4903,29 @@ function App() {
     }
     setSettingsDetailView(detail);
   }, [setSidebarSettingsOpen, setSidebarCollapsed]);
+  const handleDesktopPortRelaySelect = useCallback(() => {
+    setSidebarSettingsOpen(true);
+    setSidebarCollapsed(false);
+    setSettingsDetailView('portRelay');
+    setPortRelayError('');
+    if (!portRelayReady || !portRelayFrameUrl) {
+      setPortRelayFrameOpen(false);
+      return;
+    }
+    setPortRelayFrameOpen(open => !open);
+  }, [portRelayFrameUrl, portRelayReady, setSidebarCollapsed, setSidebarSettingsOpen]);
+  const handlePortRelayFloatingToggle = useCallback(() => {
+    if (floatingClickCooldownUntilRef.current > Date.now()) {
+      return;
+    }
+    if (!portRelayReady || !portRelayFrameUrl) {
+      setPortRelayFrameOpen(false);
+      return;
+    }
+    setDrawerOpen(false);
+    setSidebarSettingsOpen(false);
+    setPortRelayFrameOpen(open => !open);
+  }, [portRelayFrameUrl, portRelayReady, setDrawerOpen, setSidebarSettingsOpen]);
   useEffect(() => {
     if (isWide || !sidebarSettingsOpen) {
       mobileSettingsHistoryKeyRef.current = null;
@@ -7521,7 +7589,7 @@ function App() {
   }, [applyPortRelaySnapshot, portRelaySnapshot.enabled]);
 
   const openPortRelay = useCallback(() => {
-    const openUrl = resolvePortRelayOpenUrl({
+    const openUrl = portRelayFrameUrl || resolvePortRelayOpenUrl({
       relayUrl: portRelaySnapshot.relayUrl,
       registryAddress: address,
       listenPort: portRelayListenPort,
@@ -7530,7 +7598,7 @@ function App() {
       return;
     }
     window.open(openUrl, '_blank', 'noopener,noreferrer');
-  }, [address, portRelayListenPort, portRelaySnapshot.relayUrl]);
+  }, [address, portRelayFrameUrl, portRelayListenPort, portRelaySnapshot.relayUrl]);
 
   const updateHubCards = useMemo(() => {
     const hubIds = new Set<string>([
@@ -11902,6 +11970,16 @@ function App() {
     ) : null;
     return content;
   };
+  const renderPortRelayFrameSurface = (mode: 'desktop' | 'mobile') => (
+    <div className={`port-relay-frame-surface ${mode}`}>
+      <iframe
+        title="Port Relay"
+        src={portRelayFrameUrl}
+        className="port-relay-frame"
+        allow="clipboard-read; clipboard-write"
+      />
+    </div>
+  );
   const renderMain = () => {
     const heavyDiffDeferred =
       !!selectedDiff &&
@@ -11924,6 +12002,9 @@ function App() {
     const activeChatSlashCommand = chatSlashMenuVisible
       ? chatSlashMenuOptions[Math.max(0, Math.min(chatSlashActiveIndex, chatSlashMenuOptions.length - 1))]
       : null;
+    if (isWide && portRelayFrameOpen && portRelayFrameUrl) {
+      return renderPortRelayFrameSurface('desktop');
+    }
     const renderChatConfigValueMenu = (option: RegistrySessionConfigOption) => {
       const optionValues = option.options ?? [];
       const currentValue = chatConfigCurrentValue(option);
@@ -12803,7 +12884,7 @@ function App() {
         <button
           type="button"
           className={`desktop-activity-button${sidebarSettingsOpen && settingsDetailView === 'portRelay' ? ' active' : ''}`}
-          onClick={() => openSettingsDetail('portRelay')}
+          onClick={handleDesktopPortRelaySelect}
           title="Port Relay"
           aria-label="Port Relay"
         >
@@ -12871,6 +12952,20 @@ function App() {
           cancelFloatingDrag(event.pointerId);
         }}
       >
+        {portRelayReady && portRelayFrameUrl ? (
+          <button
+            type="button"
+            className="drawer-toggle-bubble port-relay-floating-bubble"
+            data-active={portRelayFrameOpen}
+            onPointerDown={handleFloatingControlButtonPointerDown}
+            onClick={handlePortRelayFloatingToggle}
+            title={portRelayFrameOpen ? 'Close relay page' : 'Open relay page'}
+            aria-label={portRelayFrameOpen ? 'Close relay page' : 'Open relay page'}
+            aria-pressed={portRelayFrameOpen}
+          >
+            <span className="codicon codicon-radio-tower" />
+          </button>
+        ) : null}
         {gestureNavigation ? (
           <div
             className="gesture-nav-control"
@@ -13029,6 +13124,9 @@ function App() {
       </div>
     </div>
   ) : null;
+  const portRelayMobileFrameOverlay = !isWide && portRelayFrameOpen && portRelayFrameUrl
+    ? renderPortRelayFrameSurface('mobile')
+    : null;
 
   const archiveTarget = confirmTarget?.kind === 'archive' ? confirmTarget : null;
   const deleteTarget = confirmTarget?.kind === 'delete' ? confirmTarget : null;
@@ -13366,6 +13464,7 @@ function App() {
         drawerOpen={drawerOpen}
         onCloseDrawer={() => setDrawerOpen(false)}
       />
+      {portRelayMobileFrameOverlay}
       {registryDebugPanel}
       {markdownImageExportRequest ? (
         <MarkdownImageExportSurface

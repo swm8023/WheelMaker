@@ -67,6 +67,31 @@ func TestCopyResponseHeadersDropsContentLength(t *testing.T) {
 	}
 }
 
+func TestCopyResponseHeadersAllowsRelayEmbedding(t *testing.T) {
+	src := map[string][]string{
+		"Content-Security-Policy":             {"default-src 'self'; frame-ancestors 'none'; connect-src ws: wss:"},
+		"Content-Security-Policy-Report-Only": {"frame-ancestors https://example.com; script-src 'self'"},
+		"X-Frame-Options":                     {"DENY"},
+		"Content-Type":                        {"text/html"},
+	}
+	dst := http.Header{}
+
+	copyResponseHeaders(dst, src)
+
+	if got := dst.Get("X-Frame-Options"); got != "" {
+		t.Fatalf("X-Frame-Options=%q, want empty", got)
+	}
+	if got := dst.Get("Content-Security-Policy"); got != "default-src 'self'; connect-src ws: wss:" {
+		t.Fatalf("Content-Security-Policy=%q, want frame-ancestors removed", got)
+	}
+	if got := dst.Get("Content-Security-Policy-Report-Only"); got != "script-src 'self'" {
+		t.Fatalf("Content-Security-Policy-Report-Only=%q, want frame-ancestors removed", got)
+	}
+	if got := dst.Get("Content-Type"); got != "text/html" {
+		t.Fatalf("Content-Type=%q, want text/html", got)
+	}
+}
+
 func TestCopyWebSocketResponseHeadersKeepsSubprotocolAndDropsExtensions(t *testing.T) {
 	src := map[string][]string{
 		"Sec-Websocket-Protocol":   {"vite-hmr"},

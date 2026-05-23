@@ -220,7 +220,7 @@ describe('agent package update settings UI source structure', () => {
     expect(activityBar).toContain('codicon-radio-tower');
     expect(activityBar).toContain("openSettingsDetail('update')");
     expect(activityBar).toContain("openSettingsDetail('tokenStats')");
-    expect(activityBar).toContain("openSettingsDetail('portRelay')");
+    expect(activityBar).toContain('handleDesktopPortRelaySelect');
     expect(activityBar.indexOf("title={reconnecting ? 'Reconnecting...' : 'Refresh project'}")).toBeLessThan(
       activityBar.indexOf('title="Update"'),
     );

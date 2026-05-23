@@ -37,4 +37,35 @@ describe('port relay settings UI source structure', () => {
     expect(stylesCss).toContain('.port-relay-code-row');
     expect(stylesCss).toContain('.port-relay-status-pill');
   });
+
+  test('embeds relay pages through desktop main pane and mobile floating overlay', () => {
+    expect(mainTsx).toContain("const PORT_RELAY_FLOATING_SLOT_STORAGE_KEY = 'wheelmaker:portRelayFloatingSlot';");
+    expect(mainTsx).toContain('readPortRelayFloatingSlot()');
+    expect(mainTsx).toContain('window.localStorage.setItem(PORT_RELAY_FLOATING_SLOT_STORAGE_KEY, nextSlot);');
+    expect(mainTsx).toContain('const [portRelayFrameOpen, setPortRelayFrameOpen] = useState(false);');
+    expect(mainTsx).toContain("portRelaySnapshot.enabled && portRelaySnapshot.status === 'Up'");
+    expect(mainTsx).toContain('setPortRelayFrameOpen(false);');
+    expect(mainTsx).toContain('const handleDesktopPortRelaySelect = useCallback(() => {');
+    expect(mainTsx).toContain('setPortRelayFrameOpen(open => !open);');
+    expect(mainTsx).toContain('onClick={handleDesktopPortRelaySelect}');
+    expect(mainTsx).toContain('className={`port-relay-frame-surface ${mode}`}');
+    expect(mainTsx).toContain("renderPortRelayFrameSurface('desktop')");
+    expect(mainTsx).toContain("renderPortRelayFrameSurface('mobile')");
+    expect(mainTsx).toContain('<iframe');
+    expect(mainTsx).toContain('src={portRelayFrameUrl}');
+    expect(mainTsx).toContain('className="port-relay-frame"');
+    expect(mainTsx).toContain('className="drawer-toggle-bubble port-relay-floating-bubble"');
+    expect(mainTsx).toContain("title={portRelayFrameOpen ? 'Close relay page' : 'Open relay page'}");
+
+    const renderMainStart = mainTsx.indexOf('const renderMain = () => {');
+    const chatBranchStart = mainTsx.indexOf("if (tab === 'chat')", renderMainStart);
+    const renderMainPrologue = mainTsx.slice(renderMainStart, chatBranchStart);
+    expect(renderMainPrologue).toContain('isWide && portRelayFrameOpen && portRelayFrameUrl');
+    expect(renderMainPrologue).toContain('renderPortRelayFrameSurface');
+
+    expect(stylesCss).toContain('.port-relay-frame-surface');
+    expect(stylesCss).toContain('.port-relay-frame-surface.mobile');
+    expect(stylesCss).toContain('.port-relay-frame');
+    expect(stylesCss).toContain('.port-relay-floating-bubble');
+  });
 });
