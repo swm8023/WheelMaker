@@ -226,8 +226,16 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="chat-prompt-action-button"');
     expect(mainTsx).toContain('aria-label="Copy response markdown"');
     expect(mainTsx).toContain('codicon codicon-copy');
+    expect(mainTsx).toContain('aria-label="Export response markdown image"');
+    expect(mainTsx).toContain('codicon codicon-device-camera');
+    expect(mainTsx).toContain('onExportPromptDoneImage');
+    expect(mainTsx).toContain('exportPromptDoneMarkdownImage(doneTurnIndex)');
+    expect(mainTsx).toContain('img: ({ src, alt, ...rest }) => (');
+    expect(mainTsx).toContain('crossOrigin="anonymous"');
     expect(stylesCss).toContain('.chat-prompt-actions {');
     expect(stylesCss).toContain('.chat-prompt-action-button {');
+    expect(stylesCss).toContain('.markdown-image-export-host {');
+    expect(stylesCss).toContain('.markdown-image-export-surface {');
     const sendExistingStart = mainTsx.indexOf('const sendChatMessage = async');
     const sendEnd = mainTsx.indexOf('const sendDirectChatText = async (text: string) => {', sendExistingStart);
     const sendBlock = mainTsx.slice(sendExistingStart, sendEnd);

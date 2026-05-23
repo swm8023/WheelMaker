@@ -64,6 +64,11 @@ import {
   type ChatFontId,
 } from './chat/chatTypography';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
+import {
+  buildPromptMarkdownImageFileName,
+  downloadBlobAsFile,
+  renderMarkdownElementToPngBlob,
+} from './chatMarkdownImageExport';
 import {RegistryDebugPanel} from './debug/RegistryDebugPanel';
 import {createRegistryDebugStore} from './debug/registryDebug';
 import type {RegistryDebugRecord} from './debug/registryDebug';
@@ -1104,6 +1109,7 @@ type ChatTurnViewProps = {
   markdownUrlTransform: (value: string) => string;
   copyDisabled?: boolean;
   onCopyPromptDone?: () => void;
+  onExportPromptDoneImage?: () => void;
   optionReplies?: ChatOptionReply[];
   optionRepliesDisabled?: boolean;
   onSelectOptionReply?: (label: string) => void;
@@ -1122,6 +1128,7 @@ const ChatTurnView = React.memo(function ChatTurnView({
   markdownUrlTransform,
   copyDisabled = true,
   onCopyPromptDone,
+  onExportPromptDoneImage,
   optionReplies = [],
   optionRepliesDisabled = false,
   onSelectOptionReply,
@@ -1217,6 +1224,16 @@ const ChatTurnView = React.memo(function ChatTurnView({
             aria-label="Copy response markdown"
           >
             <span className="codicon codicon-copy" />
+          </button>
+          <button
+            type="button"
+            className="chat-prompt-action-button"
+            onClick={() => onExportPromptDoneImage?.()}
+            disabled={copyDisabled}
+            title="Export response image"
+            aria-label="Export response markdown image"
+          >
+            <span className="codicon codicon-device-camera" />
           </button>
         </div>
         {doneStatus ? (
@@ -2029,6 +2046,7 @@ function ShikiCodeBlock({
   return (
     <div
       className={`code-wrap ${wrap ? 'wrap' : 'nowrap'}`}
+      data-markdown-export-pending={html ? undefined : 'true'}
       dangerouslySetInnerHTML={{ __html: html || '<pre><code> </code></pre>' }}
     />
   );
@@ -2086,7 +2104,11 @@ function MermaidBlock({ content, themeMode }: MermaidBlockProps) {
   }
 
   if (!svg) {
-    return <div className="muted block">Rendering mermaid diagram...</div>;
+    return (
+      <div className="muted block" data-markdown-export-pending="true">
+        Rendering mermaid diagram...
+      </div>
+    );
   }
 
   return (
@@ -2104,6 +2126,20 @@ type MarkdownPreviewProps = {
   codeTabSize: number;
   wrap: boolean;
   lineNumbers: boolean;
+};
+
+type MarkdownImageExportRequest = {
+  id: number;
+  content: string;
+  fileName: string;
+};
+
+type MarkdownImageExportSurfaceProps = {
+  request: MarkdownImageExportRequest;
+  markdownComponents: Components;
+  markdownUrlTransform: (value: string) => string;
+  onComplete: () => void;
+  onError: (message: string) => void;
 };
 
 const markdownPreRenderer: NonNullable<Components['pre']> = ({ children }) => (
@@ -2227,6 +2263,66 @@ const MarkdownPreview = React.memo(function MarkdownPreview({
     </div>
   );
 }, markdownPreviewPropsEqual);
+
+const MarkdownImageExportSurface = React.memo(function MarkdownImageExportSurface({
+  request,
+  markdownComponents,
+  markdownUrlTransform,
+  onComplete,
+  onError,
+}: MarkdownImageExportSurfaceProps) {
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const surface = surfaceRef.current;
+      if (!surface) {
+        return;
+      }
+      try {
+        const backgroundColor = getComputedStyle(surface).backgroundColor || '#ffffff';
+        const blob = await renderMarkdownElementToPngBlob(surface, {
+          backgroundColor,
+        });
+        if (cancelled) {
+          return;
+        }
+        downloadBlobAsFile(blob, request.fileName);
+        onComplete();
+      } catch (err) {
+        if (!cancelled) {
+          onError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    request.id,
+    request.fileName,
+    markdownComponents,
+    markdownUrlTransform,
+    onComplete,
+    onError,
+  ]);
+
+  return (
+    <div className="markdown-image-export-host" aria-hidden="true">
+      <div ref={surfaceRef} className="markdown-image-export-surface markdown-preview">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkMath]}
+          urlTransform={markdownUrlTransform}
+          rehypePlugins={[rehypeKatex]}
+          components={markdownComponents}
+        >
+          {request.content}
+        </ReactMarkdown>
+      </div>
+    </div>
+  );
+});
 type ShikiDiffPaneProps = {
   content: string;
   language: string;
@@ -2718,6 +2814,8 @@ function App() {
   const [chatComposerDrafts, setChatComposerDrafts] = useState<Record<string, ChatComposerDraft>>({});
   const [chatPendingPromptsByKey, setChatPendingPromptsByKey] = useState<Record<string, PendingChatPrompt>>({});
   const [chatCancellingRuntimeKey, setChatCancellingRuntimeKey] = useState('');
+  const [markdownImageExportRequest, setMarkdownImageExportRequest] = useState<MarkdownImageExportRequest | null>(null);
+  const markdownImageExportIdRef = useRef(0);
   const chatComposerTextRef = useRef('');
   const chatAttachmentsRef = useRef<ChatAttachment[]>([]);
   const chatComposerDraftsRef = useRef<Record<string, ChatComposerDraft>>({});
@@ -11563,6 +11661,14 @@ function App() {
           wrap: true,
           lineNumbers: false,
         }),
+      img: ({ src, alt, ...rest }) => (
+        <img
+          {...rest}
+          src={typeof src === 'string' ? src : undefined}
+          alt={alt || ''}
+          crossOrigin="anonymous"
+        />
+      ),
       a: ({ href, children, ...rest }) => {
         const linkHref = typeof href === 'string' ? href : '';
         const targetFile = linkHref ? resolveChatFileLink(linkHref) : null;
@@ -11644,6 +11750,29 @@ function App() {
     }
     await writeTextToClipboard(result.markdown);
   };
+
+  const exportPromptDoneMarkdownImage = async (doneTurnIndex: number) => {
+    const result = buildPromptDoneCopyRange(selectedFullChatMessages, doneTurnIndex);
+    if (!result.ok) {
+      return;
+    }
+    markdownImageExportIdRef.current += 1;
+    setError('');
+    setMarkdownImageExportRequest({
+      id: markdownImageExportIdRef.current,
+      content: result.markdown,
+      fileName: buildPromptMarkdownImageFileName(doneTurnIndex),
+    });
+  };
+
+  const completeMarkdownImageExport = useCallback(() => {
+    setMarkdownImageExportRequest(null);
+  }, []);
+
+  const failMarkdownImageExport = useCallback((message: string) => {
+    setMarkdownImageExportRequest(null);
+    setError(`Failed to export response image: ${message}`);
+  }, []);
 
   const selectedChatHasOpenPromptTurn = selectedFullChatMessages.some(message =>
     isPromptStartMessage(message) &&
@@ -11743,6 +11872,11 @@ function App() {
           onCopyPromptDone={
             message.method === 'prompt_done'
               ? () => copyPromptDoneMarkdown(doneTurnIndex).catch(() => undefined)
+              : undefined
+          }
+          onExportPromptDoneImage={
+            message.method === 'prompt_done'
+              ? () => exportPromptDoneMarkdownImage(doneTurnIndex).catch(() => undefined)
               : undefined
           }
         />
@@ -13233,6 +13367,16 @@ function App() {
         onCloseDrawer={() => setDrawerOpen(false)}
       />
       {registryDebugPanel}
+      {markdownImageExportRequest ? (
+        <MarkdownImageExportSurface
+          key={markdownImageExportRequest.id}
+          request={markdownImageExportRequest}
+          markdownComponents={chatMarkdownComponents}
+          markdownUrlTransform={chatMarkdownUrlTransform}
+          onComplete={completeMarkdownImageExport}
+          onError={failMarkdownImageExport}
+        />
+      ) : null}
       {appRenameDialog}
       {appConfirmDialog}
     </>

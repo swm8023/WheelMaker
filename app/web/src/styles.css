@@ -5235,6 +5235,32 @@ body,
   overflow-y: hidden;
 }
 
+.markdown-preview img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.markdown-image-export-host {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  width: 760px;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.markdown-image-export-surface {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 26px 30px 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+}
+
 .mermaid-block {
   margin: 10px 0 12px;
   padding: 8px;
