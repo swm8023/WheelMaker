@@ -66,6 +66,8 @@ describe('desktop title bar', () => {
     expect(root.findAllByProps({className: 'desktop-titlebar-title'})).toHaveLength(0);
     expect(root.findByProps({className: 'desktop-titlebar-app-title'}).props.children).toBe('WheelMaker - ');
     expect(root.findAllByProps({className: 'desktop-titlebar-source-select'})).toHaveLength(0);
+    const sourceControl = root.findByProps({className: 'desktop-titlebar-source-control'});
+    expect(sourceControl.props['data-desktop-titlebar-source-root']).toBe(true);
     const sourceButton = root.findByProps({className: 'desktop-titlebar-source-button'});
     expect(sourceButton.props['data-desktop-titlebar-interactive']).toBe(true);
     expect(sourceButton.props.title).toBe('https://example.com/');
@@ -74,7 +76,7 @@ describe('desktop title bar', () => {
     await ReactTestRenderer.act(async () => {
       sourceButton.props.onClick();
     });
-    expect(root.findByProps({className: 'desktop-titlebar-source-menu'}).props.role).toBe('menu');
+    expect(sourceControl.findByProps({className: 'desktop-titlebar-source-menu'}).props.role).toBe('menu');
     const menuItems = root.findAllByProps({className: 'desktop-titlebar-source-menu-item'});
     expect(menuItems.map(item => item.props.children)).toEqual([
       'example.com',

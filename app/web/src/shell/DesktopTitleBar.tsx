@@ -104,10 +104,10 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
       >
         <img className="desktop-titlebar-icon" src="/icons/icon.svg" alt="" draggable={false} />
         {webSourceState ? (
-          <span className="desktop-titlebar-title-group" data-desktop-titlebar-source-root={true}>
+          <span className="desktop-titlebar-title-group">
             <span className="desktop-titlebar-app-title" title={displayTitle}>{titlePrefix}</span>
             {hasRemoteWebSource ? (
-              <>
+              <span className="desktop-titlebar-source-control" data-desktop-titlebar-source-root={true}>
                 <button
                   type="button"
                   className="desktop-titlebar-source-button"
@@ -147,7 +147,7 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
                     </button>
                   </div>
                 ) : null}
-              </>
+              </span>
             ) : (
               <span className="desktop-titlebar-source-label" title={actualSourceLabel}>{actualSourceLabel}</span>
             )}

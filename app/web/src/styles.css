@@ -216,7 +216,6 @@ body,
   display: inline-flex;
   align-items: center;
   flex: 0 1 auto;
-  position: relative;
 }
 
 .desktop-titlebar-app-title {
@@ -225,6 +224,14 @@ body,
 
 .desktop-titlebar-source-label {
   flex: 0 1 auto;
+}
+
+.desktop-titlebar-source-control {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  position: relative;
 }
 
 .desktop-titlebar-controls {
@@ -272,8 +279,8 @@ body,
 
 .desktop-titlebar-source-menu {
   position: absolute;
-  top: 27px;
-  left: calc(100% - 100px);
+  top: calc(100% + 3px);
+  left: 0;
   z-index: 40;
   min-width: 132px;
   max-width: min(240px, calc(100vw - 20px));
