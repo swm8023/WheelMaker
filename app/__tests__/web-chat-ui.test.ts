@@ -979,10 +979,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const result = await service.renameProjectSession(targetProjectId, normalizedSessionId, normalizedTitle);');
     expect(mainTsx).toContain('className="app-rename-input"');
     expect(mainTsx).toContain('maxLength={200}');
-    expect(mainTsx).toContain('function isSessionRenameShortcutEditableTarget(target: EventTarget | null): boolean {');
     expect(mainTsx).toContain("event.key !== 'F2'");
     expect(mainTsx).toContain('event.isComposing');
-    expect(mainTsx).toContain("if (!isWide || tab !== 'chat' || !selectedChatKey || !selectedChatSession || renameTarget || confirmTarget) {");
+    expect(mainTsx).toContain("if (!isWide || tab !== 'chat' || sidebarSettingsOpen || !selectedChatKey || !selectedChatSession || renameTarget || confirmTarget) {");
     expect(mainTsx).toContain('requestRenameProjectSession(selectedChatKey.projectId, selectedChatSession);');
     expect(mainTsx).toContain('const message = err instanceof Error ? err.message : String(err);');
     expect(mainTsx).toContain('setConfirmError(message);');
