@@ -205,7 +205,7 @@ describe('agent package update settings UI source structure', () => {
     expect(agentTagBlock).toContain('text-transform: none;');
   });
 
-  test('adds desktop Update and Token Stats shortcuts below refresh and above settings only', () => {
+  test('adds desktop Update, Token Stats, and Port Relay shortcuts below refresh and above settings only', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
 
@@ -217,16 +217,22 @@ describe('agent package update settings UI source structure', () => {
 
     expect(activityBar).toContain('codicon-cloud-download');
     expect(activityBar).toContain('codicon-graph-line');
+    expect(activityBar).toContain('codicon-radio-tower');
     expect(activityBar).toContain("openSettingsDetail('update')");
     expect(activityBar).toContain("openSettingsDetail('tokenStats')");
+    expect(activityBar).toContain("openSettingsDetail('portRelay')");
     expect(activityBar.indexOf("title={reconnecting ? 'Reconnecting...' : 'Refresh project'}")).toBeLessThan(
       activityBar.indexOf('title="Update"'),
     );
     expect(activityBar.indexOf('title="Update"')).toBeLessThan(activityBar.indexOf('title="Token Stats"'));
-    expect(activityBar.indexOf('title="Token Stats"')).toBeLessThan(activityBar.indexOf('title="Settings"'));
+    expect(activityBar.indexOf('title="Token Stats"')).toBeLessThan(activityBar.indexOf('title="Port Relay"'));
+    expect(activityBar.indexOf('title="Port Relay"')).toBeLessThan(activityBar.indexOf('title="Settings"'));
     expect(activityBar).toContain("settingsDetailView === 'update'");
     expect(activityBar).toContain("settingsDetailView === 'tokenStats'");
+    expect(activityBar).toContain("settingsDetailView === 'portRelay'");
     expect(activityBar).toContain("!isShortcutSettingsDetailActive");
+    expect(mainTsx).toContain("settingsDetailView === 'skills' ||");
+    expect(mainTsx).toContain("settingsDetailView === 'portRelay'");
 
     const floatingStart = mainTsx.indexOf('const floatingControlStack = !isWide ? (');
     const mobileSettingsStart = mainTsx.indexOf('const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (', floatingStart);

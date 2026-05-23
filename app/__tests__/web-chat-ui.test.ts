@@ -474,7 +474,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('renderBreadcrumbTitle(breadcrumbProjectName, gitBreadcrumbLabel)');
   });
 
-  test('chat drawer title shows hub count summary with dropdown details', () => {
+  test('chat drawer header keeps tools left and hub browser right', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
@@ -495,11 +495,14 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('registryHubs.map(hub => {');
     expect(mainTsx).toContain('<span className="chat-hub-row-name">{hub.hubId}</span>');
     expect(mainTsx).toContain('<div className="chat-hub-empty">No hubs</div>');
-    expect(mainTsx).toContain('<div className="mobile-chat-title-row">');
-    expect(mainTsx).toContain('<span className="mobile-chat-drawer-title">Chats</span>');
+    expect(mainTsx).toContain('<div className="mobile-chat-toolbar" aria-label="Chat tools">');
+    expect(mainTsx).not.toContain('<span className="mobile-chat-drawer-title">Chats</span>');
+    expect(mainTsx).toContain('title="Port Relay"');
+    expect(mainTsx).toContain('aria-label="Port Relay"');
+    expect(mainTsx).toContain("openSettingsDetail('portRelay')");
     expect(mainTsx).toContain('renderChatHubSummary()');
     expect(mainTsx).toMatch(
-      /<div className="mobile-chat-title-row">[\s\S]*?<span className="mobile-chat-drawer-title">Chats<\/span>[\s\S]*?renderChatHubSummary\(\)/,
+      /<div className="mobile-chat-toolbar" aria-label="Chat tools">[\s\S]*?title="Open settings"[\s\S]*?openSettingsDetail\('portRelay'\)[\s\S]*?title="Port Relay"[\s\S]*?refreshMobileChatProjectSessions\(\)[\s\S]*?<\/div>[\s\S]*?\{renderChatHubSummary\(\)\}/,
     );
     expect(mainTsx).toMatch(
       /<div className="sidebar-title-row">[\s\S]*?<span className="sidebar-title-text">\{wideSidebarTitle\}<\/span>[\s\S]*?\{tab === 'chat' && !sidebarSettingsOpen \? renderChatHubSummary\(\) : null\}/,
@@ -512,12 +515,15 @@ describe('web chat integration', () => {
     expect(chatMainEnd).toBeGreaterThan(chatMainStart);
     const chatMainBlock = mainTsx.slice(chatMainStart, chatMainEnd);
     expect(chatMainBlock).not.toContain('renderChatHubSummary()');
-    expect(stylesCss).toContain('.mobile-chat-title-row {');
-    const mobileChatTitleRowBlock = stylesCss.match(/\.mobile-chat-title-row \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(mobileChatTitleRowBlock).toContain('flex-direction: row;');
-    expect(mobileChatTitleRowBlock).not.toContain('flex-direction: column;');
-    const mobileChatDrawerTitleBlock = stylesCss.match(/\.mobile-chat-drawer-title \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(mobileChatDrawerTitleBlock).toContain('font-size: 15px;');
+    const mobileChatHeaderBlock = stylesCss.match(/\.mobile-chat-drawer-header \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileChatHeaderBlock).toContain('display: flex;');
+    expect(mobileChatHeaderBlock).toContain('justify-content: space-between;');
+    expect(stylesCss).toContain('.mobile-chat-toolbar {');
+    const mobileChatToolbarBlock = stylesCss.match(/\.mobile-chat-toolbar \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileChatToolbarBlock).toContain('display: inline-flex;');
+    expect(mobileChatToolbarBlock).toContain('justify-content: flex-start;');
+    expect(stylesCss).toContain('.mobile-chat-toolbar-icon {');
+    expect(stylesCss).toContain('.mobile-chat-drawer-header .chat-hub-summary {');
     expect(stylesCss).toContain('.sidebar-title-row .chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary-button {');
@@ -862,7 +868,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('refreshChatProjectSessions(projectItem.projectId)');
     expect(mainTsx).toContain('const renderMobileChatSessionSheet = () => {');
     expect(mainTsx).toContain('className="mobile-chat-drawer-header"');
-    expect(mainTsx).toContain('<span className="mobile-chat-drawer-title">Chats</span>');
+    expect(mainTsx).toContain('<div className="mobile-chat-toolbar" aria-label="Chat tools">');
+    expect(mainTsx).toContain("openSettingsDetail('portRelay')");
+    expect(mainTsx).not.toContain('<span className="mobile-chat-drawer-title">Chats</span>');
     expect(mainTsx).toContain('className="mobile-project-session-nav"');
     expect(mainTsx).toContain('className="mobile-project-sheet"');
     expect(mainTsx).toContain('className="mobile-project-session-error"');

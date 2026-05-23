@@ -3957,9 +3957,9 @@ body,
   position: relative;
   z-index: 20;
   flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
@@ -3967,52 +3967,52 @@ body,
   backdrop-filter: blur(12px);
 }
 
-.mobile-chat-title-row {
+.mobile-chat-toolbar {
   min-width: 0;
-  display: flex;
-  flex-direction: row;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 6px;
-  line-height: 1.1;
+  flex: 0 1 auto;
 }
 
-.mobile-chat-drawer-title {
-  min-width: 0;
+.mobile-chat-toolbar-icon {
   flex: 0 0 auto;
-  max-width: 100%;
-  overflow: hidden;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
-  font-size: 15px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  line-height: 1.15;
-}
-
-.mobile-chat-title-row .chat-hub-summary {
-  flex: 0 0 auto;
-  max-width: 100%;
-}
-
-.mobile-chat-title-row .chat-hub-summary-button {
-  height: 20px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
   border-radius: 999px;
-  padding: 0 7px;
-  font-size: 9.5px;
+  background: color-mix(in srgb, var(--panel-2) 92%, transparent);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
+.mobile-chat-toolbar-icon:hover {
+  background: var(--hover);
+}
+
+.mobile-chat-drawer-header .chat-hub-summary {
+  flex: 0 0 auto;
+  max-width: min(112px, 36vw);
+  margin-left: auto;
+}
+
+.mobile-chat-drawer-header .chat-hub-summary-button {
+  height: 24px;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 10px;
   font-weight: 700;
   gap: 4px;
 }
 
-.mobile-chat-title-row .chat-hub-summary-button .codicon {
+.mobile-chat-drawer-header .chat-hub-summary-button .codicon {
   font-size: 10px;
 }
 
-.mobile-chat-title-row .chat-hub-summary-count {
-  min-width: 12px;
-  height: 12px;
+.mobile-chat-drawer-header .chat-hub-summary-count {
+  min-width: 13px;
+  height: 13px;
   font-size: 9px;
   padding: 0 3px;
 }

@@ -4723,7 +4723,12 @@ function App() {
     setSidebarCollapsed(false);
   }, [sidebarSettingsOpen, tab, setSidebarSettingsOpen, setSidebarCollapsed, setTab]);
   const handleDesktopSettingsSelect = useCallback(() => {
-    if (sidebarSettingsOpen && (settingsDetailView === 'update' || settingsDetailView === 'tokenStats')) {
+    if (sidebarSettingsOpen && (
+      settingsDetailView === 'update' ||
+      settingsDetailView === 'skills' ||
+      settingsDetailView === 'tokenStats' ||
+      settingsDetailView === 'portRelay'
+    )) {
       setSettingsDetailView(null);
       setSidebarSettingsOpen(true);
       setSidebarCollapsed(false);
@@ -10548,31 +10553,43 @@ function App() {
     return (
       <>
         <div className="mobile-chat-drawer-header">
-          <button
-            type="button"
-            className="drawer-settings-icon-btn"
-            onClick={() => {
-              setProjectMenuOpen(false);
-              setSettingsDetailView(null);
-              setSidebarSettingsOpen(true);
-            }}
-            title="Open settings"
-            aria-label="Open settings"
-          >
-            <span className="codicon codicon-settings-gear" />
-          </button>
-          <div className="mobile-chat-title-row">
-            <span className="mobile-chat-drawer-title">Chats</span>
-            {renderChatHubSummary()}
+          <div className="mobile-chat-toolbar" aria-label="Chat tools">
+            <button
+              type="button"
+              className="mobile-chat-toolbar-icon drawer-settings-icon-btn"
+              onClick={() => {
+                setProjectMenuOpen(false);
+                setSettingsDetailView(null);
+                setSidebarSettingsOpen(true);
+              }}
+              title="Open settings"
+              aria-label="Open settings"
+            >
+              <span className="codicon codicon-settings-gear" />
+            </button>
+            <button
+              type="button"
+              className="mobile-chat-toolbar-icon drawer-settings-icon-btn"
+              onClick={() => {
+                setProjectMenuOpen(false);
+                openSettingsDetail('portRelay');
+              }}
+              title="Port Relay"
+              aria-label="Port Relay"
+            >
+              <span className="codicon codicon-radio-tower" />
+            </button>
+            <button
+              type="button"
+              className={`mobile-chat-toolbar-icon header-btn refresh-btn drawer-project-refresh${hasPendingProjectUpdates && !mobileProjectSessionsRefreshing && !reconnecting ? ' has-update-badge' : ''}`}
+              onClick={() => refreshMobileChatProjectSessions().catch(() => undefined)}
+              title={reconnecting ? 'Reconnecting...' : 'Refresh chats'}
+              disabled={mobileProjectSessionsRefreshing || reconnecting}
+            >
+              {mobileProjectSessionsRefreshing ? '...' : refreshButtonContent}
+            </button>
           </div>
-          <button
-            className={`header-btn refresh-btn drawer-project-refresh${hasPendingProjectUpdates && !mobileProjectSessionsRefreshing && !reconnecting ? ' has-update-badge' : ''}`}
-            onClick={() => refreshMobileChatProjectSessions().catch(() => undefined)}
-            title={reconnecting ? 'Reconnecting...' : 'Refresh chats'}
-            disabled={mobileProjectSessionsRefreshing || reconnecting}
-          >
-            {mobileProjectSessionsRefreshing ? '...' : refreshButtonContent}
-          </button>
+          {renderChatHubSummary()}
         </div>
         <div className="mobile-project-session-nav">
           {projects.length === 0 ? (
@@ -12524,7 +12541,8 @@ function App() {
   const isShortcutSettingsDetailActive = sidebarSettingsOpen && (
     settingsDetailView === 'update' ||
     settingsDetailView === 'skills' ||
-    settingsDetailView === 'tokenStats'
+    settingsDetailView === 'tokenStats' ||
+    settingsDetailView === 'portRelay'
   );
 
   const desktopActivityBar = isWide ? (
@@ -12599,6 +12617,15 @@ function App() {
           aria-label="Token Stats"
         >
           <span className="codicon codicon-graph-line" />
+        </button>
+        <button
+          type="button"
+          className={`desktop-activity-button${sidebarSettingsOpen && settingsDetailView === 'portRelay' ? ' active' : ''}`}
+          onClick={() => openSettingsDetail('portRelay')}
+          title="Port Relay"
+          aria-label="Port Relay"
+        >
+          <span className="codicon codicon-radio-tower" />
         </button>
         <button
           type="button"
