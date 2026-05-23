@@ -89,18 +89,37 @@ func (t *registryTunnel) route(frame Frame) {
 	}
 	switch frame.Type {
 	case FrameHeaders:
-		select {
-		case stream.headers <- frame:
-		default:
-		}
+		_ = stream.enqueueHeader(frame)
 	case FrameData, FrameClose, FrameError:
-		select {
-		case stream.frames <- frame:
-		default:
-		}
+		enqueued := stream.enqueueFrame(frame)
 		if frame.Type == FrameClose || frame.Type == FrameError {
-			stream.Close()
+			t.removeStream(frame.StreamID)
+			if !enqueued {
+				stream.closeLocal()
+			}
 		}
+	}
+}
+
+func (s *registryStream) enqueueHeader(frame Frame) bool {
+	select {
+	case s.headers <- frame:
+		return true
+	case <-s.closed:
+		return false
+	case <-s.tunnel.closed:
+		return false
+	}
+}
+
+func (s *registryStream) enqueueFrame(frame Frame) bool {
+	select {
+	case s.frames <- frame:
+		return true
+	case <-s.closed:
+		return false
+	case <-s.tunnel.closed:
+		return false
 	}
 }
 
@@ -154,6 +173,9 @@ func (s *registryStream) waitHeaders(timeout time.Duration) (Frame, error) {
 func (s *registryStream) nextData() (Frame, bool) {
 	select {
 	case frame := <-s.frames:
+		if frame.Type == FrameClose || frame.Type == FrameError {
+			s.closeLocal()
+		}
 		return frame, true
 	case <-s.closed:
 		return Frame{Type: FrameClose, StreamID: s.id}, true

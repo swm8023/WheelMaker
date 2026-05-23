@@ -18,7 +18,10 @@ import (
 
 func TestReporterPortRelayHTTPAndWebSocketSmoke(t *testing.T) {
 	var seenUserAgent string
-	targetUpgrader := websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
+	targetUpgrader := websocket.Upgrader{
+		CheckOrigin:  func(_ *http.Request) bool { return true },
+		Subprotocols: []string{"vite-hmr"},
+	}
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seenUserAgent = r.UserAgent()
 		if r.URL.Path == "/ws" {
@@ -160,6 +163,16 @@ func TestReporterPortRelayHTTPAndWebSocketSmoke(t *testing.T) {
 	}
 	if messageType != websocket.BinaryMessage || string(payload) != "echo:\x01\x02\x03" {
 		t.Fatalf("ws binary type=%d payload=%v", messageType, payload)
+	}
+
+	subprotocolDialer := websocket.Dialer{Subprotocols: []string{"vite-hmr"}}
+	subprotocolConn, _, err := subprotocolDialer.Dial("ws://127.0.0.1:"+strconv.Itoa(relayPort)+"/ws", wsHeader)
+	if err != nil {
+		t.Fatalf("dial relay ws subprotocol: %v", err)
+	}
+	defer subprotocolConn.Close()
+	if got := subprotocolConn.Subprotocol(); got != "vite-hmr" {
+		t.Fatalf("relay ws subprotocol=%q, want vite-hmr", got)
 	}
 }
 

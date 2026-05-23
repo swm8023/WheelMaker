@@ -66,3 +66,23 @@ func TestCopyResponseHeadersDropsContentLength(t *testing.T) {
 		t.Fatalf("copyResponseHeaders Content-Type=%q, want application/javascript", got)
 	}
 }
+
+func TestCopyWebSocketResponseHeadersKeepsSubprotocolAndDropsExtensions(t *testing.T) {
+	src := map[string][]string{
+		"Sec-Websocket-Protocol":   {"vite-hmr"},
+		"Sec-Websocket-Extensions": {"permessage-deflate"},
+		"Content-Length":           {"12"},
+	}
+
+	dst := copyWebSocketResponseHeaders(src)
+
+	if got := dst.Get("Sec-Websocket-Protocol"); got != "vite-hmr" {
+		t.Fatalf("Sec-Websocket-Protocol=%q, want vite-hmr", got)
+	}
+	if got := dst.Get("Sec-Websocket-Extensions"); got != "" {
+		t.Fatalf("Sec-Websocket-Extensions=%q, want empty", got)
+	}
+	if got := dst.Get("Content-Length"); got != "" {
+		t.Fatalf("Content-Length=%q, want empty", got)
+	}
+}

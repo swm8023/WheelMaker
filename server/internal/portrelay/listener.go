@@ -197,7 +197,7 @@ func (c *Controller) handleExternalWebSocket(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "target websocket failed", http.StatusBadGateway)
 		return
 	}
-	conn, err := relayUpgrader.Upgrade(w, r, nil)
+	conn, err := relayUpgrader.Upgrade(w, r, copyWebSocketResponseHeaders(headers.Headers))
 	if err != nil {
 		stream.Close()
 		return
@@ -311,6 +311,23 @@ func copyResponseHeaders(dst http.Header, headers map[string][]string) {
 			dst.Add(canonical, value)
 		}
 	}
+}
+
+func copyWebSocketResponseHeaders(headers map[string][]string) http.Header {
+	dst := http.Header{}
+	for name, values := range headers {
+		canonical := http.CanonicalHeaderKey(name)
+		if isHopByHopHeader(canonical) || strings.EqualFold(canonical, "Content-Length") || strings.EqualFold(canonical, "Sec-Websocket-Extensions") {
+			continue
+		}
+		for _, value := range values {
+			if strings.EqualFold(canonical, "Set-Cookie") && strings.HasPrefix(strings.ToLower(value), strings.ToLower(relayCookieName)+"=") {
+				continue
+			}
+			dst.Add(canonical, value)
+		}
+	}
+	return dst
 }
 
 func isHopByHopHeader(name string) bool {
