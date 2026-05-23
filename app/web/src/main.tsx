@@ -2708,12 +2708,21 @@ function App() {
       listenPort: portRelayListenPort,
     });
   }, [address, portRelayListenPort, portRelayReady, portRelaySnapshot.relayUrl]);
+  const mobilePortRelayFrameOpen = !isWide && portRelayFrameOpen && !!portRelayFrameUrl;
 
   useEffect(() => {
     if (!portRelayReady || !portRelayFrameUrl) {
       setPortRelayFrameOpen(false);
     }
   }, [portRelayFrameUrl, portRelayReady]);
+
+  useEffect(() => {
+    if (!mobilePortRelayFrameOpen) {
+      return;
+    }
+    setDrawerOpen(false);
+    setSidebarSettingsOpen(false);
+  }, [mobilePortRelayFrameOpen, setDrawerOpen, setSidebarSettingsOpen]);
 
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [workspaceProjectMenuOpen, setWorkspaceProjectMenuOpen] = useState(false);
@@ -12966,7 +12975,7 @@ function App() {
             <span className="codicon codicon-radio-tower" />
           </button>
         ) : null}
-        {gestureNavigation ? (
+        {mobilePortRelayFrameOpen ? null : gestureNavigation ? (
           <div
             className="gesture-nav-control"
             data-expanded={gestureNavigationExpanded}
@@ -13124,7 +13133,7 @@ function App() {
       </div>
     </div>
   ) : null;
-  const portRelayMobileFrameOverlay = !isWide && portRelayFrameOpen && portRelayFrameUrl
+  const portRelayMobileFrameOverlay = mobilePortRelayFrameOpen
     ? renderPortRelayFrameSurface('mobile')
     : null;
 
@@ -13461,7 +13470,7 @@ function App() {
         sidebar={renderSidebar()}
         main={renderMain()}
         sidebarCollapsed={sidebarCollapsed}
-        drawerOpen={drawerOpen}
+        drawerOpen={mobilePortRelayFrameOpen ? false : drawerOpen}
         onCloseDrawer={() => setDrawerOpen(false)}
       />
       {portRelayMobileFrameOverlay}

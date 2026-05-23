@@ -87,4 +87,15 @@ describe('port relay settings UI source structure', () => {
 
     expect(iframeCss).toContain('max-width: 100%;');
   });
+
+  test('hides mobile navigation and drawer while the relay iframe is open', () => {
+    expect(mainTsx).toContain('const mobilePortRelayFrameOpen = !isWide && portRelayFrameOpen && !!portRelayFrameUrl;');
+    expect(mainTsx).toContain('if (!mobilePortRelayFrameOpen) {');
+    expect(mainTsx).toContain('setDrawerOpen(false);');
+    expect(mainTsx).toContain('setSidebarSettingsOpen(false);');
+    expect(mainTsx).toContain('}, [mobilePortRelayFrameOpen, setDrawerOpen, setSidebarSettingsOpen]);');
+    expect(mainTsx).toContain('{mobilePortRelayFrameOpen ? null : gestureNavigation ? (');
+    expect(mainTsx).toContain('drawerOpen={mobilePortRelayFrameOpen ? false : drawerOpen}');
+    expect(mainTsx).toContain('const portRelayMobileFrameOverlay = mobilePortRelayFrameOpen');
+  });
 });
