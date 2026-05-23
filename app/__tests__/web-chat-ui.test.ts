@@ -987,9 +987,11 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('style={projectSessionActionMenu.popover');
     expect(mainTsx).toContain("transform: projectSessionActionMenu.popover.placement === 'above'");
     expect(mainTsx).toContain('anchorRect: {');
+    expect(mainTsx).toContain('left: event.clientX,');
     expect(mainTsx).toContain('top: event.clientY,');
     expect(mainTsx).toContain('bottom: event.clientY,');
     expect(mainTsx).toContain('right: event.clientX,');
+    expect(mainTsx).toContain("align: 'start',");
     expect(mainTsx).toContain('className="project-session-menu-btn reload"');
     expect(mainTsx).toContain('className="project-session-menu-btn rename"');
     expect(mainTsx).toContain('className="project-session-menu-btn archive"');

@@ -44,4 +44,27 @@ describe('wide project action popover placement', () => {
       maxHeight: 240,
     });
   });
+
+  test('can place a context menu from the pointer instead of offsetting by menu width', () => {
+    const placement = resolveWideProjectActionPopoverPlacement({
+      anchorRect: {
+        top: 200,
+        right: 320,
+        bottom: 200,
+      },
+      viewportWidth: 800,
+      viewportHeight: 600,
+      preferredWidth: 156,
+      preferredMaxHeight: 190,
+      align: 'start',
+    });
+
+    expect(placement).toEqual({
+      placement: 'below',
+      top: 204,
+      left: 320,
+      width: 156,
+      maxHeight: 190,
+    });
+  });
 });

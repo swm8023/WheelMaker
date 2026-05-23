@@ -1,4 +1,5 @@
 export type WideProjectActionPopoverRect = {
+  left?: number;
   top: number;
   right: number;
   bottom: number;
@@ -18,6 +19,7 @@ type WideProjectActionPopoverInput = {
   viewportHeight: number;
   preferredWidth?: number;
   preferredMaxHeight?: number;
+  align?: 'start' | 'end';
   margin?: number;
   gap?: number;
 };
@@ -36,7 +38,11 @@ export function resolveWideProjectActionPopoverPlacement(
   const preferredWidth = positiveNumberOr(input.preferredWidth, 260);
   const preferredMaxHeight = positiveNumberOr(input.preferredMaxHeight, 280);
   const width = Math.max(0, Math.min(preferredWidth, viewportWidth - margin * 2));
-  const left = clamp(anchor.right - width, margin, Math.max(margin, viewportWidth - width - margin));
+  const anchorStart = finiteNumberOr(anchor.left, anchor.right);
+  const horizontalOrigin = input.align === 'start'
+    ? anchorStart
+    : anchor.right - width;
+  const left = clamp(horizontalOrigin, margin, Math.max(margin, viewportWidth - width - margin));
   const availableBelow = Math.max(0, viewportHeight - anchor.bottom - gap - margin);
   const availableAbove = Math.max(0, anchor.top - gap - margin);
   const openAbove = availableBelow < Math.min(160, preferredMaxHeight) && availableAbove > availableBelow;

@@ -5019,6 +5019,8 @@ function App() {
       clearProjectSessionLongPress();
       projectSessionLongPressTargetRef.current = '';
       const target = event.currentTarget;
+      const pressX = event.clientX;
+      const pressY = event.clientY;
       if (target.setPointerCapture) {
         try {
           target.setPointerCapture(event.pointerId);
@@ -5037,11 +5039,17 @@ function App() {
           projectId: targetProjectId,
           sessionId,
           popover: resolveWideProjectActionPopoverPlacement({
-            anchorRect: target.getBoundingClientRect(),
+            anchorRect: {
+              left: pressX,
+              top: pressY,
+              right: pressX,
+              bottom: pressY,
+            },
             viewportWidth: window.innerWidth,
             viewportHeight: window.innerHeight,
             preferredWidth: 156,
             preferredMaxHeight: 190,
+            align: 'start',
           }),
         });
       }, PROJECT_SESSION_LONG_PRESS_MS);
@@ -5112,6 +5120,7 @@ function App() {
       sessionId: normalizedSessionId,
       popover: resolveWideProjectActionPopoverPlacement({
         anchorRect: {
+          left: event.clientX,
           top: event.clientY,
           bottom: event.clientY,
           right: event.clientX,
@@ -5120,6 +5129,7 @@ function App() {
         viewportHeight: window.innerHeight,
         preferredWidth: 156,
         preferredMaxHeight: 190,
+        align: 'start',
       }),
     });
   };
