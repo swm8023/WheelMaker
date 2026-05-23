@@ -23,6 +23,7 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
   const bridge = getDesktopWindowBridge();
   const suppressNextDoubleClickRef = useRef(false);
   const [webSourceState, setWebSourceState] = useState<DesktopWebSourceState | null>(null);
+  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   useEffect(() => {
     let cancelled = false;
     readDesktopWebSourceState().then(state => {
@@ -34,6 +35,20 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
       cancelled = true;
     };
   }, []);
+  useEffect(() => {
+    if (!sourceMenuOpen || typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
+      return undefined;
+    }
+    const closeSourceMenu = (event: PointerEvent) => {
+      const target = event.target as { closest?: (selector: string) => Element | null } | null;
+      if (typeof target?.closest === 'function' && target.closest('[data-desktop-titlebar-source-root]')) {
+        return;
+      }
+      setSourceMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', closeSourceMenu);
+    return () => window.removeEventListener('pointerdown', closeSourceMenu);
+  }, [sourceMenuOpen]);
   if (!bridge) {
     return null;
   }
@@ -65,8 +80,8 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
     }
     invokeDesktopAction(bridge.toggleMaximize);
   };
-  const handleWebSourcePreferenceChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const preference = event.target.value === 'embedded' ? 'embedded' : 'auto';
+  const handleWebSourcePreferenceSelect = async (preference: 'auto' | 'embedded') => {
+    setSourceMenuOpen(false);
     const nextState = await setDesktopWebSourcePreference(preference);
     if (nextState) {
       setWebSourceState(nextState);
@@ -89,21 +104,50 @@ export function DesktopTitleBar({ title }: DesktopTitleBarProps) {
       >
         <img className="desktop-titlebar-icon" src="/icons/icon.svg" alt="" draggable={false} />
         {webSourceState ? (
-          <span className="desktop-titlebar-title-group">
+          <span className="desktop-titlebar-title-group" data-desktop-titlebar-source-root={true}>
             <span className="desktop-titlebar-app-title" title={displayTitle}>{titlePrefix}</span>
             {hasRemoteWebSource ? (
-              <select
-                className="desktop-titlebar-source-select"
-                aria-label="Desktop web source"
-                data-desktop-titlebar-interactive={true}
-                title={webSourceState.remoteUrl || actualSourceLabel}
-                value="current"
-                onChange={handleWebSourcePreferenceChange}
-              >
-                <option value="current" hidden>{actualSourceLabel}</option>
-                <option value="auto">{remoteSourceLabel}</option>
-                <option value="embedded">Embedded</option>
-              </select>
+              <>
+                <button
+                  type="button"
+                  className="desktop-titlebar-source-button"
+                  aria-expanded={sourceMenuOpen}
+                  aria-haspopup="menu"
+                  aria-label="Desktop web source"
+                  data-desktop-titlebar-interactive={true}
+                  title={webSourceState.remoteUrl || actualSourceLabel}
+                  onClick={() => setSourceMenuOpen(open => !open)}
+                >
+                  {actualSourceLabel}
+                </button>
+                {sourceMenuOpen ? (
+                  <div
+                    className="desktop-titlebar-source-menu"
+                    role="menu"
+                    data-desktop-titlebar-interactive={true}
+                  >
+                    <button
+                      type="button"
+                      className="desktop-titlebar-source-menu-item"
+                      role="menuitemradio"
+                      aria-checked={webSourceState.preference === 'auto'}
+                      title={webSourceState.remoteUrl}
+                      onClick={() => void handleWebSourcePreferenceSelect('auto')}
+                    >
+                      {remoteSourceLabel}
+                    </button>
+                    <button
+                      type="button"
+                      className="desktop-titlebar-source-menu-item"
+                      role="menuitemradio"
+                      aria-checked={webSourceState.preference === 'embedded'}
+                      onClick={() => void handleWebSourcePreferenceSelect('embedded')}
+                    >
+                      Embedded
+                    </button>
+                  </div>
+                ) : null}
+              </>
             ) : (
               <span className="desktop-titlebar-source-label" title={actualSourceLabel}>{actualSourceLabel}</span>
             )}

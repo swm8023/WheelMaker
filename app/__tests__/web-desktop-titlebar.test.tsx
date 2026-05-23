@@ -65,23 +65,30 @@ describe('desktop title bar', () => {
     expect(root.findByType('img').props.src).toBe('/icons/icon.svg');
     expect(root.findAllByProps({className: 'desktop-titlebar-title'})).toHaveLength(0);
     expect(root.findByProps({className: 'desktop-titlebar-app-title'}).props.children).toBe('WheelMaker - ');
-    const select = root.findByProps({className: 'desktop-titlebar-source-select'});
-    expect(select.props['data-desktop-titlebar-interactive']).toBe(true);
-    expect(select.props.title).toBe('https://example.com/');
-    expect(select.findAllByType('option').find(option => option.props.value === 'current')?.props.children).toBe('example.com');
-    expect(select.findAllByType('option').filter(option => !option.props.hidden).map(option => option.props.children)).toEqual([
+    expect(root.findAllByProps({className: 'desktop-titlebar-source-select'})).toHaveLength(0);
+    const sourceButton = root.findByProps({className: 'desktop-titlebar-source-button'});
+    expect(sourceButton.props['data-desktop-titlebar-interactive']).toBe(true);
+    expect(sourceButton.props.title).toBe('https://example.com/');
+    expect(sourceButton.props.children).toBe('example.com');
+    expect(sourceButton.props['aria-expanded']).toBe(false);
+    await ReactTestRenderer.act(async () => {
+      sourceButton.props.onClick();
+    });
+    expect(root.findByProps({className: 'desktop-titlebar-source-menu'}).props.role).toBe('menu');
+    const menuItems = root.findAllByProps({className: 'desktop-titlebar-source-menu-item'});
+    expect(menuItems.map(item => item.props.children)).toEqual([
       'example.com',
       'Embedded',
     ]);
-    expect(select.props.value).toBe('current');
     await ReactTestRenderer.act(async () => {
-      await select.props.onChange({target: {value: 'embedded'}});
+      await menuItems[1].props.onClick();
     });
     expect(setWebSourcePreference).toHaveBeenCalledWith('embedded');
     expect(reload).toHaveBeenCalled();
 
     const dragRegion = root.findByProps({'data-desktop-titlebar-drag-region': true});
     expect(root.findByProps({className: 'desktop-titlebar-controls'}).findAllByType('select')).toHaveLength(0);
+    expect(root.findByProps({className: 'desktop-titlebar-controls'}).findAllByProps({className: 'desktop-titlebar-source-button'})).toHaveLength(0);
     expect(dragRegion.props.onPointerDown).toBeUndefined();
     const preventDefault = jest.fn();
     dragRegion.props.onMouseDown({
@@ -92,14 +99,14 @@ describe('desktop title bar', () => {
     });
     expect(preventDefault).toHaveBeenCalled();
     expect(startDrag).toHaveBeenCalled();
-    const selectMouseDownPreventDefault = jest.fn();
+    const sourceMouseDownPreventDefault = jest.fn();
     dragRegion.props.onMouseDown({
       button: 0,
       detail: 1,
       target: { closest: (selector: string) => selector.includes('[data-desktop-titlebar-interactive]') ? {} : null },
-      preventDefault: selectMouseDownPreventDefault,
+      preventDefault: sourceMouseDownPreventDefault,
     });
-    expect(selectMouseDownPreventDefault).not.toHaveBeenCalled();
+    expect(sourceMouseDownPreventDefault).not.toHaveBeenCalled();
     expect(startDrag).toHaveBeenCalledTimes(1);
     dragRegion.props.onDoubleClick({
       target: { closest: (selector: string) => selector.includes('[data-desktop-titlebar-interactive]') ? {} : null },
@@ -161,5 +168,6 @@ describe('desktop title bar', () => {
     expect(root.findByProps({className: 'desktop-titlebar-app-title'}).props.children).toBe('WheelMaker - ');
     expect(root.findByProps({className: 'desktop-titlebar-source-label'}).props.children).toBe('Embedded');
     expect(root.findAllByProps({className: 'desktop-titlebar-source-select'})).toHaveLength(0);
+    expect(root.findAllByProps({className: 'desktop-titlebar-source-button'})).toHaveLength(0);
   });
 });

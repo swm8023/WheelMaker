@@ -216,6 +216,7 @@ body,
   display: inline-flex;
   align-items: center;
   flex: 0 1 auto;
+  position: relative;
 }
 
 .desktop-titlebar-app-title {
@@ -233,7 +234,7 @@ body,
   align-items: stretch;
 }
 
-.desktop-titlebar-source-select {
+.desktop-titlebar-source-button {
   align-self: center;
   height: 24px;
   min-width: 0;
@@ -247,13 +248,15 @@ body,
   padding: 0 18px 0 0;
   flex: 0 1 auto;
   cursor: pointer;
-  appearance: none;
+  display: inline-flex;
+  align-items: center;
   background-repeat: no-repeat;
   transition: background-color 80ms ease, border-color 80ms ease, color 80ms ease;
 }
 
-.desktop-titlebar-source-select:hover,
-.desktop-titlebar-source-select:focus-visible {
+.desktop-titlebar-source-button:hover,
+.desktop-titlebar-source-button:focus-visible,
+.desktop-titlebar-source-button[aria-expanded="true"] {
   border-color: color-mix(in srgb, var(--border) 70%, transparent);
   background-color: color-mix(in srgb, var(--hover) 72%, transparent);
   background-image:
@@ -263,6 +266,50 @@ body,
     calc(100% - 10px) 10px,
     calc(100% - 6px) 10px;
   background-size: 4px 4px, 4px 4px;
+  color: var(--text);
+  outline: none;
+}
+
+.desktop-titlebar-source-menu {
+  position: absolute;
+  top: 27px;
+  left: calc(100% - 100px);
+  z-index: 40;
+  min-width: 132px;
+  max-width: min(240px, calc(100vw - 20px));
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 92%, var(--bg));
+  box-shadow: 0 14px 34px color-mix(in srgb, #000 30%, transparent);
+}
+
+.theme-light .desktop-titlebar-source-menu {
+  background: color-mix(in srgb, var(--panel) 96%, #ffffff);
+  box-shadow: 0 12px 26px color-mix(in srgb, #000 16%, transparent);
+}
+
+.desktop-titlebar-source-menu-item {
+  width: 100%;
+  min-height: 26px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 84%, var(--muted));
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.desktop-titlebar-source-menu-item:hover,
+.desktop-titlebar-source-menu-item:focus-visible,
+.desktop-titlebar-source-menu-item[aria-checked="true"] {
+  background: var(--hover);
   color: var(--text);
   outline: none;
 }
