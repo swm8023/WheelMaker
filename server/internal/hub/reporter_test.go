@@ -787,6 +787,125 @@ func TestReporterForwardsSessionDeleteRequests(t *testing.T) {
 		t.Fatal("did not receive session.delete response from reporter")
 	}
 }
+
+func TestReporterForwardsSessionRenameRequests(t *testing.T) {
+	reqSeen := make(chan testEnvelope, 1)
+	respSeen := make(chan testEnvelope, 1)
+	errSeen := make(chan error, 1)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+		ws, err := upgrader.Upgrade(w, req, nil)
+		if err != nil {
+			errSeen <- err
+			return
+		}
+		defer ws.Close()
+
+		initReq := mustReadEnvelope(t, ws)
+		if initReq.Method != "connect.init" {
+			errSeen <- fmt.Errorf("init method=%q", initReq.Method)
+			return
+		}
+		mustWriteJSON(t, ws, testEnvelope{
+			RequestID: initReq.RequestID,
+			Type:      "response",
+			Method:    "connect.init",
+			Payload: map[string]any{
+				"ok": true,
+				"principal": map[string]any{
+					"role":            "hub",
+					"hubId":           "hub-session-rename",
+					"connectionEpoch": 1,
+				},
+				"serverInfo": map[string]any{
+					"serverVersion":   "test",
+					"protocolVersion": rp.DefaultProtocolVersion,
+				},
+				"features":       map[string]any{},
+				"hashAlgorithms": []string{"sha256"},
+			},
+		})
+
+		reportReq := mustReadEnvelope(t, ws)
+		if reportReq.Method != "registry.reportProjects" {
+			errSeen <- fmt.Errorf("report method=%q", reportReq.Method)
+			return
+		}
+		mustWriteJSON(t, ws, testEnvelope{
+			RequestID: reportReq.RequestID,
+			Type:      "response",
+			Method:    "registry.reportProjects",
+			Payload: map[string]any{
+				"ok": true,
+			},
+		})
+
+		request := testEnvelope{
+			RequestID: 103,
+			Type:      "request",
+			Method:    "session.rename",
+			ProjectID: "hub-session-rename:proj1",
+			Payload: map[string]any{
+				"sessionId": "sess-1",
+				"title":     "Manual title",
+			},
+		}
+		mustWriteJSON(t, ws, request)
+		reqSeen <- request
+
+		_ = ws.SetReadDeadline(time.Now().Add(1500 * time.Millisecond))
+		respSeen <- mustReadEnvelope(t, ws)
+	}))
+
+	t.Cleanup(ts.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reporter := NewReporter(ReporterConfig{
+		Server:            strings.TrimPrefix(ts.URL, "http://"),
+		HubID:             "hub-session-rename",
+		ReconnectInterval: 50 * time.Millisecond,
+	}, []ProjectInfo{{Name: "proj1", Path: t.TempDir(), Online: true}})
+	handler := &stubSessionHandler{}
+	reporter.RegisterSessionHandler(rp.ProjectID("hub-session-rename", "proj1"), handler)
+
+	done := make(chan error, 1)
+	go func() { done <- reporter.Run(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("reporter did not stop")
+		}
+	}()
+
+	select {
+	case err := <-errSeen:
+		t.Fatalf("fake registry error: %v", err)
+	case <-reqSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive session.rename request")
+	}
+
+	select {
+	case err := <-errSeen:
+		t.Fatalf("fake registry error: %v", err)
+	case resp := <-respSeen:
+		if resp.Type != "response" || resp.Method != "session.rename" {
+			t.Fatalf("unexpected session.rename response: %#v", resp)
+		}
+		if resp.Payload["ok"] != true || resp.Payload["sessionId"] != "sess-1" {
+			t.Fatalf("session.rename response payload=%#v, want ok sessionId", resp.Payload)
+		}
+		if handler.lastMethod != "session.rename" || !strings.Contains(handler.lastBody, `"title":"Manual title"`) {
+			t.Fatalf("handler saw method=%q body=%q, want session.rename payload", handler.lastMethod, handler.lastBody)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive session.rename response from reporter")
+	}
+}
+
 func TestReporterRunReturnsOnContextCancel(t *testing.T) {
 	ts := newRegistryServer(t, registry.New(registry.Config{}).Handler())
 	ctx, cancel := context.WithCancel(context.Background())
