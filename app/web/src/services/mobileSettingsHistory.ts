@@ -58,7 +58,7 @@ export function resolveMobileSettingsPopAction({
     return 'none';
   }
   if (settingsDetailView !== null) {
-    return 'back-to-list';
+    return isMobileSettingsHistoryState(nextState) ? 'back-to-list' : 'close-settings';
   }
   return isMobileSettingsHistoryState(nextState) ? 'none' : 'close-settings';
 }

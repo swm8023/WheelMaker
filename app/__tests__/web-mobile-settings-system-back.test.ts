@@ -37,6 +37,12 @@ describe('mobile settings system back', () => {
     expect(resolveMobileSettingsPopAction({
       nextState: null,
       settingsOpen: true,
+      settingsDetailView: 'portRelay',
+    })).toBe('close-settings');
+
+    expect(resolveMobileSettingsPopAction({
+      nextState: null,
+      settingsOpen: true,
       settingsDetailView: null,
     })).toBe('close-settings');
 
