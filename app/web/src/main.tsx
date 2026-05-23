@@ -521,6 +521,11 @@ function generatePortRelayAccessCode(): string {
   return String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
 }
 
+function isSessionRenameShortcutEditableTarget(target: EventTarget | null): boolean {
+  const element = target instanceof Element ? target : null;
+  return !!element?.closest('input, textarea, select, [contenteditable="true"]');
+}
+
 function agentPackageActionForPackage(pkg: RegistryNpmPackage): 'install' | 'update' | 'uninstall' | null {
   if (pkg.canInstall) return 'install';
   if (pkg.canUpdate) return 'update';
@@ -6618,6 +6623,39 @@ function App() {
       title,
     });
   };
+
+  useEffect(() => {
+    if (!isWide || tab !== 'chat' || !selectedChatKey || !selectedChatSession || renameTarget || confirmTarget) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.key !== 'F2' ||
+        event.repeat ||
+        event.isComposing ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.shiftKey ||
+        isSessionRenameShortcutEditableTarget(event.target)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      requestRenameProjectSession(selectedChatKey.projectId, selectedChatSession);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    confirmTarget,
+    isWide,
+    renameTarget,
+    requestRenameProjectSession,
+    selectedChatKey,
+    selectedChatSession,
+    tab,
+  ]);
 
   const requestArchiveProjectSession = (targetProjectId: string, session: RegistrySessionSummary) => {
     const normalizedSessionId = session.sessionId.trim();
