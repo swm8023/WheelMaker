@@ -21,8 +21,8 @@ describe('web hide tool calls setting', () => {
     );
 
     expect(mainTsx).toContain('const [hideToolCalls, setHideToolCalls] = useState(');
-    expect(mainTsx).toContain(
-      "typeof persistedGlobal.hideToolCalls === 'boolean'\n      ? persistedGlobal.hideToolCalls\n      : true",
+    expect(mainTsx).toMatch(
+      /typeof persistedGlobal\.hideToolCalls === 'boolean'\r?\n\s*\? persistedGlobal\.hideToolCalls\r?\n\s*: true/,
     );
     expect(mainTsx).toContain("renderSettingsSection('Chat'");
     const chatSettingsStart = mainTsx.indexOf("renderSettingsSection('Chat'");

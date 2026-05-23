@@ -214,6 +214,7 @@ type MobileProjectActionMenuState = WideProjectActionMenuState;
 type ProjectSessionActionMenuState = {
   projectId: string;
   sessionId: string;
+  popover?: WideProjectActionPopoverPlacement | null;
 };
 type RenameSessionTarget = {
   projectId: string;
@@ -5027,7 +5028,17 @@ function App() {
           sessionId,
         );
         try { navigator.vibrate?.(12); } catch { /* ignore */ }
-        setProjectSessionActionMenu({projectId: targetProjectId, sessionId});
+        setProjectSessionActionMenu({
+          projectId: targetProjectId,
+          sessionId,
+          popover: resolveWideProjectActionPopoverPlacement({
+            anchorRect: target.getBoundingClientRect(),
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+            preferredWidth: 156,
+            preferredMaxHeight: 190,
+          }),
+        });
       }, PROJECT_SESSION_LONG_PRESS_MS);
     },
     [clearProjectSessionLongPress],
@@ -5081,15 +5092,23 @@ function App() {
   const openProjectSessionActionMenu = (
     targetProjectId: string,
     sessionId: string,
+    anchor: HTMLElement | null,
   ) => {
     const normalizedSessionId = sessionId.trim();
     if (!targetProjectId || !normalizedSessionId) {
       return;
     }
+    const popover = resolveWideProjectActionPopoverPlacement({
+      anchorRect: anchor?.getBoundingClientRect() ?? null,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      preferredWidth: 156,
+      preferredMaxHeight: 190,
+    });
     setProjectSessionActionMenu(current =>
       current?.projectId === targetProjectId && current.sessionId === normalizedSessionId
         ? null
-        : {projectId: targetProjectId, sessionId: normalizedSessionId},
+        : {projectId: targetProjectId, sessionId: normalizedSessionId, popover},
     );
   };
   const openProjectSessionContextMenu = (
@@ -5101,7 +5120,25 @@ function App() {
     event.stopPropagation();
     clearProjectSessionLongPress();
     projectSessionLongPressTargetRef.current = '';
-    openProjectSessionActionMenu(targetProjectId, sessionId);
+    const normalizedSessionId = sessionId.trim();
+    if (!targetProjectId || !normalizedSessionId) {
+      return;
+    }
+    setProjectSessionActionMenu({
+      projectId: targetProjectId,
+      sessionId: normalizedSessionId,
+      popover: resolveWideProjectActionPopoverPlacement({
+        anchorRect: {
+          top: event.clientY,
+          bottom: event.clientY,
+          right: event.clientX,
+        },
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        preferredWidth: 156,
+        preferredMaxHeight: 190,
+      }),
+    });
   };
   currentProjectRef.current = currentProject;
   projectsRef.current = projects;
@@ -8361,14 +8398,28 @@ function App() {
             onPointerDown={event => event.stopPropagation()}
             onClick={event => {
               event.stopPropagation();
-              openProjectSessionActionMenu(targetProjectId, sessionId);
+              openProjectSessionActionMenu(targetProjectId, sessionId, event.currentTarget);
             }}
           >
             <span className="codicon codicon-kebab-horizontal" />
           </button>
         ) : null}
         {actionsOpen ? (
-          <div className="project-session-action-menu" role="menu">
+          <div
+            className="project-session-action-menu"
+            role="menu"
+            style={projectSessionActionMenu.popover
+              ? {
+                  top: `${projectSessionActionMenu.popover.top}px`,
+                  left: `${projectSessionActionMenu.popover.left}px`,
+                  width: `${projectSessionActionMenu.popover.width}px`,
+                  maxHeight: `${projectSessionActionMenu.popover.maxHeight}px`,
+                  transform: projectSessionActionMenu.popover.placement === 'above'
+                    ? 'translateY(-100%)'
+                    : undefined,
+                }
+              : undefined}
+          >
             <button
               type="button"
               className="project-session-menu-btn reload"
