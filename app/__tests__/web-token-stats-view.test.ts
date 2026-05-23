@@ -1,6 +1,22 @@
 import { buildTokenStatCards, type TokenProviderSectionView } from '../web/src/tokenStatsView';
+import fs from 'fs';
+import path from 'path';
+
+const mainTsx = fs.readFileSync(path.join(__dirname, '../web/src/main.tsx'), 'utf8');
 
 describe('web token stats view', () => {
+  test('refreshes token stats from hub snapshot instead of online projects', () => {
+    const refreshTokenStatsStart = mainTsx.indexOf('const refreshTokenStats = useCallback(async () => {');
+    const refreshTokenStatsEnd = mainTsx.indexOf('const agentPackageActionKey', refreshTokenStatsStart);
+    const refreshTokenStatsBlock = mainTsx.slice(refreshTokenStatsStart, refreshTokenStatsEnd);
+
+    expect(refreshTokenStatsBlock).toContain('const snapshot = await service.listProjectSnapshot();');
+    expect(refreshTokenStatsBlock).toContain('const hubIds = deriveRegistryHubIds(snapshot.hubs);');
+    expect(refreshTokenStatsBlock).toContain('service.scanTokenStats(hubId)');
+    expect(refreshTokenStatsBlock).not.toContain('onlineByHub');
+    expect(refreshTokenStatsBlock).not.toContain('scanTokenStats(project.projectId)');
+  });
+
   test('aggregates the same provider account across hubs and keeps hub tags', () => {
     const providers: TokenProviderSectionView[] = [
       {

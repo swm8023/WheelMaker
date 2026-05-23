@@ -955,11 +955,10 @@ export class RegistryRepository {
     return (resp.payload ?? {}) as RegistryDeepSeekTokenStats;
   }
 
-  async scanTokenStats(projectId: string): Promise<RegistryTokenScanResult> {
+  async scanTokenStats(hubId: string): Promise<RegistryTokenScanResult> {
     const resp = await this.client.request({
-      method: 'session.token.scan',
-      projectId,
-      payload: {},
+      method: 'cmd.token',
+      payload: {action: 'scan', hubId},
       timeoutMs: 45000,
     });
     return (resp.payload ?? {}) as RegistryTokenScanResult;

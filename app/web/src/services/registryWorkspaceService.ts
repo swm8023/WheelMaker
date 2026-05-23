@@ -71,12 +71,11 @@ export class RegistryWorkspaceService {
       const previousRepository = this.repository;
       this.bindRepository(repository);
       const snapshot = await this.listProjectSnapshotWithRetry(repository);
-      if (snapshot.projects.length === 0) {
-        throw new Error('No projects available. Please ensure at least one project is online and retry.');
-      }
       this.token = normalizedToken;
       await this.localHubReadManager.refresh(snapshot, normalizedToken);
-      const {selectedProjectId, fileEntries} = await this.selectFirstReachableProject(repository, snapshot.projects);
+      const {selectedProjectId, fileEntries} = snapshot.projects.length > 0
+        ? await this.selectFirstReachableProject(repository, snapshot.projects)
+        : {selectedProjectId: '', fileEntries: []};
       previousRepository?.close();
       this.repository = repository;
       this.session = {...snapshot, selectedProjectId, fileEntries};
@@ -107,6 +106,7 @@ export class RegistryWorkspaceService {
 
   private async listProjectSnapshotWithRetry(repository: RegistryRepository): Promise<RegistryProjectListResponse> {
     const retryDelaysMs = [0, 400, 900];
+    let lastSnapshot: RegistryProjectListResponse = {projects: [], hubs: []};
     for (let i = 0; i < retryDelaysMs.length; i += 1) {
       if (retryDelaysMs[i] > 0) {
         await new Promise(resolve => {
@@ -114,9 +114,10 @@ export class RegistryWorkspaceService {
         });
       }
       const snapshot = await repository.listProjectSnapshot();
-      if (snapshot.projects.length > 0) return snapshot;
+      lastSnapshot = snapshot;
+      if (snapshot.projects.length > 0 || snapshot.hubs.length > 0) return snapshot;
     }
-    return {projects: [], hubs: []};
+    return lastSnapshot;
   }
 
   private async selectFirstReachableProject(
@@ -180,6 +181,9 @@ export class RegistryWorkspaceService {
 
   async listDirectory(path: string, knownHash?: string): Promise<{entries: RegistryFsEntry[]; hash?: string; notModified: boolean}> {
     if (!this.session || !this.repository) {
+      return {entries: [], hash: '', notModified: false};
+    }
+    if (!this.session.selectedProjectId) {
       return {entries: [], hash: '', notModified: false};
     }
     const repository = this.readRepositoryForProject(this.session.selectedProjectId);
@@ -503,12 +507,11 @@ export class RegistryWorkspaceService {
     return this.repository.setSessionConfig(projectId, payload);
   }
 
-  async scanTokenStats(projectId?: string): Promise<RegistryTokenScanResult> {
-    if (!this.session || !this.repository) {
+  async scanTokenStats(hubId: string): Promise<RegistryTokenScanResult> {
+    if (!this.repository) {
       throw new Error('session is not ready');
     }
-    const targetProjectId = (projectId || '').trim() || this.session.selectedProjectId;
-    return this.repository.scanTokenStats(targetProjectId);
+    return this.repository.scanTokenStats(hubId);
   }
 
   async scanNpmPackages(hubId: string): Promise<RegistryNpmCommandResponse> {

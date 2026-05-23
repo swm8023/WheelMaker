@@ -293,7 +293,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			s.handleRelayRequest(state.peer, state, in)
 		case "monitor.status", "monitor.log", "monitor.db", "monitor.action":
 			s.handleMonitorForwardRequest(state.peer, state, in)
-		case "cmd.npm", "cmd.update", "cmd.skills":
+		case "cmd.npm", "cmd.update", "cmd.skills", "cmd.token":
 			go s.handleHubCommandForwardRequest(state.peer, state, in)
 		case "chat.send",
 			"session.list", "session.read", "session.new", "session.resume.list", "session.resume.import", "session.reload", "session.archive", "session.delete", "session.rename", "session.send", "session.cancel", "session.markRead", "session.setConfig", "session.token.providers", "session.token.deepseek.stats", "session.token.scan",
@@ -344,7 +344,7 @@ func methodAllowed(role string, method string) bool {
 	case "client":
 		return method == "project.list" || method == "project.syncCheck" || method == "batch" ||
 			method == rp.MethodRelayEnable || method == rp.MethodRelayDisable || method == rp.MethodRelayStatus || method == rp.MethodRelayRegenerateAccessCode ||
-			method == "cmd.npm" || method == "cmd.update" || method == "cmd.skills" ||
+			method == "cmd.npm" || method == "cmd.update" || method == "cmd.skills" || method == "cmd.token" ||
 			method == "chat.send" || strings.HasPrefix(method, "session.") ||
 			strings.HasPrefix(method, "fs.") || strings.HasPrefix(method, "git.")
 	case "monitor":
@@ -889,7 +889,7 @@ func (s *Server) executeBatchRequest(state *connectionState, in envelope) envelo
 				"ok": true,
 			}),
 		}
-	case "cmd.npm", "cmd.update", "cmd.skills":
+	case "cmd.npm", "cmd.update", "cmd.skills", "cmd.token":
 		if state.role != "client" {
 			return s.errorEnvelope(in.Method, codeForbidden, "method not allowed for role", map[string]any{"role": state.role})
 		}

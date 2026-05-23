@@ -7365,7 +7365,7 @@ function App() {
   }, [address, autoConnecting, connected]);
 
   const mergeTokenProviders = useCallback(
-    (entries: Array<{hubId: string; projectId: string; result: RegistryTokenScanResult}>): TokenProviderSectionView[] => {
+    (entries: Array<{hubId: string; projectId?: string; result: RegistryTokenScanResult}>): TokenProviderSectionView[] => {
       const sections = new Map<string, TokenProviderSectionView>();
       for (const entry of entries) {
         const providers = Array.isArray(entry.result.providers) ? entry.result.providers : [];
@@ -7383,7 +7383,7 @@ function App() {
               ...account,
               id: account.id || account.alias || account.displayName || 'account',
               hubId: entry.hubId,
-              projectId: entry.projectId,
+              projectId: entry.projectId ?? '',
               providerId: section.id,
               providerName: section.name,
             });
@@ -7420,27 +7420,22 @@ function App() {
     setTokenStatsLoading(true);
     setTokenStatsError('');
     try {
-      const latestProjects = await service.listProjects();
-      if (latestProjects.length > 0) {
-        setProjects(latestProjects);
+      const snapshot = await service.listProjectSnapshot();
+      if (snapshot.projects.length > 0) {
+        setProjects(snapshot.projects);
       }
-      const onlineByHub = new Map<string, RegistryProject>();
-      for (const project of latestProjects) {
-        if (!project.online) continue;
-        const hubId = (project.hubId || 'local').trim() || 'local';
-        if (!onlineByHub.has(hubId)) {
-          onlineByHub.set(hubId, project);
-        }
-      }
-      if (onlineByHub.size === 0) {
+      setRegistryHubs(snapshot.hubs);
+      setLocalHubReadStatuses(service.getLocalHubReadStatuses(snapshot.hubs));
+      const hubIds = deriveRegistryHubIds(snapshot.hubs);
+      if (hubIds.length === 0) {
         setTokenStatsProviders([]);
         setTokenStatsUpdatedAt('');
-        setTokenStatsError('No online hubs available.');
+        setTokenStatsError('No hubs available.');
         return;
       }
-      const requests = Array.from(onlineByHub.entries()).map(async ([hubId, project]) => {
-        const result = await service.scanTokenStats(project.projectId);
-        return {hubId, projectId: project.projectId, result};
+      const requests = hubIds.map(async hubId => {
+        const result = await service.scanTokenStats(hubId);
+        return {hubId, result};
       });
       const responses = await Promise.all(requests);
       setTokenStatsProviders(mergeTokenProviders(responses));

@@ -1,6 +1,57 @@
 import { RegistryWorkspaceService } from '../web/src/services/registryWorkspaceService';
 
 describe('registry workspace project-scoped chat service methods', () => {
+  test('connects to a hub with no projects without selecting or reading a project', async () => {
+    const repository = {
+      initialize: jest.fn().mockResolvedValue(undefined),
+      listProjectSnapshot: jest.fn().mockResolvedValue({
+        projects: [],
+        hubs: [{hubId: 'hub-empty'}],
+      }),
+      listFiles: jest.fn(),
+      onEvent: jest.fn(() => () => undefined),
+      onClose: jest.fn(() => () => undefined),
+      close: jest.fn(),
+    };
+    const service = new RegistryWorkspaceService(undefined, {
+      createRepository: jest.fn(() => repository as never),
+    });
+
+    const session = await service.connect('ws://registry.example/ws', 'secret-token');
+
+    expect(session).toMatchObject({
+      projects: [],
+      hubs: [{hubId: 'hub-empty'}],
+      selectedProjectId: '',
+      fileEntries: [],
+    });
+    expect(repository.listFiles).not.toHaveBeenCalled();
+  });
+
+  test('does not send project read requests when no project is selected', async () => {
+    const service = new RegistryWorkspaceService();
+    const repository = {
+      listFiles: jest.fn(),
+    };
+
+    Object.assign(service as unknown as { repository: unknown; session: unknown }, {
+      repository,
+      session: {
+        projects: [],
+        hubs: [{hubId: 'hub-empty'}],
+        selectedProjectId: '',
+        fileEntries: [],
+      },
+    });
+
+    await expect(service.listDirectory('.')).resolves.toEqual({
+      entries: [],
+      hash: '',
+      notModified: false,
+    });
+    expect(repository.listFiles).not.toHaveBeenCalled();
+  });
+
   test('delegates read/send/config to the explicitly selected chat project', async () => {
     const service = new RegistryWorkspaceService();
     const repository = {

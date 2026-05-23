@@ -139,4 +139,22 @@ describe('agent package update registry service', () => {
       payload: {action: 'update-publish', hubId: 'hub-a'},
     });
   });
+
+  test('sends token stats scans as hub-level commands', async () => {
+    const client = {
+      request: jest.fn().mockResolvedValue({
+        type: 'response',
+        payload: {ok: true, updatedAt: '2026-05-19T10:00:00Z', providers: []},
+      }),
+    } as unknown as RegistryClient;
+    const repository = new RegistryRepository(client);
+
+    await repository.scanTokenStats('hub-a');
+
+    expect(client.request).toHaveBeenCalledWith({
+      method: 'cmd.token',
+      payload: {action: 'scan', hubId: 'hub-a'},
+      timeoutMs: 45000,
+    });
+  });
 });

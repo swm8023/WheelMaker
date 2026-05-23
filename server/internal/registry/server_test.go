@@ -1081,6 +1081,95 @@ func TestCmdNPMForwardsByHubIDWithoutProjectID(t *testing.T) {
 	}
 }
 
+func TestCmdTokenForwardsByHubIDWithoutProjectID(t *testing.T) {
+	s := New(Config{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	hub := dialWS(t, ts.URL+"/ws")
+	defer hub.Close()
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-hub",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.3",
+			"role":            "hub",
+			"hubId":           "hub-token",
+		},
+	})
+	initResp := mustReadEnvelope(t, hub)
+	principal, _ := initResp.Payload["principal"].(map[string]any)
+	connectionEpoch, _ := principal["connectionEpoch"].(float64)
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "registry.reportProjects",
+		Payload: map[string]any{
+			"hubId":           "hub-token",
+			"connectionEpoch": int64(connectionEpoch),
+			"projects":        []map[string]any{},
+		},
+	})
+	_ = mustReadEnvelope(t, hub)
+
+	client := dialWS(t, ts.URL+"/ws")
+	defer client.Close()
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-web",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.3",
+			"role":            "client",
+		},
+	})
+	_ = mustReadEnvelope(t, client)
+
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "cmd.token",
+		Payload: map[string]any{
+			"action": "scan",
+			"hubId":  "hub-token",
+		},
+	})
+	_ = hub.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	forwarded := mustReadEnvelope(t, hub)
+	if forwarded.Type != "request" || forwarded.Method != "cmd.token" {
+		t.Fatalf("forwarded=%#v, want cmd.token request", forwarded)
+	}
+	if forwarded.ProjectID != "" {
+		t.Fatalf("forwarded projectId=%q, want empty", forwarded.ProjectID)
+	}
+	if forwarded.Payload["hubId"] != "hub-token" || forwarded.Payload["action"] != "scan" {
+		t.Fatalf("forwarded payload=%#v", forwarded.Payload)
+	}
+
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: forwarded.RequestID,
+		Type:      "response",
+		Method:    "cmd.token",
+		Payload: map[string]any{
+			"ok":        true,
+			"updatedAt": "2026-05-19T10:00:00Z",
+			"providers": []map[string]any{},
+		},
+	})
+	resp := mustReadEnvelope(t, client)
+	if resp.Type != "response" || resp.Method != "cmd.token" {
+		t.Fatalf("client response=%#v, want cmd.token response", resp)
+	}
+	if resp.ProjectID != "" {
+		t.Fatalf("client response projectId=%q, want empty", resp.ProjectID)
+	}
+}
+
 func TestCmdUpdateForwardsByHubIDWithoutProjectID(t *testing.T) {
 	s := New(Config{})
 	ts := httptest.NewServer(s.Handler())
@@ -1383,6 +1472,9 @@ func TestCmdPrefixIsNotAllowedByWildcard(t *testing.T) {
 
 	if !methodAllowed("client", "cmd.skills") {
 		t.Fatal("cmd.skills should be explicitly allowed")
+	}
+	if !methodAllowed("client", "cmd.token") {
+		t.Fatal("cmd.token should be explicitly allowed")
 	}
 }
 

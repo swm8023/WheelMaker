@@ -90,6 +90,7 @@ type Reporter struct {
 	npmCommand      *NPMCommand
 	updateCommand   *UpdateCommand
 	skillsCommand   *SkillsCommand
+	tokenCommand    *TokenCommand
 	relayClient     *portrelay.HubClient
 
 	localReadMu         sync.RWMutex
@@ -146,6 +147,7 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		npmCommand:    NewNPMCommand(),
 		updateCommand: NewUpdateCommand(monitorBase),
 		skillsCommand: NewSkillsCommand(skillsCommandConfig{HubID: cfg.HubID, Projects: cp}),
+		tokenCommand:  NewTokenCommand(),
 		relayClient:   portrelay.NewHubClient(),
 	}
 	r.requestSeq.Store(2)
@@ -446,6 +448,8 @@ func (r *Reporter) handleRegistryRequest(conn *websocket.Conn, in envelope) {
 		r.replyCmdUpdate(conn, in)
 	case "cmd.skills":
 		r.replyCmdSkills(conn, in)
+	case "cmd.token":
+		r.replyCmdToken(conn, in)
 	case rp.MethodRelayOpen:
 		r.replyRelayOpen(conn, in)
 	case rp.MethodRelayClose:
@@ -1157,6 +1161,25 @@ func (r *Reporter) replyCmdSkills(conn *websocket.Conn, req envelope) {
 		r.skillsCommand = handler
 	}
 	handler.SetProjects(r.projectsSnapshot())
+	payload, cmdErr := handler.Handle(context.Background(), req.Payload)
+	if cmdErr != nil {
+		_ = r.writeError(conn, req.RequestID, cmdErr.Code, cmdErr.Message)
+		return
+	}
+	_ = r.writeJSON(conn, "->", envelope{
+		RequestID: req.RequestID,
+		Type:      "response",
+		Method:    req.Method,
+		Payload:   rp.MustRaw(payload),
+	})
+}
+
+func (r *Reporter) replyCmdToken(conn *websocket.Conn, req envelope) {
+	handler := r.tokenCommand
+	if handler == nil {
+		handler = NewTokenCommand()
+		r.tokenCommand = handler
+	}
 	payload, cmdErr := handler.Handle(context.Background(), req.Payload)
 	if cmdErr != nil {
 		_ = r.writeError(conn, req.RequestID, cmdErr.Code, cmdErr.Message)

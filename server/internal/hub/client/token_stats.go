@@ -98,6 +98,14 @@ type tokenScanPayload struct {
 	Providers []tokenProviderScanResult `json:"providers"`
 }
 
+func ScanTokenStats(ctx context.Context) (any, error) {
+	scanner := &Client{
+		httpClient:      &http.Client{Timeout: 15 * time.Second},
+		deepSeekBaseURL: "https://api.deepseek.com",
+	}
+	return scanner.scanTokenStats(ctx)
+}
+
 func (c *Client) fetchDeepSeekTokenStats(ctx context.Context, apiKey, rangeType, month string) (deepSeekTokenStatsPayload, error) {
 	key := strings.TrimSpace(apiKey)
 	if key == "" {
