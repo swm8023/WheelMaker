@@ -1233,7 +1233,7 @@ func normalizePromptBlocksForAgent(agentType string, blocks []acp.ContentBlock) 
 
 func agentPrefersRemoteImageURI(agentType string) bool {
 	switch strings.ToLower(strings.TrimSpace(agentType)) {
-	case string(acp.ACPProviderClaude), string(acp.ACPProviderCodex):
+	case string(acp.ACPProviderClaude):
 		return true
 	default:
 		return false

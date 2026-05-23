@@ -1900,11 +1900,16 @@ func TestCodexAppPromptMapsImageURIs(t *testing.T) {
 	}
 }
 
-func TestCodexAppPromptPrefersRemoteImageURIOverBase64Data(t *testing.T) {
+func TestCodexAppPromptKeepsBase64ImageLocalWhenURIAlsoPresent(t *testing.T) {
+	oldRoot := codexappArtifactRootPathFunc
+	artifactRoot := t.TempDir()
+	codexappArtifactRootPathFunc = func() (string, error) { return artifactRoot, nil }
+	t.Cleanup(func() { codexappArtifactRootPathFunc = oldRoot })
+
 	input, err := codexappPromptToInputWithArtifacts("proj", "sess-1", []protocol.ContentBlock{{
 		Type:     protocol.ContentBlockTypeImage,
 		MimeType: "image/png",
-		Data:     "not-base64",
+		Data:     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
 		URI:      "https://example.com/a.png",
 	}})
 	if err != nil {
@@ -1913,11 +1918,14 @@ func TestCodexAppPromptPrefersRemoteImageURIOverBase64Data(t *testing.T) {
 	if len(input) != 1 {
 		t.Fatalf("input len=%d, want 1: %#v", len(input), input)
 	}
-	if input[0].Type != "image" || input[0].URL != "https://example.com/a.png" {
-		t.Fatalf("image input=%#v, want image url", input[0])
+	if input[0].Type != "localImage" || input[0].Path == "" {
+		t.Fatalf("image input=%#v, want localImage path", input[0])
 	}
-	if input[0].Path != "" {
-		t.Fatalf("image path=%q, want no local image artifact", input[0].Path)
+	if input[0].URL != "" {
+		t.Fatalf("image url=%q, want local image priority", input[0].URL)
+	}
+	if _, err := os.Stat(input[0].Path); err != nil {
+		t.Fatalf("image artifact not written: %v", err)
 	}
 }
 
