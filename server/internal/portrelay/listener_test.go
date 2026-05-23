@@ -28,3 +28,24 @@ func TestRelayListenerBindsLoopbackOnly(t *testing.T) {
 		t.Fatalf("listener IP=%s, want 127.0.0.1", addr.IP.String())
 	}
 }
+
+func TestFilterRequestHeadersDropsConditionalCacheHeaders(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("If-None-Match", `"empty-index"`)
+	headers.Set("If-Modified-Since", "Sat, 23 May 2026 00:00:00 GMT")
+	headers.Set("If-Match", `"current"`)
+	headers.Set("If-Unmodified-Since", "Sat, 23 May 2026 00:00:00 GMT")
+	headers.Set("If-Range", `"range"`)
+	headers.Set("Accept", "text/html")
+
+	filtered := filterRequestHeaders(headers)
+
+	for _, name := range []string{"If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since", "If-Range"} {
+		if _, ok := filtered[name]; ok {
+			t.Fatalf("filterRequestHeaders forwarded %s: %#v", name, filtered)
+		}
+	}
+	if got := filtered["Accept"]; len(got) != 1 || got[0] != "text/html" {
+		t.Fatalf("filterRequestHeaders dropped Accept: %#v", filtered)
+	}
+}

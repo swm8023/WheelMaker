@@ -290,7 +290,7 @@ func filterRequestHeaders(headers http.Header) map[string][]string {
 	out := map[string][]string{}
 	for name, values := range headers {
 		canonical := http.CanonicalHeaderKey(name)
-		if isHopByHopHeader(canonical) || isWebSocketDialerHeader(canonical) || strings.EqualFold(canonical, "Cookie") {
+		if isHopByHopHeader(canonical) || isWebSocketDialerHeader(canonical) || isConditionalRequestHeader(canonical) || strings.EqualFold(canonical, "Cookie") {
 			continue
 		}
 		out[canonical] = append([]string(nil), values...)
@@ -325,6 +325,15 @@ func isHopByHopHeader(name string) bool {
 func isWebSocketDialerHeader(name string) bool {
 	switch http.CanonicalHeaderKey(name) {
 	case "Sec-Websocket-Key", "Sec-Websocket-Version", "Sec-Websocket-Extensions", "Sec-Websocket-Accept":
+		return true
+	default:
+		return false
+	}
+}
+
+func isConditionalRequestHeader(name string) bool {
+	switch http.CanonicalHeaderKey(name) {
+	case "If-Match", "If-Modified-Since", "If-None-Match", "If-Range", "If-Unmodified-Since":
 		return true
 	default:
 		return false
