@@ -1900,6 +1900,27 @@ func TestCodexAppPromptMapsImageURIs(t *testing.T) {
 	}
 }
 
+func TestCodexAppPromptPrefersRemoteImageURIOverBase64Data(t *testing.T) {
+	input, err := codexappPromptToInputWithArtifacts("proj", "sess-1", []protocol.ContentBlock{{
+		Type:     protocol.ContentBlockTypeImage,
+		MimeType: "image/png",
+		Data:     "not-base64",
+		URI:      "https://example.com/a.png",
+	}})
+	if err != nil {
+		t.Fatalf("codexappPromptToInputWithArtifacts: %v", err)
+	}
+	if len(input) != 1 {
+		t.Fatalf("input len=%d, want 1: %#v", len(input), input)
+	}
+	if input[0].Type != "image" || input[0].URL != "https://example.com/a.png" {
+		t.Fatalf("image input=%#v, want image url", input[0])
+	}
+	if input[0].Path != "" {
+		t.Fatalf("image path=%q, want no local image artifact", input[0].Path)
+	}
+}
+
 func TestCodexAppSessionPromptRejectsInvalidImageBeforeTurnStart(t *testing.T) {
 	tr := newFakeCodexappTransport()
 	rt := newCodexappRuntimeWithTransport(tr)

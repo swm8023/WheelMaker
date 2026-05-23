@@ -1803,6 +1803,63 @@ func TestNormalizeIMPromptBlocks_PreservesImageAndText(t *testing.T) {
 	}
 }
 
+func TestNormalizePromptBlocksForAgentPrefersRemoteImageURIForClaudeAndCodex(t *testing.T) {
+	input := []acp.ContentBlock{
+		{Type: acp.ContentBlockTypeText, Text: "describe"},
+		{
+			Type:     acp.ContentBlockTypeImage,
+			MimeType: "image/png",
+			Data:     "not-base64",
+			URI:      "https://example.com/a.png",
+		},
+	}
+
+	for _, agentType := range []string{"claude", "codex"} {
+		t.Run(agentType, func(t *testing.T) {
+			got := normalizePromptBlocksForAgent(agentType, input)
+			if len(got) != 2 {
+				t.Fatalf("blocks=%+v, want 2", got)
+			}
+			if got[1].Type != acp.ContentBlockTypeImage || got[1].URI != "https://example.com/a.png" {
+				t.Fatalf("image block=%+v, want remote URI image", got[1])
+			}
+			if got[1].Data != "" {
+				t.Fatalf("image data=%q, want empty so provider uses URL", got[1].Data)
+			}
+			if input[1].Data == "" {
+				t.Fatal("normalizePromptBlocksForAgent mutated caller blocks")
+			}
+		})
+	}
+}
+
+func TestNormalizePromptBlocksForAgentKeepsBase64FallbackWhenNoRemoteURI(t *testing.T) {
+	input := []acp.ContentBlock{{
+		Type:     acp.ContentBlockTypeImage,
+		MimeType: "image/png",
+		Data:     "aGVsbG8=",
+	}}
+
+	got := normalizePromptBlocksForAgent("claude", input)
+	if len(got) != 1 || got[0].Data != "aGVsbG8=" {
+		t.Fatalf("blocks=%+v, want base64 image preserved", got)
+	}
+}
+
+func TestNormalizePromptBlocksForAgentLeavesGenericACPAgentsUnchanged(t *testing.T) {
+	input := []acp.ContentBlock{{
+		Type:     acp.ContentBlockTypeImage,
+		MimeType: "image/png",
+		Data:     "aGVsbG8=",
+		URI:      "https://example.com/a.png",
+	}}
+
+	got := normalizePromptBlocksForAgent("copilot", input)
+	if len(got) != 1 || got[0].Data != "aGVsbG8=" || got[0].URI != "https://example.com/a.png" {
+		t.Fatalf("blocks=%+v, want generic ACP image unchanged", got)
+	}
+}
+
 func TestNormalizeChatRef_TrimsFields(t *testing.T) {
 	got := normalizeChatRef(im.ChatRef{ChannelID: " feishu ", ChatID: " chat-1 "})
 	if got.ChannelID != "feishu" || got.ChatID != "chat-1" {

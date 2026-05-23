@@ -665,6 +665,15 @@ func codexappPromptToInputWithArtifacts(projectName string, sessionID string, bl
 }
 
 func codexappImageToInput(projectName string, sessionID string, block protocol.ContentBlock) (appServerUserInput, error) {
+	uriText := strings.TrimSpace(block.URI)
+	if uriText != "" {
+		if parsed, err := url.Parse(uriText); err == nil {
+			switch strings.ToLower(parsed.Scheme) {
+			case "http", "https":
+				return appServerUserInput{Type: "image", URL: uriText}, nil
+			}
+		}
+	}
 	if strings.TrimSpace(block.Data) != "" {
 		path, err := codexappWriteImageArtifact(projectName, sessionID, block)
 		if err != nil {
@@ -672,7 +681,6 @@ func codexappImageToInput(projectName string, sessionID string, block protocol.C
 		}
 		return appServerUserInput{Type: "localImage", Path: path}, nil
 	}
-	uriText := strings.TrimSpace(block.URI)
 	if uriText == "" {
 		return appServerUserInput{}, errors.New("codexapp image requires data or uri")
 	}
