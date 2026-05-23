@@ -897,7 +897,7 @@ describe('web chat integration', () => {
     expect(mobileSheetEnd).toBeGreaterThan(mobileSheetStart);
     const mobileSheet = mainTsx.slice(mobileSheetStart, mobileSheetEnd);
     expect(mobileSheet).not.toContain('className="project-wrap"');
-    expect(mobileSheet).toContain('renderProjectSessionActionMenu(targetProjectId, session, false)');
+    expect(mobileSheet).toContain('renderProjectSessionActionMenu(targetProjectId, session)');
     expect(mobileSheet).toContain('onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}');
     expect(mobileSheet).not.toContain('chat-session-swipe-row');
     expect(mobileSheet).toContain("tagVariantClass('wide-project-hub', projectItem.hubId || 'local')");
@@ -972,8 +972,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("kind: 'delete'");
     expect(mainTsx).toContain('className="app-confirm-error"');
     expect(mainTsx).not.toContain('Sessions with fewer than 3 turns are permanently removed.');
-    expect(mainTsx).toContain('const renderProjectSessionActionMenu = (targetProjectId: string, session: RegistrySessionSummary, showMoreButton = true) => {');
-    expect(mainTsx).toContain('className="project-session-more-btn"');
+    expect(mainTsx).toContain('const renderProjectSessionActionMenu = (targetProjectId: string, session: RegistrySessionSummary) => {');
+    expect(mainTsx).not.toContain('className="project-session-more-btn"');
+    expect(mainTsx).not.toContain('const openProjectSessionActionMenu = (');
     expect(mainTsx).toContain('className="project-session-action-menu"');
     expect(mainTsx).toContain('style={projectSessionActionMenu.popover');
     expect(mainTsx).toContain("transform: projectSessionActionMenu.popover.placement === 'above'");
@@ -991,7 +992,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="project-session-menu-label">Rename</span>');
     expect(mainTsx).toContain('className="project-session-menu-label">Archive</span>');
     expect(mainTsx).toContain('className="project-session-menu-label">Delete</span>');
-    expect(mainTsx).toContain("if (target?.closest('.project-session-action-menu') || target?.closest('.project-session-more-btn')) {");
+    expect(mainTsx).toContain("if (target?.closest('.project-session-action-menu')) {");
     expect(mainTsx).toContain('renderProjectSessionActionMenu(targetProjectId, session)');
     expect(mainTsx).toContain('onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}');
     expect(mainTsx).toContain('onContextMenu={event => openProjectSessionContextMenu(targetProjectId, session.sessionId, event)}');
@@ -1074,7 +1075,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.wide-project-action-title {');
     expect(stylesCss).toContain('.wide-session-row {');
     expect(stylesCss).toContain('.project-session-row-wrap {');
-    expect(stylesCss).toContain('.project-session-more-btn {');
+    expect(stylesCss).not.toContain('.project-session-more-btn');
     expect(stylesCss).toContain('.project-session-action-menu {');
     expect(stylesCss).toContain('.project-session-menu-btn.reload {');
     expect(stylesCss).toContain('.project-session-menu-btn.rename {');
@@ -1134,12 +1135,7 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.wide-session-row::after');
     expect(stylesCss).not.toContain('.project-session-row-wrap.actions-open .wide-session-row {');
     expect(stylesCss).not.toContain('.project-session-action-strip');
-    expect(stylesCss).toMatch(
-      /\.project-session-more-btn \{[^}]*width: 22px;[^}]*height: 22px;[^}]*opacity: 0;[^}]*\}/,
-    );
-    expect(stylesCss).toMatch(
-      /\.project-session-row-wrap:hover \.project-session-more-btn,[\s\S]*\.project-session-row-wrap\.actions-open \.project-session-more-btn \{[\s\S]*opacity: 0\.85;[\s\S]*\}/,
-    );
+    expect(stylesCss).not.toContain('.project-session-row-wrap:hover .project-session-more-btn');
     expect(stylesCss).toMatch(
       /\.project-session-action-menu \{[^}]*position: fixed;[^}]*left: 0;[^}]*width: min\(156px, calc\(100vw - 16px\)\);[^}]*max-height: min\(190px, calc\(100vh - 16px\)\);[^}]*overflow-y: auto;[^}]*\}/,
     );

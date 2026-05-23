@@ -5081,7 +5081,7 @@ function App() {
     if (!projectSessionActionMenu) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (target?.closest('.project-session-action-menu') || target?.closest('.project-session-more-btn')) {
+      if (target?.closest('.project-session-action-menu')) {
         return;
       }
       setProjectSessionActionMenu(null);
@@ -5089,28 +5089,6 @@ function App() {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [projectSessionActionMenu]);
-  const openProjectSessionActionMenu = (
-    targetProjectId: string,
-    sessionId: string,
-    anchor: HTMLElement | null,
-  ) => {
-    const normalizedSessionId = sessionId.trim();
-    if (!targetProjectId || !normalizedSessionId) {
-      return;
-    }
-    const popover = resolveWideProjectActionPopoverPlacement({
-      anchorRect: anchor?.getBoundingClientRect() ?? null,
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      preferredWidth: 156,
-      preferredMaxHeight: 190,
-    });
-    setProjectSessionActionMenu(current =>
-      current?.projectId === targetProjectId && current.sessionId === normalizedSessionId
-        ? null
-        : {projectId: targetProjectId, sessionId: normalizedSessionId, popover},
-    );
-  };
   const openProjectSessionContextMenu = (
     targetProjectId: string,
     sessionId: string,
@@ -8377,7 +8355,7 @@ function App() {
     }
   };
 
-  const renderProjectSessionActionMenu = (targetProjectId: string, session: RegistrySessionSummary, showMoreButton = true) => {
+  const renderProjectSessionActionMenu = (targetProjectId: string, session: RegistrySessionSummary) => {
     const sessionId = session.sessionId;
     const sessionActionDisabled = !!session.running ||
       chatReloadingSessionId === sessionId ||
@@ -8388,22 +8366,6 @@ function App() {
       projectSessionActionMenu.sessionId === sessionId;
     return (
       <>
-        {showMoreButton ? (
-          <button
-            type="button"
-            className="project-session-more-btn"
-            title="Session actions"
-            aria-label="Session actions"
-            aria-expanded={actionsOpen}
-            onPointerDown={event => event.stopPropagation()}
-            onClick={event => {
-              event.stopPropagation();
-              openProjectSessionActionMenu(targetProjectId, sessionId, event.currentTarget);
-            }}
-          >
-            <span className="codicon codicon-kebab-horizontal" />
-          </button>
-        ) : null}
         {actionsOpen ? (
           <div
             className="project-session-action-menu"
@@ -10764,7 +10726,7 @@ function App() {
                               {formatCompactRelativeAge(session.updatedAt)}
                             </span>
                           </button>
-                          {renderProjectSessionActionMenu(targetProjectId, session, false)}
+                          {renderProjectSessionActionMenu(targetProjectId, session)}
                         </div>
                       );
                     })}

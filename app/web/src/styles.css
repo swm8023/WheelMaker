@@ -3529,43 +3529,6 @@ body,
   box-shadow: 0 0 0 2px color-mix(in srgb, #f46d6d 18%, transparent);
 }
 
-.project-session-more-btn {
-  position: absolute;
-  top: 2px;
-  right: 4px;
-  z-index: 3;
-  width: 22px;
-  height: 22px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--panel-2) 76%, transparent);
-  color: var(--muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 120ms ease, color 120ms ease, background 120ms ease, border-color 120ms ease;
-}
-
-.project-session-more-btn .codicon {
-  font-size: 14px;
-}
-
-.project-session-row-wrap:hover .project-session-more-btn,
-.project-session-row-wrap:focus-within .project-session-more-btn,
-.project-session-row-wrap.actions-open .project-session-more-btn {
-  opacity: 0.85;
-}
-
-.project-session-more-btn:hover,
-.project-session-more-btn[aria-expanded="true"] {
-  opacity: 1;
-  border-color: color-mix(in srgb, var(--border) 82%, transparent);
-  background: var(--hover);
-  color: var(--text);
-}
-
 .project-session-action-menu {
   position: fixed;
   top: 0;
