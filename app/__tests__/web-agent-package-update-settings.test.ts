@@ -51,7 +51,14 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('service.queryWheelMakerUpdate');
     expect(mainTsx).toContain('service.requestWheelMakerUpdatePublish');
     expect(mainTsx).toContain("kind: 'wheelMakerUpdate'");
+    expect(mainTsx).toContain("kind: 'wheelMakerUpdateAll'");
     expect(mainTsx).toContain('requestWheelMakerUpdatePublish');
+    expect(mainTsx).toContain('requestWheelMakerUpdateAll');
+    expect(mainTsx).toContain('handleWheelMakerUpdateAllConfirmedAction');
+    expect(mainTsx).toContain('const [wheelMakerUpdateAllPending, setWheelMakerUpdateAllPending] = useState(false);');
+    expect(mainTsx).toContain('Promise.all(target.hubIds.map(async hubId =>');
+    expect(mainTsx).toContain('await refreshWheelMakerUpdates();');
+    expect(mainTsx).toContain('Failed to update ${failedUpdates.length} of ${target.hubIds.length} hubs: ${failedUpdates.map(entry => entry.hubId).join');
     expect(mainTsx).toContain('wheelMakerUpdateStatusLabel');
     expect(mainTsx).toContain('wheelMakerReleaseRef');
     expect(mainTsx).toContain('formatWheelMakerDateTime');
@@ -71,6 +78,12 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('const showWheelMakerUpdateAction =');
     expect(mainTsx).toContain('shouldShowWheelMakerUpdateAction({');
     expect(mainTsx).toContain('loading: wheelMaker?.loading === true,');
+    expect(mainTsx).toContain('pending: wheelMakerPending || wheelMakerUpdateAllPending,');
+    expect(mainTsx).toContain('disabled={wheelMakerUpdateAllPending || wheelMakerPending || wheelMakerData?.pendingSignal === true}');
+    expect(mainTsx).toContain('className="wheelmaker-update-all-btn"');
+    expect(mainTsx).toContain("requestWheelMakerUpdateAll(updateHubCards.map(card => card.hubId))");
+    expect(mainTsx).toContain("wheelMakerUpdateAllPending ? 'Updating All Hubs...' : 'Update All Hubs'");
+    expect(mainTsx).toContain('disabled={updateHubCards.length === 0 || wheelMakerUpdateAllPending}');
     expect(mainTsx).not.toContain("wheelMakerStatus !== 'up_to_date'");
     expect(mainTsx).not.toContain('Agent Packages');
     expect(mainTsx).not.toContain('>Prefix:');
@@ -87,6 +100,7 @@ describe('agent package update settings UI source structure', () => {
     expect(settingsDetailBodyBlock).toContain('overflow-y: auto;');
     expect(settingsDetailBodyBlock).toContain('scrollbar-gutter: stable;');
     expect(stylesCss).toContain('.wheelmaker-update-panel');
+    expect(stylesCss).toContain('.wheelmaker-update-all-btn');
     expect(stylesCss).toContain('.wheelmaker-update-version-line');
     expect(stylesCss).toContain('.wheelmaker-update-ref-tag');
     expect(stylesCss).toContain('.wheelmaker-update-sha-line');

@@ -956,6 +956,32 @@ body,
   gap: 10px;
 }
 
+.wheelmaker-update-all-btn {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wheelmaker-update-all-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, var(--hover));
+}
+
+.wheelmaker-update-all-btn:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
 .agent-package-hub-card {
   gap: 8px;
 }

@@ -257,6 +257,10 @@ type ConfirmTarget =
       behindCount: number;
     }
   | {
+      kind: 'wheelMakerUpdateAll';
+      hubIds: string[];
+    }
+  | {
       kind: 'skillInstall';
       hubId: string;
       scope: RegistrySkillScope;
@@ -2665,6 +2669,7 @@ function App() {
   const [wheelMakerUpdatesLoading, setWheelMakerUpdatesLoading] = useState(false);
   const [wheelMakerUpdatesError, setWheelMakerUpdatesError] = useState('');
   const [wheelMakerUpdatePendingHubId, setWheelMakerUpdatePendingHubId] = useState('');
+  const [wheelMakerUpdateAllPending, setWheelMakerUpdateAllPending] = useState(false);
   const [agentPackageHubs, setAgentPackageHubs] = useState<Record<string, AgentPackageHubView>>({});
   const [agentPackagesLoading, setAgentPackagesLoading] = useState(false);
   const [agentPackagesError, setAgentPackagesError] = useState('');
@@ -8141,6 +8146,18 @@ function App() {
     });
   }, []);
 
+  const requestWheelMakerUpdateAll = useCallback((hubIds: string[]) => {
+    const uniqueHubIds = Array.from(new Set(hubIds.filter(Boolean))).sort();
+    if (uniqueHubIds.length === 0) {
+      return;
+    }
+    setConfirmError('');
+    setConfirmTarget({
+      kind: 'wheelMakerUpdateAll',
+      hubIds: uniqueHubIds,
+    });
+  }, []);
+
   const handleWheelMakerUpdateConfirmedAction = useCallback(async (target: Extract<ConfirmTarget, {kind: 'wheelMakerUpdate'}>) => {
     setConfirmError('');
     setWheelMakerUpdatePendingHubId(target.hubId);
@@ -8167,6 +8184,73 @@ function App() {
       setWheelMakerUpdatePendingHubId('');
     }
   }, [refreshWheelMakerUpdateHub]);
+
+  const handleWheelMakerUpdateAllConfirmedAction = useCallback(async (target: Extract<ConfirmTarget, {kind: 'wheelMakerUpdateAll'}>) => {
+    if (target.hubIds.length === 0) {
+      setConfirmTarget(null);
+      return;
+    }
+    setConfirmError('');
+    setWheelMakerUpdatesError('');
+    setWheelMakerUpdateAllPending(true);
+    setWheelMakerUpdatePendingHubId('');
+    try {
+      const responses = await Promise.all(target.hubIds.map(async hubId => {
+        try {
+          const result = await service.requestWheelMakerUpdatePublish(hubId);
+          return {
+            hubId,
+            result,
+            error: result.ok ? '' : result.error || 'Update request failed.',
+          };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return {hubId, error: message};
+        }
+      }));
+      setWheelMakerUpdateHubs(prev => {
+        const next = {...prev};
+        responses.forEach(entry => {
+          next[entry.hubId] = {
+            ...(prev[entry.hubId] ?? {hubId: entry.hubId, loading: false, error: '', data: null}),
+            hubId: entry.hubId,
+            loading: false,
+            error: entry.error || '',
+            data: 'result' in entry && entry.result ? entry.result : prev[entry.hubId]?.data ?? null,
+          };
+        });
+        return next;
+      });
+      setConfirmTarget(null);
+      setConfirmError('');
+      await refreshWheelMakerUpdates();
+      const failedUpdates = responses.filter(entry => entry.error);
+      if (failedUpdates.length > 0) {
+        const message = `Failed to update ${failedUpdates.length} of ${target.hubIds.length} hubs: ${failedUpdates.map(entry => entry.hubId).join(', ')}`;
+        setWheelMakerUpdatesError(message);
+        setWheelMakerUpdateHubs(prev => {
+          const next = {...prev};
+          failedUpdates.forEach(entry => {
+            next[entry.hubId] = {
+              ...(prev[entry.hubId] ?? {hubId: entry.hubId, loading: false, error: '', data: null}),
+              hubId: entry.hubId,
+              loading: false,
+              error: entry.error || 'Update request failed.',
+            };
+          });
+          return next;
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setConfirmTarget(null);
+      setConfirmError('');
+      setWheelMakerUpdatesError(message);
+      setError(message);
+    } finally {
+      setWheelMakerUpdateAllPending(false);
+    }
+  }, [refreshWheelMakerUpdates]);
 
   const handleAgentPackageConfirmedAction = useCallback(async (target: Extract<ConfirmTarget, {kind: 'npmPackage'}>) => {
     const pendingKey = agentPackageActionKey(target.hubId, target.packageName);
@@ -10007,6 +10091,21 @@ function App() {
     renderSettingsDetailShell(
       'Update',
       <>
+        <button
+          type="button"
+          className="wheelmaker-update-all-btn"
+          disabled={updateHubCards.length === 0 || wheelMakerUpdateAllPending}
+          onClick={() => requestWheelMakerUpdateAll(updateHubCards.map(card => card.hubId))}
+        >
+          <span
+            className={`codicon ${
+              wheelMakerUpdateAllPending
+                ? 'codicon-loading codicon-modifier-spin'
+                : 'codicon-cloud-download'
+            }`}
+          />
+          <span>{wheelMakerUpdateAllPending ? 'Updating All Hubs...' : 'Update All Hubs'}</span>
+        </button>
         {(wheelMakerUpdatesLoading || agentPackagesLoading) && updateHubCards.length === 0 ? (
           <div className="muted block">Scanning hubs...</div>
         ) : null}
@@ -10028,7 +10127,7 @@ function App() {
             const showWheelMakerUpdateAction = shouldShowWheelMakerUpdateAction({
               data: wheelMakerData,
               loading: wheelMaker?.loading === true,
-              pending: wheelMakerPending,
+              pending: wheelMakerPending || wheelMakerUpdateAllPending,
             });
             const wheelMakerCurrentSha = wheelMakerData?.release?.sha || wheelMakerData?.git?.currentSha || '';
             const wheelMakerLatestSha = wheelMakerData?.git?.latestSha || '';
@@ -10077,7 +10176,7 @@ function App() {
                     <button
                       type="button"
                       className="wheelmaker-update-action-btn"
-                      disabled={wheelMakerPending || wheelMakerData?.pendingSignal === true}
+                      disabled={wheelMakerUpdateAllPending || wheelMakerPending || wheelMakerData?.pendingSignal === true}
                       onClick={() => requestWheelMakerUpdatePublish(card.hubId, wheelMakerData)}
                     >
                       {wheelMakerPending ? 'Updating...' : wheelMakerData?.pendingSignal ? 'Requested' : 'Update'}
@@ -13113,6 +13212,7 @@ function App() {
   const deleteTarget = confirmTarget?.kind === 'delete' ? confirmTarget : null;
   const npmPackageTarget = confirmTarget?.kind === 'npmPackage' ? confirmTarget : null;
   const wheelMakerUpdateTarget = confirmTarget?.kind === 'wheelMakerUpdate' ? confirmTarget : null;
+  const wheelMakerUpdateAllTarget = confirmTarget?.kind === 'wheelMakerUpdateAll' ? confirmTarget : null;
   const skillInstallConfirmTarget = confirmTarget?.kind === 'skillInstall' ? confirmTarget : null;
   const skillUninstallConfirmTarget = confirmTarget?.kind === 'skillUninstall' ? confirmTarget : null;
   const skillUpdateConfirmTarget = confirmTarget?.kind === 'skillUpdate' ? confirmTarget : null;
@@ -13133,90 +13233,102 @@ function App() {
     ? chatArchivingSessionId === archiveTarget.sessionId
     : deleteTarget
       ? chatDeletingSessionId === deleteTarget.sessionId
-    : npmPackageTarget
-      ? agentPackageActionPendingKey === npmPackageConfirmPendingKey
-    : wheelMakerUpdateTarget
-      ? wheelMakerUpdatePendingHubId === wheelMakerUpdateTarget.hubId
-    : skillConfirmTarget
-      ? skillsPendingKey === skillConfirmPendingKey
-      : false;
+      : npmPackageTarget
+        ? agentPackageActionPendingKey === npmPackageConfirmPendingKey
+        : wheelMakerUpdateTarget
+          ? wheelMakerUpdatePendingHubId === wheelMakerUpdateTarget.hubId
+          : wheelMakerUpdateAllTarget
+            ? wheelMakerUpdateAllPending
+            : skillConfirmTarget
+              ? skillsPendingKey === skillConfirmPendingKey
+              : false;
   const confirmTitle = confirmTarget?.kind === 'clearCache'
     ? 'Clear local cache?'
     : deleteTarget
       ? 'Delete session?'
-    : npmPackageTarget
-      ? `${agentPackageActionLabel(npmPackageTarget.action)} package?`
-    : wheelMakerUpdateTarget
-      ? 'Update and publish WheelMaker?'
-    : skillInstallConfirmTarget
-      ? 'Install skills?'
-    : skillUninstallConfirmTarget
-      ? 'Uninstall skill?'
-    : skillUpdateConfirmTarget
-      ? 'Update skills?'
-    : 'Archive session?';
+      : npmPackageTarget
+        ? `${agentPackageActionLabel(npmPackageTarget.action)} package?`
+        : wheelMakerUpdateTarget
+          ? 'Update and publish WheelMaker?'
+          : wheelMakerUpdateAllTarget
+            ? 'Update all hubs?'
+            : skillInstallConfirmTarget
+              ? 'Install skills?'
+              : skillUninstallConfirmTarget
+                ? 'Uninstall skill?'
+                : skillUpdateConfirmTarget
+                  ? 'Update skills?'
+                  : 'Archive session?';
   const confirmName = confirmTarget?.kind === 'clearCache'
     ? 'Token and server address will be preserved.'
     : deleteTarget
       ? deleteTarget.title || 'Untitled session'
-    : npmPackageTarget
-      ? npmPackageTarget.displayName || npmPackageTarget.packageName
-    : wheelMakerUpdateTarget
-      ? `Hub: ${wheelMakerUpdateTarget.hubId}`
-    : skillInstallConfirmTarget
-      ? skillScopeLabel(skillInstallConfirmTarget)
-    : skillUninstallConfirmTarget
-      ? skillUninstallConfirmTarget.skillName
-    : skillUpdateConfirmTarget
-      ? skillScopeLabel(skillUpdateConfirmTarget)
-    : archiveTarget?.title || 'Untitled session';
+      : npmPackageTarget
+        ? npmPackageTarget.displayName || npmPackageTarget.packageName
+        : wheelMakerUpdateTarget
+          ? `Hub: ${wheelMakerUpdateTarget.hubId}`
+          : wheelMakerUpdateAllTarget
+            ? `${wheelMakerUpdateAllTarget.hubIds.length} hubs`
+            : skillInstallConfirmTarget
+              ? skillScopeLabel(skillInstallConfirmTarget)
+              : skillUninstallConfirmTarget
+                ? skillUninstallConfirmTarget.skillName
+                : skillUpdateConfirmTarget
+                  ? skillScopeLabel(skillUpdateConfirmTarget)
+                  : archiveTarget?.title || 'Untitled session';
   const confirmCopy = confirmTarget?.kind === 'clearCache'
     ? 'The app will reload after local cached workspace data is cleared.'
     : deleteTarget
       ? 'This permanently deletes the session data from the Hub.'
-    : npmPackageTarget
-      ? `Hub: ${npmPackageTarget.hubId}. Package: ${npmPackageTarget.packageName}. Installed: ${npmPackageTarget.installedVersion || '-'}. Target: ${npmPackageTarget.action === 'uninstall' ? 'remove deprecated package' : npmPackageTarget.latestVersion || 'latest'}. Restart WheelMaker or start a new agent session for changes to take effect.`
-    : wheelMakerUpdateTarget
-      ? `Current: ${shortGitSha(wheelMakerUpdateTarget.currentSha)}. Latest: ${shortGitSha(wheelMakerUpdateTarget.latestSha)}. ${wheelMakerUpdateTarget.behindCount > 0 ? `${wheelMakerUpdateTarget.behindCount} commits behind. ` : ''}This writes a full-update signal; updater will pull, build, publish Web, and restart Hub/Monitor. Updater itself is not restarted.`
-    : skillInstallConfirmTarget
-      ? `Source: ${skillInstallConfirmTarget.source}. Skills: ${skillInstallConfirmTarget.skills.join(', ')}.`
-    : skillUninstallConfirmTarget
-      ? `Remove from ${skillScopeLabel(skillUninstallConfirmTarget)}.`
-    : skillUpdateConfirmTarget
-      ? skillUpdateConfirmTarget.includeProjects
-        ? 'Updates Hub Skills and online Project Skills on this Hub.'
-        : `Updates installed skills in ${skillScopeLabel(skillUpdateConfirmTarget)}.`
-    : 'Archived sessions leave the chat list.';
+      : npmPackageTarget
+        ? `Hub: ${npmPackageTarget.hubId}. Package: ${npmPackageTarget.packageName}. Installed: ${npmPackageTarget.installedVersion || '-'}. Target: ${npmPackageTarget.action === 'uninstall' ? 'remove deprecated package' : npmPackageTarget.latestVersion || 'latest'}. Restart WheelMaker or start a new agent session for changes to take effect.`
+        : wheelMakerUpdateTarget
+          ? `Current: ${shortGitSha(wheelMakerUpdateTarget.currentSha)}. Latest: ${shortGitSha(wheelMakerUpdateTarget.latestSha)}. ${wheelMakerUpdateTarget.behindCount > 0 ? `${wheelMakerUpdateTarget.behindCount} commits behind. ` : ''}This writes a full-update signal; updater will pull, build, publish Web, and restart Hub/Monitor. Updater itself is not restarted.`
+          : wheelMakerUpdateAllTarget
+            ? `This sends update-publish to ${wheelMakerUpdateAllTarget.hubIds.length} hubs. Each hub may pull, build, publish Web, and restart independently.`
+            : skillInstallConfirmTarget
+              ? `Source: ${skillInstallConfirmTarget.source}. Skills: ${skillInstallConfirmTarget.skills.join(', ')}.`
+              : skillUninstallConfirmTarget
+                ? `Remove from ${skillScopeLabel(skillUninstallConfirmTarget)}.`
+                : skillUpdateConfirmTarget
+                  ? skillUpdateConfirmTarget.includeProjects
+                    ? 'Updates Hub Skills and online Project Skills on this Hub.'
+                    : `Updates installed skills in ${skillScopeLabel(skillUpdateConfirmTarget)}.`
+                  : 'Archived sessions leave the chat list.';
   const confirmIcon = confirmTarget?.kind === 'clearCache'
     ? 'codicon-trash'
     : deleteTarget
       ? 'codicon-trash'
-    : npmPackageTarget
-      ? npmPackageTarget.action === 'uninstall' ? 'codicon-trash' : 'codicon-cloud-download'
-    : wheelMakerUpdateTarget
-      ? 'codicon-cloud-download'
-    : skillInstallConfirmTarget
-      ? 'codicon-cloud-download'
-    : skillUninstallConfirmTarget
-      ? 'codicon-trash'
-    : skillUpdateConfirmTarget
-      ? 'codicon-sync'
-    : 'codicon-archive';
+      : npmPackageTarget
+        ? npmPackageTarget.action === 'uninstall' ? 'codicon-trash' : 'codicon-cloud-download'
+        : wheelMakerUpdateTarget
+          ? 'codicon-cloud-download'
+          : wheelMakerUpdateAllTarget
+            ? 'codicon-cloud-download'
+            : skillInstallConfirmTarget
+              ? 'codicon-cloud-download'
+              : skillUninstallConfirmTarget
+                ? 'codicon-trash'
+                : skillUpdateConfirmTarget
+                  ? 'codicon-sync'
+                  : 'codicon-archive';
   const confirmPrimaryLabel = confirmTarget?.kind === 'clearCache'
     ? 'Clear Cache'
     : deleteTarget
       ? 'Delete'
-    : npmPackageTarget
-      ? agentPackageActionLabel(npmPackageTarget.action)
-    : wheelMakerUpdateTarget
-      ? 'Update'
-    : skillInstallConfirmTarget
-      ? 'Install'
-    : skillUninstallConfirmTarget
-      ? 'Uninstall'
-    : skillUpdateConfirmTarget
-      ? 'Update'
-    : 'Archive';
+      : npmPackageTarget
+        ? agentPackageActionLabel(npmPackageTarget.action)
+        : wheelMakerUpdateTarget
+          ? 'Update'
+          : wheelMakerUpdateAllTarget
+            ? 'Update'
+            : skillInstallConfirmTarget
+              ? 'Install'
+              : skillUninstallConfirmTarget
+                ? 'Uninstall'
+                : skillUpdateConfirmTarget
+                  ? 'Update'
+                  : 'Archive';
   const confirmPrimaryClassName = confirmTarget?.kind === 'clearCache' || !!deleteTarget || npmPackageTarget?.action === 'uninstall' || !!skillUninstallConfirmTarget
     ? 'app-confirm-btn primary danger'
     : 'app-confirm-btn primary';
@@ -13244,6 +13356,10 @@ function App() {
     }
     if (confirmTarget.kind === 'wheelMakerUpdate') {
       handleWheelMakerUpdateConfirmedAction(confirmTarget).catch(() => undefined);
+      return;
+    }
+    if (confirmTarget.kind === 'wheelMakerUpdateAll') {
+      handleWheelMakerUpdateAllConfirmedAction(confirmTarget).catch(() => undefined);
       return;
     }
     if (confirmTarget.kind === 'skillInstall' || confirmTarget.kind === 'skillUninstall' || confirmTarget.kind === 'skillUpdate') {
