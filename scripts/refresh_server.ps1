@@ -186,7 +186,6 @@ function Ensure-AcpDependencies {
   }
 
   $missing = @()
-  if (-not (Get-Command codex-acp -ErrorAction SilentlyContinue)) { $missing += "@zed-industries/codex-acp" }
   if (-not (Get-Command claude-agent-acp -ErrorAction SilentlyContinue)) { $missing += "@agentclientprotocol/claude-agent-acp" }
   if ($missing.Count -eq 0) { Write-Step "ACP dependencies already installed"; return }
   Write-Step ("install ACP dependencies: {0}" -f ($missing -join ", "))

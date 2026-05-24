@@ -289,9 +289,6 @@ ensure_acp_dependencies() {
   fi
 
   local missing=()
-  if ! command -v codex-acp >/dev/null 2>&1; then
-    missing+=("@zed-industries/codex-acp")
-  fi
   if ! command -v claude-agent-acp >/dev/null 2>&1; then
     missing+=("@agentclientprotocol/claude-agent-acp")
   fi
