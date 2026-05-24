@@ -1,6 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 
+function loadWebpackConfig(projectRoot, mode = 'production') {
+  const webpackConfigPath = path.join(projectRoot, 'web', 'webpack.config.js');
+  jest.resetModules();
+  const loadedConfig = require(webpackConfigPath);
+  if (typeof loadedConfig === 'function') {
+    return loadedConfig({}, {mode});
+  }
+  return loadedConfig;
+}
+
 describe('web runtime setup', () => {
   test('defines web script and pure React web entrypoints', () => {
     const projectRoot = path.join(__dirname, '..');
@@ -99,21 +109,18 @@ describe('web runtime setup', () => {
 
   test('webpack output path can be redirected for desktop staging', () => {
     const projectRoot = path.join(__dirname, '..');
-    const webpackConfigPath = path.join(projectRoot, 'web', 'webpack.config.js');
     const target = path.join(projectRoot, '..', 'server', 'cmd', 'wheelmaker-desktop', 'webroot');
     const previous = process.env.WHEELMAKER_WEB_TARGET;
 
-    jest.resetModules();
     process.env.WHEELMAKER_WEB_TARGET = target;
-    const redirected = require(webpackConfigPath);
+    const redirected = loadWebpackConfig(projectRoot);
 
     if (previous === undefined) {
       delete process.env.WHEELMAKER_WEB_TARGET;
     } else {
       process.env.WHEELMAKER_WEB_TARGET = previous;
     }
-    jest.resetModules();
-    const normal = require(webpackConfigPath);
+    const normal = loadWebpackConfig(projectRoot);
 
     expect(redirected.output.path).toBe(path.resolve(target));
     expect(normal.output.path).toBe(path.join(require('os').homedir(), '.wheelmaker', 'web'));
@@ -121,8 +128,32 @@ describe('web runtime setup', () => {
 
   test('webpack does not emit bundle size performance warnings for local PWA releases', () => {
     const projectRoot = path.join(__dirname, '..');
-    const webpackConfig = require(path.join(projectRoot, 'web', 'webpack.config.js'));
+    const webpackConfig = loadWebpackConfig(projectRoot);
 
     expect(webpackConfig.performance).toEqual({hints: false});
+  });
+
+  test('production webpack releases use low-memory defaults', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const webpackConfig = loadWebpackConfig(projectRoot, 'production');
+
+    expect(webpackConfig.devtool).toBe(false);
+    expect(webpackConfig.optimization.minimizer[0].options.parallel).toBe(false);
+  });
+
+  test('production webpack source maps remain opt-in', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const previous = process.env.WHEELMAKER_WEB_SOURCEMAP;
+
+    process.env.WHEELMAKER_WEB_SOURCEMAP = '1';
+    const webpackConfig = loadWebpackConfig(projectRoot, 'production');
+
+    if (previous === undefined) {
+      delete process.env.WHEELMAKER_WEB_SOURCEMAP;
+    } else {
+      process.env.WHEELMAKER_WEB_SOURCEMAP = previous;
+    }
+
+    expect(webpackConfig.devtool).toBe('source-map');
   });
 });
