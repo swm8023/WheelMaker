@@ -10,10 +10,16 @@ describe('web markdown preview mode', () => {
     expect(mainTsx).toContain("import ReactMarkdown");
     expect(mainTsx).toContain("from 'react-markdown';");
     expect(mainTsx).toContain("import remarkGfm from 'remark-gfm';");
-    expect(mainTsx).toContain("import remarkMath from 'remark-math';");
-    expect(mainTsx).toContain("import rehypeKatex from 'rehype-katex';");
-    expect(mainTsx).toContain("import mermaid from 'mermaid';");
-    expect(mainTsx).toContain("import 'katex/dist/katex.min.css';");
+    expect(mainTsx).not.toContain("import remarkMath from 'remark-math';");
+    expect(mainTsx).not.toContain("import rehypeKatex from 'rehype-katex';");
+    expect(mainTsx).not.toContain("import mermaid from 'mermaid';");
+    expect(mainTsx).not.toContain("import 'katex/dist/katex.min.css';");
+    expect(mainTsx).toContain("import('remark-math')");
+    expect(mainTsx).toContain("import('rehype-katex')");
+    expect(mainTsx).toContain("import('katex/dist/katex.min.css')");
+    expect(mainTsx).toContain("import('mermaid')");
+    expect(mainTsx).toContain('function markdownNeedsMath(content: string): boolean {');
+    expect(mainTsx).toContain('function useMarkdownCapabilityPlugins(content: string): MarkdownCapabilityPlugins {');
 
     expect(mainTsx).toContain('function isMarkdownPath(path: string): boolean {');
     expect(mainTsx).toContain('const selectedFileIsMarkdown = isMarkdownPath(selectedFile);');
@@ -31,8 +37,9 @@ describe('web markdown preview mode', () => {
     expect(wrapIndex).toBeGreaterThan(previewIndex);
 
     expect(mainTsx).toContain('<MarkdownPreview');
-    expect(mainTsx).toContain('remarkPlugins={[remarkGfm, remarkMath]}');
-    expect(mainTsx).toContain('rehypePlugins={[rehypeKatex]}');
+    expect(mainTsx).toContain('remarkPlugins={markdownCapabilities.remarkPlugins}');
+    expect(mainTsx).toContain('rehypePlugins={markdownCapabilities.rehypePlugins}');
+    expect(mainTsx).toContain("data-markdown-export-pending={markdownCapabilities.pending ? 'true' : undefined}");
     expect(mainTsx).toContain('if (language === "mermaid") {');
     expect(mainTsx).toContain('<MermaidBlock content={codeText} themeMode={themeMode} />');
 

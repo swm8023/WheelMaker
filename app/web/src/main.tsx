@@ -8,11 +8,7 @@ import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
 import '@fontsource/jetbrains-mono/400.css';
 import ReactMarkdown, { type Components } from 'react-markdown';
-import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import mermaid from 'mermaid';
-import 'katex/dist/katex.min.css';
 
 declare const require: (id: string) => any;
 
@@ -508,10 +504,118 @@ const PORT_RELAY_FLOATING_SLOT_STORAGE_KEY = 'wheelmaker:portRelayFloatingSlot';
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
 const DEFAULT_PORT_RELAY_SNAPSHOT: RegistryPortRelaySnapshot = {ok: true, enabled: false, status: 'Disabled'};
 let mermaidRenderSequence = 0;
+let mermaidModulePromise: Promise<typeof import('mermaid').default> | null = null;
+
+type MarkdownRemarkPlugins = NonNullable<React.ComponentProps<typeof ReactMarkdown>['remarkPlugins']>;
+type MarkdownRehypePlugins = NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']>;
+type MarkdownMathPipeline = {
+  remarkPlugins: MarkdownRemarkPlugins;
+  rehypePlugins: MarkdownRehypePlugins;
+};
+type MarkdownCapabilityPlugins = MarkdownMathPipeline & {
+  pending: boolean;
+};
+
+let markdownMathPipeline: MarkdownMathPipeline | null = null;
+let markdownMathPipelinePromise: Promise<MarkdownMathPipeline> | null = null;
+const markdownMathPattern = /\\\(|\\\[|\$\$|(?:^|[^\\])\$(?:[^\s$\\]|[^\s$][^$\n]*[^\s$])\$/m;
 
 function nextMermaidRenderId(): string {
   mermaidRenderSequence += 1;
   return `wm-mermaid-${mermaidRenderSequence}`;
+}
+
+function loadMermaid(): Promise<typeof import('mermaid').default> {
+  if (!mermaidModulePromise) {
+    mermaidModulePromise = import('mermaid')
+      .then(module => module.default)
+      .catch(error => {
+        mermaidModulePromise = null;
+        throw error;
+      });
+  }
+  return mermaidModulePromise;
+}
+
+function markdownNeedsMath(content: string): boolean {
+  return markdownMathPattern.test(content);
+}
+
+function loadMarkdownMathPipeline(): Promise<MarkdownMathPipeline> {
+  if (markdownMathPipeline) {
+    return Promise.resolve(markdownMathPipeline);
+  }
+  if (!markdownMathPipelinePromise) {
+    markdownMathPipelinePromise = Promise.all([
+      import('remark-math'),
+      import('rehype-katex'),
+      import('katex/dist/katex.min.css'),
+    ])
+      .then(([remarkMathModule, rehypeKatexModule]) => {
+        markdownMathPipeline = {
+          remarkPlugins: [remarkMathModule.default],
+          rehypePlugins: [rehypeKatexModule.default],
+        };
+        return markdownMathPipeline;
+      })
+      .catch(error => {
+        markdownMathPipelinePromise = null;
+        throw error;
+      });
+  }
+  return markdownMathPipelinePromise;
+}
+
+function useMarkdownCapabilityPlugins(content: string): MarkdownCapabilityPlugins {
+  const needsMath = useMemo(() => markdownNeedsMath(content), [content]);
+  const [loadedMathPipeline, setLoadedMathPipeline] = useState<MarkdownMathPipeline | null>(() =>
+    needsMath ? markdownMathPipeline : null,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!needsMath) {
+      setLoadedMathPipeline(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (markdownMathPipeline) {
+      setLoadedMathPipeline(markdownMathPipeline);
+      return () => {
+        cancelled = true;
+      };
+    }
+    loadMarkdownMathPipeline()
+      .then(pipeline => {
+        if (!cancelled) {
+          setLoadedMathPipeline(pipeline);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoadedMathPipeline(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsMath]);
+
+  const activeMathPipeline = needsMath
+    ? loadedMathPipeline ?? markdownMathPipeline
+    : null;
+
+  return useMemo(
+    () => ({
+      remarkPlugins: activeMathPipeline
+        ? [remarkGfm, ...activeMathPipeline.remarkPlugins]
+        : [remarkGfm],
+      rehypePlugins: activeMathPipeline ? activeMathPipeline.rehypePlugins : [],
+      pending: needsMath && !activeMathPipeline,
+    }),
+    [activeMathPipeline, needsMath],
+  );
 }
 
 function buildChatDraftKey(activeProjectId: string, sessionId: string): string {
@@ -1043,6 +1147,7 @@ const CollapsibleThought = React.memo(function CollapsibleThought({
   markdownUrlTransform: (value: string) => string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const markdownCapabilities = useMarkdownCapabilityPlugins(text);
   const firstLine = (text || '')
     .split('\n')
     .map(line => line.trim())
@@ -1064,11 +1169,14 @@ const CollapsibleThought = React.memo(function CollapsibleThought({
         ) : null}
       </div>
       {open ? (
-        <div className="chat-thought-content">
+        <div
+          className="chat-thought-content"
+          data-markdown-export-pending={markdownCapabilities.pending ? 'true' : undefined}
+        >
           <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
+            remarkPlugins={markdownCapabilities.remarkPlugins}
             urlTransform={markdownUrlTransform}
-            rehypePlugins={[rehypeKatex]}
+            rehypePlugins={markdownCapabilities.rehypePlugins}
             components={markdownComponents}
           >
             {text}
@@ -1155,6 +1263,7 @@ const ChatTurnView = React.memo(function ChatTurnView({
 }: ChatTurnViewProps) {
   const text = msgText(message.method, message.param).trim();
   const kind = msgKind(message.method);
+  const markdownCapabilities = useMarkdownCapabilityPlugins(text);
 
   if (message.method === 'prompt_request' || message.method === 'user_message_chunk') {
     const imageBlocks = groupImageBlocks([message]);
@@ -1329,16 +1438,19 @@ const ChatTurnView = React.memo(function ChatTurnView({
     !hasOptionReplyParts &&
     confirmationReplyParts.some(part => part.type === 'confirmation');
   return (
-    <div className="chat-main-message">
+    <div
+      className="chat-main-message"
+      data-markdown-export-pending={markdownCapabilities.pending ? 'true' : undefined}
+    >
       {hasOptionReplyParts ? (
         optionReplyParts.map((part, index) => {
           if (part.type === 'markdown') {
             return part.text ? (
               <ReactMarkdown
                 key={`markdown:${index}`}
-                remarkPlugins={[remarkGfm, remarkMath]}
+                remarkPlugins={markdownCapabilities.remarkPlugins}
                 urlTransform={markdownUrlTransform}
-                rehypePlugins={[rehypeKatex]}
+                rehypePlugins={markdownCapabilities.rehypePlugins}
                 components={markdownComponents}
               >
                 {part.text}
@@ -1378,9 +1490,9 @@ const ChatTurnView = React.memo(function ChatTurnView({
             return part.text ? (
               <ReactMarkdown
                 key={`markdown:${index}`}
-                remarkPlugins={[remarkGfm, remarkMath]}
+                remarkPlugins={markdownCapabilities.remarkPlugins}
                 urlTransform={markdownUrlTransform}
-                rehypePlugins={[rehypeKatex]}
+                rehypePlugins={markdownCapabilities.rehypePlugins}
                 components={markdownComponents}
               >
                 {part.text}
@@ -1407,9 +1519,9 @@ const ChatTurnView = React.memo(function ChatTurnView({
         })
       ) : (
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
+          remarkPlugins={markdownCapabilities.remarkPlugins}
           urlTransform={markdownUrlTransform}
-          rehypePlugins={[rehypeKatex]}
+          rehypePlugins={markdownCapabilities.rehypePlugins}
           components={markdownComponents}
         >
           {text}
@@ -2093,6 +2205,7 @@ function MermaidBlock({ content, themeMode }: MermaidBlockProps) {
 
     (async () => {
       try {
+        const mermaid = await loadMermaid();
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: 'strict',
@@ -2266,12 +2379,16 @@ const MarkdownPreview = React.memo(function MarkdownPreview({
       lineNumbers,
     ],
   );
+  const markdownCapabilities = useMarkdownCapabilityPlugins(content);
 
   return (
-    <div className="markdown-preview">
+    <div
+      className="markdown-preview"
+      data-markdown-export-pending={markdownCapabilities.pending ? 'true' : undefined}
+    >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={markdownCapabilities.remarkPlugins}
+        rehypePlugins={markdownCapabilities.rehypePlugins}
         components={markdownComponents}
       >
         {content}
@@ -2288,6 +2405,7 @@ const MarkdownImageExportSurface = React.memo(function MarkdownImageExportSurfac
   onError,
 }: MarkdownImageExportSurfaceProps) {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const markdownCapabilities = useMarkdownCapabilityPlugins(request.content);
 
   useEffect(() => {
     let cancelled = false;
@@ -2326,11 +2444,15 @@ const MarkdownImageExportSurface = React.memo(function MarkdownImageExportSurfac
 
   return (
     <div className="markdown-image-export-host" aria-hidden="true">
-      <div ref={surfaceRef} className="markdown-image-export-surface markdown-preview">
+      <div
+        ref={surfaceRef}
+        className="markdown-image-export-surface markdown-preview"
+        data-markdown-export-pending={markdownCapabilities.pending ? 'true' : undefined}
+      >
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
+          remarkPlugins={markdownCapabilities.remarkPlugins}
           urlTransform={markdownUrlTransform}
-          rehypePlugins={[rehypeKatex]}
+          rehypePlugins={markdownCapabilities.rehypePlugins}
           components={markdownComponents}
         >
           {request.content}
