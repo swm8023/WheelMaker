@@ -1743,7 +1743,7 @@ Relay data plane 监听在 `listenPort` 上，同一端口处理普通 HTTP 与 
 - `GET /__wheelmaker/relay/logout`：清除 cookie。
 - `GET /__wheelmaker/relay/status`：只读状态。
 
-其他路径必须先通过 data-plane cookie 认证；未认证访问会 303 跳转到登录页，并将原同站相对路径写入 `next`。认证通过后，HTTP 请求和 WebSocket text/binary frame 通过 Hub 主动建立的 binary tunnel 转发到所选 Hub 机器上的 `127.0.0.1:targetPort`。Hub 侧目标请求固定设置浏览器风格 `User-Agent`。
+其他路径必须先通过 data-plane cookie 认证；未认证访问会 303 跳转到登录页，并将原同站相对路径写入 `next`。认证通过后，HTTP 请求和 WebSocket text/binary frame 通过 Hub 主动建立的 binary tunnel 转发到所选 Hub 机器上的 `127.0.0.1:targetPort`。Hub 侧目标请求固定设置浏览器风格 `User-Agent`，不透传浏览器 `Accept-Encoding`。Registry 对未压缩的 `text/html` 响应，如果 `<head>` 中没有 viewport meta，会注入 `width=device-width` viewport，便于内嵌 iframe 按当前屏幕宽度渲染。
 
 ### 5.14 Chat / Session 透传方法
 

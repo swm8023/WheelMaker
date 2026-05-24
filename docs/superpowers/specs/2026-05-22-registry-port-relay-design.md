@@ -546,6 +546,12 @@ Data plane 错误：
 
 错误页保持纯文本或最小 HTML，不暴露 token、nonce、access code 或内部 stack。
 
+Data plane 兼容性：
+
+- Registry 不透传浏览器 `Accept-Encoding`，避免目标返回无法安全改写的压缩 HTML。
+- 对未压缩的 `text/html` 响应，如果 `<head>` 中没有 viewport meta，Registry 注入 `width=device-width, initial-scale=1, viewport-fit=cover`，使 App 内嵌 iframe 更接近当前屏幕宽度渲染。
+- 如果目标页面自身 CSS 设置固定最小宽度，relay 不改写页面样式，页面内部仍可能横向滚动。
+
 ## 可观测性
 
 Registry log：
