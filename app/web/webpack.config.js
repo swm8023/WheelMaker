@@ -1,6 +1,7 @@
 const path = require('path');
 const os = require('os');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
 
 function envFlag(value) {
@@ -51,7 +52,7 @@ module.exports = (_env = {}, argv = {}) => {
         },
         {
           test: /\.css$/,
-          use: ['style-loader', 'css-loader'],
+          use: [isProduction ? MiniCssExtractPlugin.loader : 'style-loader', 'css-loader'],
         },
         {
           test: /\.(woff2?|ttf|eot|svg)$/,
@@ -64,6 +65,7 @@ module.exports = (_env = {}, argv = {}) => {
         template: path.resolve(__dirname, 'public/index.html'),
         inject: false,
       }),
+      ...(isProduction ? [new MiniCssExtractPlugin({ filename: '[name].css' })] : []),
     ],
     devServer: {
       host: '0.0.0.0',

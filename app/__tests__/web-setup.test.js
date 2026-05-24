@@ -156,4 +156,18 @@ describe('web runtime setup', () => {
 
     expect(webpackConfig.devtool).toBe('source-map');
   });
+
+  test('production webpack extracts css instead of injecting it through javascript', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const webpackConfig = loadWebpackConfig(projectRoot, 'production');
+    const indexHtml = fs.readFileSync(path.join(projectRoot, 'web', 'public', 'index.html'), 'utf8');
+    const cssRule = webpackConfig.module.rules.find(rule => String(rule.test) === String(/\.css$/));
+    const cssUses = cssRule.use.map(item => (typeof item === 'string' ? item : item?.loader));
+    const pluginNames = webpackConfig.plugins.map(plugin => plugin.constructor.name);
+
+    expect(cssUses.some(item => item.includes('mini-css-extract-plugin'))).toBe(true);
+    expect(cssUses).not.toContain('style-loader');
+    expect(pluginNames).toContain('MiniCssExtractPlugin');
+    expect(indexHtml).toContain('href="/bundle.css"');
+  });
 });
