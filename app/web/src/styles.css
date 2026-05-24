@@ -4143,23 +4143,36 @@ body,
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 6px;
+  gap: 2px;
   flex: 0 1 auto;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-2) 62%, transparent);
 }
 
 .mobile-chat-toolbar-icon {
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--panel-2) 92%, transparent);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+  width: 34px;
+  height: 32px;
+  min-width: 34px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+  transition: background 120ms ease, color 120ms ease;
 }
 
-.mobile-chat-toolbar-icon:hover {
-  background: var(--hover);
+.mobile-chat-toolbar-icon:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--hover) 76%, transparent);
+  color: var(--text);
+}
+
+.mobile-chat-toolbar-icon.active {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--text);
 }
 
 .mobile-chat-drawer-header .chat-hub-summary {

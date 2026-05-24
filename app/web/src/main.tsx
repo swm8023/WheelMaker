@@ -10850,7 +10850,19 @@ function App() {
           <div className="mobile-chat-toolbar" aria-label="Chat tools">
             <button
               type="button"
-              className="mobile-chat-toolbar-icon drawer-settings-icon-btn"
+              className={`mobile-chat-toolbar-icon drawer-settings-icon-btn${sidebarSettingsOpen && settingsDetailView === 'update' ? ' active' : ''}`}
+              onClick={() => {
+                setProjectMenuOpen(false);
+                openSettingsDetail('update');
+              }}
+              title="Update"
+              aria-label="Update"
+            >
+              <span className="codicon codicon-cloud-download" />
+            </button>
+            <button
+              type="button"
+              className={`mobile-chat-toolbar-icon drawer-settings-icon-btn${sidebarSettingsOpen && !settingsDetailView ? ' active' : ''}`}
               onClick={() => {
                 setProjectMenuOpen(false);
                 setSettingsDetailView(null);
@@ -10863,7 +10875,7 @@ function App() {
             </button>
             <button
               type="button"
-              className="mobile-chat-toolbar-icon drawer-settings-icon-btn"
+              className={`mobile-chat-toolbar-icon drawer-settings-icon-btn${sidebarSettingsOpen && settingsDetailView === 'portRelay' ? ' active' : ''}`}
               onClick={() => {
                 setProjectMenuOpen(false);
                 openSettingsDetail('portRelay');

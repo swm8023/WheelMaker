@@ -219,9 +219,10 @@ describe('agent package update settings UI source structure', () => {
     expect(agentTagBlock).toContain('text-transform: none;');
   });
 
-  test('adds desktop Update, Token Stats, and Port Relay shortcuts below refresh and above settings only', () => {
+  test('adds desktop shortcuts and a compact mobile Update toolbar shortcut', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     const activityBarStart = mainTsx.indexOf('const desktopActivityBar = isWide ? (');
     const activityBarEnd = mainTsx.indexOf('const floatingControlStack = !isWide ? (', activityBarStart);
@@ -251,7 +252,28 @@ describe('agent package update settings UI source structure', () => {
     const floatingStart = mainTsx.indexOf('const floatingControlStack = !isWide ? (');
     const mobileSettingsStart = mainTsx.indexOf('const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (', floatingStart);
     const mobileOnly = mainTsx.slice(floatingStart, mobileSettingsStart);
-    expect(mobileOnly).not.toContain('codicon-cloud-download');
-    expect(mobileOnly).not.toContain('title="Update"');
+    expect(mobileOnly).not.toContain("openSettingsDetail('update')");
+
+    const mobileToolbarStart = mainTsx.indexOf('<div className="mobile-chat-toolbar"');
+    const mobileToolbarEnd = mainTsx.indexOf('{renderChatHubSummary()}', mobileToolbarStart);
+    expect(mobileToolbarStart).toBeGreaterThanOrEqual(0);
+    expect(mobileToolbarEnd).toBeGreaterThan(mobileToolbarStart);
+    const mobileToolbar = mainTsx.slice(mobileToolbarStart, mobileToolbarEnd);
+    expect(mobileToolbar).toContain("openSettingsDetail('update')");
+    expect(mobileToolbar).toContain('codicon-cloud-download');
+    expect(mobileToolbar.indexOf('title="Update"')).toBeLessThan(mobileToolbar.indexOf('title="Open settings"'));
+
+    const mobileToolbarBlock = stylesCss.match(/\.mobile-chat-toolbar \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileToolbarBlock).toContain('border: 1px solid');
+    expect(mobileToolbarBlock).toContain('border-radius: 10px;');
+    expect(mobileToolbarBlock).toContain('padding: 3px;');
+
+    const mobileToolbarIconBlock = stylesCss.match(/\.mobile-chat-toolbar-icon \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileToolbarIconBlock).toContain('width: 34px;');
+    expect(mobileToolbarIconBlock).toContain('height: 32px;');
+    expect(mobileToolbarIconBlock).toContain('border-radius: 7px;');
+    expect(mobileToolbarIconBlock).toContain('box-shadow: none;');
+    expect(mobileToolbarIconBlock).not.toContain('border-radius: 999px;');
+    expect(stylesCss).toContain('.mobile-chat-toolbar-icon.active');
   });
 });
