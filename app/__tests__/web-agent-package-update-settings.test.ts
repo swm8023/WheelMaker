@@ -261,17 +261,19 @@ describe('agent package update settings UI source structure', () => {
     const mobileToolbar = mainTsx.slice(mobileToolbarStart, mobileToolbarEnd);
     expect(mobileToolbar).toContain("openSettingsDetail('update')");
     expect(mobileToolbar).toContain('codicon-cloud-download');
-    expect(mobileToolbar.indexOf('title="Update"')).toBeLessThan(mobileToolbar.indexOf('title="Open settings"'));
+    expect(mobileToolbar.indexOf('title="Open settings"')).toBeLessThan(mobileToolbar.indexOf('title="Update"'));
+    expect(mobileToolbar.indexOf('title="Update"')).toBeLessThan(mobileToolbar.indexOf('title="Port Relay"'));
 
     const mobileToolbarBlock = stylesCss.match(/\.mobile-chat-toolbar \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(mobileToolbarBlock).toContain('border: 1px solid');
-    expect(mobileToolbarBlock).toContain('border-radius: 10px;');
-    expect(mobileToolbarBlock).toContain('padding: 3px;');
+    expect(mobileToolbarBlock).toContain('gap: 4px;');
+    expect(mobileToolbarBlock).toContain('background: transparent;');
+    expect(mobileToolbarBlock).not.toContain('border: 1px solid');
+    expect(mobileToolbarBlock).not.toContain('border-radius: 10px;');
 
     const mobileToolbarIconBlock = stylesCss.match(/\.mobile-chat-toolbar-icon \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(mobileToolbarIconBlock).toContain('width: 34px;');
-    expect(mobileToolbarIconBlock).toContain('height: 32px;');
-    expect(mobileToolbarIconBlock).toContain('border-radius: 7px;');
+    expect(mobileToolbarIconBlock).toContain('width: 36px;');
+    expect(mobileToolbarIconBlock).toContain('height: 34px;');
+    expect(mobileToolbarIconBlock).toContain('border-radius: 8px;');
     expect(mobileToolbarIconBlock).toContain('box-shadow: none;');
     expect(mobileToolbarIconBlock).not.toContain('border-radius: 999px;');
     expect(stylesCss).toContain('.mobile-chat-toolbar-icon.active');

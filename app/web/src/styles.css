@@ -4143,22 +4143,19 @@ body,
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 2px;
+  gap: 4px;
   flex: 0 1 auto;
-  padding: 3px;
-  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--panel-2) 62%, transparent);
+  background: transparent;
 }
 
 .mobile-chat-toolbar-icon {
   flex: 0 0 auto;
-  width: 34px;
-  height: 32px;
-  min-width: 34px;
-  min-height: 32px;
+  width: 36px;
+  height: 34px;
+  min-width: 36px;
+  min-height: 34px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
   box-shadow: none;
   color: color-mix(in srgb, var(--muted) 86%, var(--text));
