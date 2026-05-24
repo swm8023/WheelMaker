@@ -47,13 +47,16 @@ func TestFilterRequestHeadersDropsConditionalCacheHeaders(t *testing.T) {
 
 	filtered := filterRequestHeaders(headers)
 
-	for _, name := range []string{"If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since", "If-Range", "Accept-Encoding"} {
+	for _, name := range []string{"If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since", "If-Range"} {
 		if _, ok := filtered[name]; ok {
 			t.Fatalf("filterRequestHeaders forwarded %s: %#v", name, filtered)
 		}
 	}
 	if got := filtered["Accept"]; len(got) != 1 || got[0] != "text/html" {
 		t.Fatalf("filterRequestHeaders dropped Accept: %#v", filtered)
+	}
+	if got := filtered["Accept-Encoding"]; len(got) != 1 || got[0] != "gzip, br" {
+		t.Fatalf("filterRequestHeaders dropped Accept-Encoding: %#v", filtered)
 	}
 }
 
@@ -96,81 +99,6 @@ func TestCopyResponseHeadersAllowsRelayEmbedding(t *testing.T) {
 	}
 	if got := dst.Get("Content-Type"); got != "text/html" {
 		t.Fatalf("Content-Type=%q, want text/html", got)
-	}
-}
-
-func TestHTMLViewportInjectorAddsMobileViewportMeta(t *testing.T) {
-	injector := newHTMLViewportInjector(map[string][]string{
-		"Content-Type": {"text/html; charset=utf-8"},
-	})
-
-	out := injector.Transform([]byte("<!doctype html><html><head><title>x</title></head><body>ok</body></html>"), true)
-	got := string(out)
-
-	if !strings.Contains(got, `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">`) {
-		t.Fatalf("Transform() did not inject viewport meta: %s", got)
-	}
-	if strings.Index(got, `<meta name="viewport"`) < strings.Index(got, "<title>") {
-		return
-	}
-	t.Fatalf("Transform() injected viewport after existing head content: %s", got)
-}
-
-func TestHTMLViewportInjectorKeepsExistingViewportMeta(t *testing.T) {
-	injector := newHTMLViewportInjector(map[string][]string{
-		"Content-Type": {"text/html"},
-	})
-	input := `<html><head><meta name="viewport" content="initial-scale=1"><title>x</title></head></html>`
-
-	out := string(injector.Transform([]byte(input), true))
-
-	if out != input {
-		t.Fatalf("Transform() changed page with existing viewport:\n%s", out)
-	}
-}
-
-func TestHTMLViewportInjectorSkipsNonHTML(t *testing.T) {
-	injector := newHTMLViewportInjector(map[string][]string{
-		"Content-Type": {"application/javascript"},
-	})
-	input := `const html = "<head></head>";`
-
-	out := string(injector.Transform([]byte(input), true))
-
-	if out != input {
-		t.Fatalf("Transform() changed non-html payload: %s", out)
-	}
-}
-
-func TestHTMLViewportInjectorSkipsEncodedHTML(t *testing.T) {
-	injector := newHTMLViewportInjector(map[string][]string{
-		"Content-Type":     {"text/html"},
-		"Content-Encoding": {"gzip"},
-	})
-	input := `<html><head></head><body>ok</body></html>`
-
-	out := string(injector.Transform([]byte(input), true))
-
-	if out != input {
-		t.Fatalf("Transform() changed encoded html payload: %s", out)
-	}
-}
-
-func TestHTMLViewportInjectorWaitsForHeadBeforeInjecting(t *testing.T) {
-	injector := newHTMLViewportInjector(map[string][]string{
-		"Content-Type": {"text/html"},
-	})
-
-	if out := injector.Transform([]byte("<html><head>"), false); out != nil {
-		t.Fatalf("first Transform()=%q, want buffered", string(out))
-	}
-	out := string(injector.Transform([]byte("<title>x</title></head><body>ok</body></html>"), false))
-
-	if !strings.Contains(out, relayViewportMeta) {
-		t.Fatalf("second Transform() missing viewport meta: %s", out)
-	}
-	if strings.Index(out, relayViewportMeta) > strings.Index(out, "<title>") {
-		t.Fatalf("viewport meta should be injected before title: %s", out)
 	}
 }
 

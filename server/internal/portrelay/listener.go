@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"mime"
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 
@@ -19,17 +17,6 @@ import (
 )
 
 var relayUpgrader = websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
-
-const (
-	htmlViewportProbeLimit = 8192
-	relayViewportMeta      = `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">`
-)
-
-var (
-	htmlHeadPattern         = regexp.MustCompile(`(?i)<head\b[^>]*>`)
-	htmlHeadClosePattern    = regexp.MustCompile(`(?i)</head\s*>`)
-	htmlViewportMetaPattern = regexp.MustCompile(`(?i)<meta\b[^>]*\bname\s*=\s*['"]?viewport['"]?`)
-)
 
 type relayListener struct {
 	port int
@@ -183,32 +170,20 @@ func (c *Controller) handleExternalHTTP(w http.ResponseWriter, r *http.Request, 
 		status = http.StatusOK
 	}
 	w.WriteHeader(status)
-	viewportInjector := newHTMLViewportInjector(headers.Headers)
-	writePayload := func(payload []byte) bool {
-		if len(payload) == 0 {
-			return true
-		}
-		if _, err := w.Write(payload); err != nil {
-			return false
-		}
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
-		return true
-	}
 	for {
 		frame, ok := stream.nextData()
 		if !ok {
-			writePayload(viewportInjector.Transform(nil, true))
 			return
 		}
 		if frame.Type == FrameData && len(frame.Payload) > 0 {
-			if !writePayload(viewportInjector.Transform(frame.Payload, false)) {
+			if _, err := w.Write(frame.Payload); err != nil {
 				return
+			}
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
 			}
 		}
 		if frame.Type == FrameClose {
-			writePayload(viewportInjector.Transform(nil, true))
 			return
 		}
 	}
@@ -458,7 +433,7 @@ func filterRequestHeaders(headers http.Header) map[string][]string {
 	out := map[string][]string{}
 	for name, values := range headers {
 		canonical := http.CanonicalHeaderKey(name)
-		if isHopByHopHeader(canonical) || isWebSocketDialerHeader(canonical) || isConditionalRequestHeader(canonical) || isContentEncodingRequestHeader(canonical) || strings.EqualFold(canonical, "Cookie") {
+		if isHopByHopHeader(canonical) || isWebSocketDialerHeader(canonical) || isConditionalRequestHeader(canonical) || strings.EqualFold(canonical, "Cookie") {
 			continue
 		}
 		out[canonical] = append([]string(nil), values...)
@@ -500,72 +475,6 @@ func copyWebSocketResponseHeaders(headers map[string][]string) http.Header {
 		}
 	}
 	return dst
-}
-
-type htmlViewportInjector struct {
-	enabled bool
-	done    bool
-	buffer  []byte
-}
-
-func newHTMLViewportInjector(headers map[string][]string) *htmlViewportInjector {
-	if headerFirstValue(headers, "Content-Encoding") != "" {
-		return &htmlViewportInjector{}
-	}
-	contentType := headerFirstValue(headers, "Content-Type")
-	mediaType, _, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		mediaType = strings.Split(contentType, ";")[0]
-	}
-	return &htmlViewportInjector{enabled: strings.EqualFold(mediaType, "text/html")}
-}
-
-func (i *htmlViewportInjector) Transform(payload []byte, final bool) []byte {
-	if i == nil || !i.enabled || i.done {
-		return payload
-	}
-	if len(payload) > 0 {
-		i.buffer = append(i.buffer, payload...)
-	}
-	if htmlViewportMetaPattern.Match(i.buffer) {
-		return i.drain()
-	}
-	headMatch := htmlHeadPattern.FindIndex(i.buffer)
-	headClosed := htmlHeadClosePattern.Match(i.buffer)
-	shouldDecide := final || len(i.buffer) >= htmlViewportProbeLimit || headClosed
-	if headMatch == nil {
-		if shouldDecide {
-			return i.drain()
-		}
-		return nil
-	}
-	if !shouldDecide {
-		return nil
-	}
-	insertAt := headMatch[1]
-	out := make([]byte, 0, len(i.buffer)+len(relayViewportMeta))
-	out = append(out, i.buffer[:insertAt]...)
-	out = append(out, relayViewportMeta...)
-	out = append(out, i.buffer[insertAt:]...)
-	i.done = true
-	i.buffer = nil
-	return out
-}
-
-func (i *htmlViewportInjector) drain() []byte {
-	i.done = true
-	out := i.buffer
-	i.buffer = nil
-	return out
-}
-
-func headerFirstValue(headers map[string][]string, name string) string {
-	for key, values := range headers {
-		if strings.EqualFold(key, name) && len(values) > 0 {
-			return values[0]
-		}
-	}
-	return ""
 }
 
 func sanitizeResponseHeaderValues(name string, values []string) []string {
@@ -635,8 +544,4 @@ func isConditionalRequestHeader(name string) bool {
 	default:
 		return false
 	}
-}
-
-func isContentEncodingRequestHeader(name string) bool {
-	return strings.EqualFold(name, "Accept-Encoding")
 }

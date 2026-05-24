@@ -548,9 +548,8 @@ Data plane 错误：
 
 Data plane 兼容性：
 
-- Registry 不透传浏览器 `Accept-Encoding`，避免目标返回无法安全改写的压缩 HTML。
-- 对未压缩的 `text/html` 响应，如果 `<head>` 中没有 viewport meta，Registry 注入 `width=device-width, initial-scale=1, viewport-fit=cover`，使 App 内嵌 iframe 更接近当前屏幕宽度渲染。
-- 如果目标页面自身 CSS 设置固定最小宽度，relay 不改写页面样式，页面内部仍可能横向滚动。
+- Registry 不改写第三方 HTML 内容，不注入 viewport meta 或样式。
+- 如果目标页面缺少移动端 viewport 或自身 CSS 设置固定最小宽度，页面内部可能横向滚动；这属于目标页面适配问题。
 
 ## 可观测性
 
