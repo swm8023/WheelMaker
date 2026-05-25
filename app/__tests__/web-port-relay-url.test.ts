@@ -1,4 +1,9 @@
-import {buildPortRelayOpenUrl, resolvePortRelayOpenUrl} from '../web/src/portRelayUrl';
+import {
+  appendPortRelayOpenPath,
+  buildPortRelayOpenUrl,
+  parsePortRelayLocalHttpUrl,
+  resolvePortRelayOpenUrl,
+} from '../web/src/portRelayUrl';
 
 describe('port relay URL helpers', () => {
   test('maps registry wss connection to https relay URL on the selected port', () => {
@@ -27,5 +32,28 @@ describe('port relay URL helpers', () => {
       registryAddress: 'ws://127.0.0.1:9630/ws',
       listenPort: 28801,
     })).toBe('http://127.0.0.1:28801/');
+  });
+
+  test('parses localhost http URLs into relay target port and path', () => {
+    expect(parsePortRelayLocalHttpUrl('http://localhost:58647/session?id=1#logs')).toEqual({
+      targetPort: 58647,
+      path: '/session?id=1#logs',
+    });
+    expect(parsePortRelayLocalHttpUrl('http://127.0.0.1:5173/')).toEqual({
+      targetPort: 5173,
+      path: '/',
+    });
+  });
+
+  test('rejects non-local or portless URLs for relay link handling', () => {
+    expect(parsePortRelayLocalHttpUrl('https://localhost:58647/')).toBeNull();
+    expect(parsePortRelayLocalHttpUrl('http://example.com:58647/')).toBeNull();
+    expect(parsePortRelayLocalHttpUrl('http://localhost/')).toBeNull();
+  });
+
+  test('appends original local URL path to relay iframe URL', () => {
+    expect(appendPortRelayOpenPath('https://relay.example.com:28801/', '/session?id=1#logs')).toBe(
+      'https://relay.example.com:28801/session?id=1#logs',
+    );
   });
 });

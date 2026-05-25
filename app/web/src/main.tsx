@@ -13,7 +13,8 @@ import remarkGfm from 'remark-gfm';
 declare const require: (id: string) => any;
 
 import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
-import { resolvePortRelayOpenUrl } from './portRelayUrl';
+import { appendPortRelayOpenPath, parsePortRelayLocalHttpUrl, resolvePortRelayOpenUrl } from './portRelayUrl';
+import type { PortRelayLocalHttpUrl } from './portRelayUrl';
 import {
   normalizePortRelayListenPort,
   normalizePortRelayTarget,
@@ -2847,6 +2848,7 @@ function App() {
   const [portRelayKnownAccessCodeGeneration, setPortRelayKnownAccessCodeGeneration] = useState<number | null>(null);
   const [portRelayCodeCopied, setPortRelayCodeCopied] = useState(false);
   const [portRelayFrameOpen, setPortRelayFrameOpen] = useState(false);
+  const [portRelayFramePath, setPortRelayFramePath] = useState('');
   const [portRelayFrameAutoOpenPending, setPortRelayFrameAutoOpenPending] = useState(false);
   const portRelayCodeCopyTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const portRelayReady = portRelaySnapshot.enabled && portRelaySnapshot.status === 'Up';
@@ -2861,12 +2863,13 @@ function App() {
     if (!portRelayReady) {
       return '';
     }
-    return resolvePortRelayOpenUrl({
+    const baseUrl = resolvePortRelayOpenUrl({
       relayUrl: portRelaySnapshot.relayUrl,
       registryAddress: address,
       listenPort: portRelaySnapshot.listenPort || portRelayListenPort,
     });
-  }, [address, portRelayListenPort, portRelayReady, portRelaySnapshot.listenPort, portRelaySnapshot.relayUrl]);
+    return appendPortRelayOpenPath(baseUrl, portRelayFramePath);
+  }, [address, portRelayFramePath, portRelayListenPort, portRelayReady, portRelaySnapshot.listenPort, portRelaySnapshot.relayUrl]);
   const mobilePortRelayFrameOpen = !isWide && portRelayFrameOpen && !!portRelayFrameUrl;
 
   useEffect(() => {
@@ -2876,7 +2879,7 @@ function App() {
   }, [portRelayFrameUrl, portRelayReady]);
 
   useEffect(() => {
-    if (!isWide || !portRelayFrameAutoOpenPending) {
+    if (!portRelayFrameAutoOpenPending) {
       return;
     }
     if (portRelayReady && portRelayFrameUrl) {
@@ -2888,7 +2891,6 @@ function App() {
       setPortRelayFrameAutoOpenPending(false);
     }
   }, [
-    isWide,
     portRelayFrameAutoOpenPending,
     portRelayFrameUrl,
     portRelayReady,
@@ -7781,12 +7783,19 @@ function App() {
     return target;
   }, [persistPortRelaySettings, portRelayDraftHubId, portRelayDraftPort, portRelayTargets]);
 
-  const enablePortRelayForTarget = useCallback(async (target: PortRelayTarget | null, listenPortValue = portRelayListenPort) => {
+  const enablePortRelayForTarget = useCallback(async (
+    target: PortRelayTarget | null,
+    listenPortValue = portRelayListenPort,
+    options: {framePath?: string; openFrame?: boolean} = {},
+  ) => {
     const normalizedTarget = normalizePortRelayTarget(target);
     const listenPort = Number(listenPortValue);
     if (portRelayAccessCodeUnknown) {
       setPortRelayError('Access code is unknown on this device. Generate a new code before switching target.');
       return;
+    }
+    if (options.framePath !== undefined) {
+      setPortRelayFramePath(options.framePath);
     }
     const accessCode = portRelayAccessCode || generatePortRelayAccessCode();
     setPortRelayAccessCode(accessCode);
@@ -7817,7 +7826,7 @@ function App() {
         accessCode,
       });
       setPortRelayKnownAccessCodeGeneration(typeof snapshot.accessCodeGeneration === 'number' ? snapshot.accessCodeGeneration : null);
-      setPortRelayFrameAutoOpenPending(isWide && snapshot.enabled);
+      setPortRelayFrameAutoOpenPending((options.openFrame ?? isWide) && snapshot.enabled);
       applyPortRelaySnapshot(snapshot);
     } catch (err) {
       setPortRelayError(err instanceof Error ? err.message : String(err));
@@ -7828,7 +7837,7 @@ function App() {
 
   const enablePortRelay = useCallback(async () => {
     const target = selectedPortRelayTarget ?? commitPortRelayDraftTarget();
-    await enablePortRelayForTarget(target, portRelayListenPort);
+    await enablePortRelayForTarget(target, portRelayListenPort, {framePath: ''});
   }, [commitPortRelayDraftTarget, enablePortRelayForTarget, portRelayListenPort, selectedPortRelayTarget]);
 
   const disablePortRelay = useCallback(async () => {
@@ -7836,6 +7845,7 @@ function App() {
     setPortRelayError('');
     try {
       const snapshot = await service.disablePortRelay();
+      setPortRelayFramePath('');
       applyPortRelaySnapshot(snapshot);
     } catch (err) {
       setPortRelayError(err instanceof Error ? err.message : String(err));
@@ -7899,7 +7909,7 @@ function App() {
     if (!portRelaySnapshot.enabled || samePortRelayTarget(selectedPortRelayTarget, target)) {
       return;
     }
-    await enablePortRelayForTarget(target, String(portRelaySnapshot.listenPort || portRelayListenPort));
+    await enablePortRelayForTarget(target, String(portRelaySnapshot.listenPort || portRelayListenPort), {framePath: ''});
   }, [
     enablePortRelayForTarget,
     persistPortRelaySettings,
@@ -7926,6 +7936,7 @@ function App() {
     setPortRelayError('');
     try {
       const snapshot = await service.disablePortRelay();
+      setPortRelayFramePath('');
       setPortRelayFrameAutoOpenPending(false);
       applyPortRelaySnapshot(snapshot);
     } catch (err) {
@@ -7934,6 +7945,78 @@ function App() {
       setPortRelayLoading(false);
     }
   }, [applyPortRelaySnapshot, persistPortRelaySettings, portRelaySnapshot.enabled, portRelayTargets, selectedPortRelayTarget]);
+
+  const openChatPortRelayLink = useCallback(async (localUrl: PortRelayLocalHttpUrl) => {
+    const hubId = currentProject?.hubId || '';
+    if (!hubId) {
+      setError('Current project has no hub for Port Relay.');
+      return;
+    }
+    if (portRelayAccessCodeUnknown) {
+      setPortRelayError('Access code is unknown on this device. Generate a new code before opening local relay links.');
+      setSidebarSettingsOpen(true);
+      setSidebarCollapsed(false);
+      setSettingsDetailView('portRelay');
+      setPortRelayFrameOpen(false);
+      return;
+    }
+    const target: PortRelayTarget = {
+      hubId,
+      targetPort: localUrl.targetPort,
+    };
+    const listenPort = Number(portRelayListenPort);
+    if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) {
+      setPortRelayError('Listen port must be in 1..65535.');
+      setSidebarSettingsOpen(true);
+      setSidebarCollapsed(false);
+      setSettingsDetailView('portRelay');
+      return;
+    }
+    const nextTargets = upsertPortRelayTarget(portRelayTargets, target);
+    setPortRelayTargets(nextTargets);
+    setSelectedPortRelayTarget(target);
+    persistPortRelaySettings({
+      targets: nextTargets,
+      selectedTarget: target,
+      listenPort,
+    });
+    setPortRelayFramePath(localUrl.path);
+    const activeTarget = normalizePortRelayTarget({
+      hubId: portRelaySnapshot.hubId,
+      targetPort: portRelaySnapshot.targetPort,
+    });
+    const activeRelayMatches =
+      portRelaySnapshot.enabled &&
+      portRelaySnapshot.status !== 'Error' &&
+      portRelaySnapshot.listenPort === listenPort &&
+      samePortRelayTarget(activeTarget, target);
+    if (activeRelayMatches) {
+      setPortRelayFrameAutoOpenPending(true);
+      if (portRelayReady) {
+        setPortRelayFrameOpen(true);
+      }
+      return;
+    }
+    await enablePortRelayForTarget(target, portRelayListenPort, {
+      framePath: localUrl.path,
+      openFrame: true,
+    });
+  }, [
+    currentProject?.hubId,
+    enablePortRelayForTarget,
+    persistPortRelaySettings,
+    portRelayAccessCodeUnknown,
+    portRelayListenPort,
+    portRelayReady,
+    portRelaySnapshot.enabled,
+    portRelaySnapshot.hubId,
+    portRelaySnapshot.listenPort,
+    portRelaySnapshot.status,
+    portRelaySnapshot.targetPort,
+    portRelayTargets,
+    setSidebarCollapsed,
+    setSidebarSettingsOpen,
+  ]);
 
   const updateHubCards = useMemo(() => {
     const hubIds = new Set<string>([
@@ -12345,6 +12428,7 @@ function App() {
       a: ({ href, children, ...rest }) => {
         const linkHref = typeof href === 'string' ? href : '';
         const targetFile = linkHref ? resolveChatFileLink(linkHref) : null;
+        const relayLocalUrl = parsePortRelayLocalHttpUrl(linkHref);
         const isFileLink = !!targetFile;
         const isWindowsLocalPath = /^\/?[a-zA-Z]:/.test(linkHref.trim());
         const linkText = collectReactText(children);
@@ -12355,15 +12439,23 @@ function App() {
         return (
           <a
             {...rest}
+            className={[rest.className, relayLocalUrl ? 'chat-relay-link' : ''].filter(Boolean).join(' ') || undefined}
             href={fallbackHref}
-            target={isFileLink ? undefined : '_blank'}
-            rel={isFileLink ? undefined : 'noreferrer'}
+            target={isFileLink || relayLocalUrl ? undefined : '_blank'}
+            rel={isFileLink || relayLocalUrl ? undefined : 'noreferrer'}
             title={
               isFileLink && jumpLine
                 ? `${targetFile.path}:${jumpLine}`
+                : relayLocalUrl
+                  ? 'Open through Port Relay'
                 : rest.title
             }
             onClick={event => {
+              if (relayLocalUrl) {
+                event.preventDefault();
+                openChatPortRelayLink(relayLocalUrl).catch(() => undefined);
+                return;
+              }
               if (!targetFile) {
                 if (isWindowsLocalPath) {
                   event.preventDefault();
@@ -12399,6 +12491,7 @@ function App() {
       codeLineHeight,
       codeTabSize,
       currentProject?.path,
+      openChatPortRelayLink,
     ],
   );
 

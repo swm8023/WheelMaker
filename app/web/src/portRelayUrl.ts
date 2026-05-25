@@ -17,9 +17,19 @@ export function buildPortRelayOpenUrl(registryAddress: string, portRelayListenPo
   }
 }
 
+export type PortRelayLocalHttpUrl = {
+  targetPort: number;
+  path: string;
+};
+
 function isLoopbackHost(hostname: string): boolean {
   const value = hostname.trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
   return value === 'localhost' || value === '127.0.0.1' || value === '::1';
+}
+
+function isLocalHttpRelayHost(hostname: string): boolean {
+  const value = hostname.trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+  return value === 'localhost' || value === '127.0.0.1';
 }
 
 function urlHostIsLoopback(rawUrl: string): boolean {
@@ -44,4 +54,41 @@ export function resolvePortRelayOpenUrl(args: {
     return relayUrl;
   }
   return derivedUrl;
+}
+
+export function parsePortRelayLocalHttpUrl(value: string): PortRelayLocalHttpUrl | null {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' || !isLocalHttpRelayHost(url.hostname) || !url.port) {
+    return null;
+  }
+  const targetPort = Number(url.port);
+  if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
+    return null;
+  }
+  return {
+    targetPort,
+    path: `${url.pathname || '/'}${url.search}${url.hash}`,
+  };
+}
+
+export function appendPortRelayOpenPath(baseUrl: string, path: string): string {
+  const normalizedPath = path.trim();
+  if (!normalizedPath || normalizedPath === '/') {
+    return baseUrl;
+  }
+  try {
+    const url = new URL(baseUrl);
+    const pathUrl = new URL(normalizedPath, 'http://relay.local');
+    url.pathname = pathUrl.pathname || '/';
+    url.search = pathUrl.search;
+    url.hash = pathUrl.hash;
+    return url.toString();
+  } catch {
+    return baseUrl;
+  }
 }

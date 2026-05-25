@@ -27,7 +27,7 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).toContain('service.disablePortRelay');
     expect(mainTsx).toContain('service.regeneratePortRelayAccessCode');
     expect(mainTsx).toContain('generatePortRelayAccessCode');
-    expect(mainTsx).toContain("import { resolvePortRelayOpenUrl } from './portRelayUrl';");
+    expect(mainTsx).toContain("import { appendPortRelayOpenPath, parsePortRelayLocalHttpUrl, resolvePortRelayOpenUrl } from './portRelayUrl';");
     expect(mainTsx).toContain('resolvePortRelayOpenUrl({');
     expect(mainTsx).toContain('relayUrl: portRelaySnapshot.relayUrl');
     expect(mainTsx).not.toContain('window.open(openUrl, \'_blank\', \'noopener,noreferrer\')');
@@ -72,8 +72,8 @@ describe('port relay settings UI source structure', () => {
   });
 
   test('auto-opens the desktop relay frame after enable and polls opening status silently', () => {
-    expect(mainTsx).toContain('setPortRelayFrameAutoOpenPending(isWide && snapshot.enabled);');
-    expect(mainTsx).toContain("if (!isWide || !portRelayFrameAutoOpenPending) {");
+    expect(mainTsx).toContain('setPortRelayFrameAutoOpenPending((options.openFrame ?? isWide) && snapshot.enabled);');
+    expect(mainTsx).toContain("if (!portRelayFrameAutoOpenPending) {");
     expect(mainTsx).toContain('setPortRelayFrameOpen(true);');
     expect(mainTsx).toContain("portRelaySnapshot.status !== 'Opening'");
     expect(mainTsx).toContain('refreshPortRelayStatus({silent: true}).catch(() => undefined);');
@@ -92,6 +92,20 @@ describe('port relay settings UI source structure', () => {
     expect(primary.indexOf('title="Git"')).toBeLessThan(primary.indexOf('title="Port Relay"'));
     expect(primary).toContain('onClick={handleDesktopPortRelaySelect}');
     expect(secondary).not.toContain('title="Port Relay"');
+  });
+
+  test('turns chat localhost links into relay iframe actions for the current project hub', () => {
+    expect(mainTsx).toContain("import { appendPortRelayOpenPath, parsePortRelayLocalHttpUrl, resolvePortRelayOpenUrl } from './portRelayUrl';");
+    expect(mainTsx).toContain('const [portRelayFramePath, setPortRelayFramePath] = useState(\'\');');
+    expect(mainTsx).toContain('appendPortRelayOpenPath(baseUrl, portRelayFramePath)');
+    expect(mainTsx).toContain('const openChatPortRelayLink = useCallback(async (localUrl: PortRelayLocalHttpUrl) => {');
+    expect(mainTsx).toContain('const hubId = currentProject?.hubId || \'\';');
+    expect(mainTsx).toContain('targetPort: localUrl.targetPort');
+    expect(mainTsx).toContain('framePath: localUrl.path');
+    expect(mainTsx).toContain('openFrame: true');
+    expect(mainTsx).toContain('const relayLocalUrl = parsePortRelayLocalHttpUrl(linkHref);');
+    expect(mainTsx).toContain('openChatPortRelayLink(relayLocalUrl).catch(() => undefined);');
+    expect(mainTsx).toContain('className={[rest.className, relayLocalUrl ? \'chat-relay-link\' : \'\'].filter(Boolean).join(\' \') || undefined}');
   });
 
   test('keeps the mobile relay iframe locked to the visible viewport', () => {
