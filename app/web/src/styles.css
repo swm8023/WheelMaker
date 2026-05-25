@@ -1713,21 +1713,45 @@ body,
 
 .port-relay-panel {
   display: grid;
-  gap: 10px;
+  gap: 12px;
+}
+
+.port-relay-panel-shell {
+  padding: 2px;
 }
 
 .port-relay-section {
+  position: relative;
   display: grid;
   gap: 10px;
   min-width: 0;
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--panel-3) 82%, transparent),
+      color-mix(in srgb, var(--panel) 88%, transparent)
+    );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 5%, transparent);
 }
 
 .port-relay-status-section {
-  padding-bottom: 9px;
+  overflow: hidden;
+  padding-bottom: 10px;
+}
+
+.port-relay-status-section::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: color-mix(in srgb, var(--accent) 78%, white 8%);
+}
+
+.port-relay-control-section {
+  gap: 9px;
 }
 
 .port-relay-header,
@@ -1740,6 +1764,23 @@ body,
 
 .port-relay-header {
   min-height: 28px;
+}
+
+.port-relay-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: color-mix(in srgb, var(--text) 84%, var(--muted) 16%);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.port-relay-section-title .codicon {
+  color: var(--accent);
+  font-size: 13px;
 }
 
 .port-relay-status-pill {
@@ -1775,6 +1816,7 @@ body,
 }
 
 .port-relay-url {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
@@ -1844,11 +1886,23 @@ body,
 .port-relay-code-row input {
   flex: 1 1 auto;
   font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  font-size: 15px;
+  font-weight: 600;
   letter-spacing: 0;
+  text-align: center;
 }
 
 .port-relay-code-section {
   padding: 8px;
+}
+
+.port-relay-copy-btn {
+  min-width: 70px;
+}
+
+.port-relay-copy-btn .codicon {
+  margin-right: 5px;
+  font-size: 13px;
 }
 
 .port-relay-targets-section {
@@ -1880,11 +1934,17 @@ body,
   padding: 3px 4px;
   border: 1px solid transparent;
   border-radius: 6px;
+  background: color-mix(in srgb, var(--panel-3) 38%, transparent);
 }
 
 .port-relay-target-list-row.selected {
   border-color: color-mix(in srgb, var(--accent) 46%, transparent);
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 14%, transparent),
+      color-mix(in srgb, var(--panel-3) 50%, transparent)
+    );
 }
 
 .port-relay-target-list-row input[type='checkbox'] {
@@ -1938,6 +1998,7 @@ body,
 .port-relay-target-list-row.draft {
   border-style: dashed;
   border-color: color-mix(in srgb, var(--border) 70%, transparent);
+  background: transparent;
 }
 
 .port-relay-actions {

@@ -2834,7 +2834,9 @@ function App() {
   const [portRelayDraftHubId, setPortRelayDraftHubId] = useState('');
   const [portRelayDraftPort, setPortRelayDraftPort] = useState('80');
   const [portRelayAccessCode, setPortRelayAccessCode] = useState('');
+  const [portRelayCodeCopied, setPortRelayCodeCopied] = useState(false);
   const [portRelayFrameOpen, setPortRelayFrameOpen] = useState(false);
+  const portRelayCodeCopyTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const portRelayReady = portRelaySnapshot.enabled && portRelaySnapshot.status === 'Up';
   const portRelayFrameUrl = useMemo(() => {
     if (!portRelayReady) {
@@ -2861,6 +2863,12 @@ function App() {
     setDrawerOpen(false);
     setSidebarSettingsOpen(false);
   }, [mobilePortRelayFrameOpen, setDrawerOpen, setSidebarSettingsOpen]);
+
+  useEffect(() => () => {
+    if (portRelayCodeCopyTimerRef.current) {
+      window.clearTimeout(portRelayCodeCopyTimerRef.current);
+    }
+  }, []);
 
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [workspaceProjectMenuOpen, setWorkspaceProjectMenuOpen] = useState(false);
@@ -7774,6 +7782,7 @@ function App() {
   const regeneratePortRelayAccessCode = useCallback(async () => {
     const accessCode = generatePortRelayAccessCode();
     setPortRelayAccessCode(accessCode);
+    setPortRelayCodeCopied(false);
     if (!portRelaySnapshot.enabled) {
       return;
     }
@@ -7788,6 +7797,30 @@ function App() {
       setPortRelayLoading(false);
     }
   }, [applyPortRelaySnapshot, portRelaySnapshot.enabled]);
+
+  const copyPortRelayAccessCode = useCallback(async () => {
+    setPortRelayError('');
+    try {
+      if (!portRelayAccessCode) {
+        const accessCode = generatePortRelayAccessCode();
+        setPortRelayAccessCode(accessCode);
+        await writeTextToClipboard(accessCode);
+      } else {
+        await writeTextToClipboard(portRelayAccessCode);
+      }
+      setPortRelayCodeCopied(true);
+      if (portRelayCodeCopyTimerRef.current) {
+        window.clearTimeout(portRelayCodeCopyTimerRef.current);
+      }
+      portRelayCodeCopyTimerRef.current = window.setTimeout(() => {
+        setPortRelayCodeCopied(false);
+        portRelayCodeCopyTimerRef.current = null;
+      }, 1400);
+    } catch (err) {
+      setPortRelayCodeCopied(false);
+      setPortRelayError(err instanceof Error ? err.message : String(err));
+    }
+  }, [portRelayAccessCode]);
 
   const selectPortRelayTarget = useCallback(async (target: PortRelayTarget) => {
     setSelectedPortRelayTarget(target);
@@ -10649,9 +10682,13 @@ function App() {
       listenPortNumber !== portRelaySnapshot.listenPort;
     return renderSettingsDetailShell(
       'Port Relay',
-      <div className="port-relay-panel">
+      <div className="port-relay-panel port-relay-panel-shell">
         <div className="port-relay-section port-relay-status-section">
           <div className="port-relay-header">
+            <span className="port-relay-section-title">
+              <span className="codicon codicon-radio-tower" aria-hidden="true" />
+              Relay
+            </span>
             <span className={`port-relay-status-pill ${statusClass}`}>{portRelaySnapshot.status}</span>
             {portRelaySnapshot.relayUrl ? <span className="port-relay-url">{portRelaySnapshot.relayUrl}</span> : null}
           </div>
@@ -10666,7 +10703,11 @@ function App() {
         {portRelayError || portRelaySnapshot.error ? (
           <div className="settings-metadata-error">{portRelayError || portRelaySnapshot.error}</div>
         ) : null}
-        <div className="port-relay-section">
+        <div className="port-relay-section port-relay-control-section">
+          <div className="port-relay-section-title">
+            <span className="codicon codicon-key" aria-hidden="true" />
+            Access
+          </div>
           <div className="port-relay-form-grid">
             <label>
               <span>Listen Port</span>
@@ -10698,11 +10739,24 @@ function App() {
             >
               Generate
             </button>
+            <button
+              type="button"
+              className="settings-detail-action-btn port-relay-copy-btn"
+              onClick={() => copyPortRelayAccessCode().catch(() => undefined)}
+              disabled={!portRelayAccessCode}
+              aria-label="Copy port relay access code"
+            >
+              <span className={`codicon ${portRelayCodeCopied ? 'codicon-check' : 'codicon-copy'}`} aria-hidden="true" />
+              {portRelayCodeCopied ? 'Copied' : 'Copy'}
+            </button>
           </div>
         </div>
         <div className="port-relay-section port-relay-targets-section">
           <div className="port-relay-targets-header">
-            <span>Targets</span>
+            <span className="port-relay-section-title">
+              <span className="codicon codicon-server-process" aria-hidden="true" />
+              Targets
+            </span>
             <span>{'Hub -> 127.0.0.1:Port'}</span>
           </div>
           <div className="port-relay-target-list">

@@ -125,4 +125,23 @@ describe('port relay settings UI source structure', () => {
     expect(stylesCss).toContain('.port-relay-target-list-row');
     expect(stylesCss).toContain('.port-relay-target-delete');
   });
+
+  test('adds a copy action beside generated relay access code and polished relay panel styling', () => {
+    const codeRowStart = mainTsx.indexOf('className="port-relay-code-row"');
+    const codeRowEnd = mainTsx.indexOf('</div>', codeRowStart);
+    const codeRow = mainTsx.slice(codeRowStart, codeRowEnd);
+
+    expect(codeRow.indexOf('Generate')).toBeGreaterThan(-1);
+    expect(codeRow.indexOf('Copy')).toBeGreaterThan(codeRow.indexOf('Generate'));
+    expect(mainTsx).toContain('const [portRelayCodeCopied, setPortRelayCodeCopied] = useState(false);');
+    expect(mainTsx).toContain('writeTextToClipboard(portRelayAccessCode);');
+    expect(mainTsx).toContain('aria-label="Copy port relay access code"');
+    expect(mainTsx).toContain("{portRelayCodeCopied ? 'Copied' : 'Copy'}");
+
+    expect(stylesCss).toContain('.port-relay-panel-shell');
+    expect(stylesCss).toContain('.port-relay-control-section');
+    expect(stylesCss).toContain('.port-relay-section-title');
+    expect(stylesCss).toContain('.port-relay-copy-btn');
+    expect(stylesCss).toContain('.port-relay-status-section::before');
+  });
 });
