@@ -2263,6 +2263,68 @@ body,
   border-color: color-mix(in srgb, var(--accent) 42%, transparent);
 }
 
+.port-relay-target-switch-menu {
+  position: absolute;
+  top: 0;
+  right: 58px;
+  width: min(320px, calc(100dvw - 96px));
+  max-height: min(280px, calc(100dvh - 48px));
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+  z-index: 2;
+}
+
+.port-relay-target-switch-item {
+  width: 100%;
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.port-relay-target-switch-item:hover,
+.port-relay-target-switch-item[data-selected='true'] {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.port-relay-target-switch-item[data-loading='true'] {
+  cursor: progress;
+}
+
+.port-relay-target-switch-check {
+  width: 20px;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.port-relay-target-switch-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .gesture-nav-control {
   position: relative;
   width: 48px;

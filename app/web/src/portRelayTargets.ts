@@ -94,6 +94,18 @@ export function removePortRelayTarget(targets: unknown, target: unknown): PortRe
   return existing.filter(item => portRelayTargetKey(item) !== key);
 }
 
+export function orderPortRelayTargetsForMenu(targets: unknown, activeTarget: unknown): PortRelayTarget[] {
+  const existing = normalizePortRelayTargets(targets);
+  const normalizedActiveTarget = normalizePortRelayTarget(activeTarget);
+  if (!normalizedActiveTarget) {
+    return existing;
+  }
+  return [
+    normalizedActiveTarget,
+    ...existing.filter(target => !samePortRelayTarget(target, normalizedActiveTarget)),
+  ];
+}
+
 export function reconcilePortRelayTargetSelection(input: {
   targets: unknown;
   selectedTarget: unknown;

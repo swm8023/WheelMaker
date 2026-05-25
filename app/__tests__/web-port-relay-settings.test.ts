@@ -148,6 +148,29 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).toContain('const portRelayMobileFrameOverlay = mobilePortRelayFrameOpen');
   });
 
+  test('adds a mobile long-press target switch menu for the relay floating button', () => {
+    expect(mainTsx).toContain('orderPortRelayTargetsForMenu(');
+    expect(mainTsx).toContain('const [portRelayTargetMenuOpen, setPortRelayTargetMenuOpen] = useState(false);');
+    expect(mainTsx).toContain('const portRelayTargetMenuTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);');
+    expect(mainTsx).toContain('const handlePortRelayFloatingPointerDown = useCallback(');
+    expect(mainTsx).toContain('if (!mobilePortRelayFrameOpen) {');
+    expect(mainTsx).toContain('setPortRelayTargetMenuOpen(true);');
+    expect(mainTsx).toContain('const handleMobilePortRelayTargetMenuSelect = useCallback(async (target: PortRelayTarget) => {');
+    expect(mainTsx).toContain('if (samePortRelayTarget(activePortRelayTarget, target)) {');
+    expect(mainTsx).toContain("setPortRelayError('Access code is unknown on this device. Generate a new code before switching target.');");
+    expect(mainTsx).toContain("openSettingsDetail('portRelay');");
+    expect(mainTsx).toContain("await enablePortRelayForTarget(target, String(portRelaySnapshot.listenPort || portRelayListenPort), {framePath: '', openFrame: true});");
+    expect(mainTsx).toContain('const portRelayTargetMenu = portRelayTargetMenuOpen && mobilePortRelayFrameOpen');
+    expect(mainTsx).toContain('className="port-relay-target-switch-menu"');
+    expect(mainTsx).toContain('className="port-relay-target-switch-item"');
+    expect(mainTsx).toContain('`${target.hubId}:${target.targetPort}`');
+    expect(mainTsx).toContain('onPointerDown={handlePortRelayFloatingPointerDown}');
+    expect(mainTsx).toContain('{portRelayTargetMenu}');
+
+    expect(stylesCss).toContain('.port-relay-target-switch-menu');
+    expect(stylesCss).toContain('.port-relay-target-switch-item');
+  });
+
   test('keeps relay settings focused on hub local port mapping', () => {
     expect(mainTsx).toContain("const [portRelayTargets, setPortRelayTargets] = useState<PortRelayTarget[]>(");
     expect(mainTsx).toContain("const [selectedPortRelayTarget, setSelectedPortRelayTarget] = useState<PortRelayTarget | null>(");

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import {
   normalizePortRelayTarget,
+  orderPortRelayTargetsForMenu,
   reconcilePortRelayTargetSelection,
   samePortRelayTargets,
   upsertPortRelayTarget,
@@ -62,6 +63,21 @@ describe('port relay target presets', () => {
       [{hubId: 'hub-a', targetPort: 80}],
       [{hubId: 'hub-a', targetPort: 5173}],
     )).toBe(false);
+  });
+
+  test('orders the mobile relay switch menu with the current target first', () => {
+    expect(orderPortRelayTargetsForMenu(
+      [
+        {hubId: 'hub-a', targetPort: 80},
+        {hubId: 'hub-b', targetPort: 5173},
+        {hubId: 'hub-c', targetPort: 3000},
+      ],
+      {hubId: 'hub-b', targetPort: 5173},
+    )).toEqual([
+      {hubId: 'hub-b', targetPort: 5173},
+      {hubId: 'hub-a', targetPort: 80},
+      {hubId: 'hub-c', targetPort: 3000},
+    ]);
   });
 
   test('persists relay target presets under global workspace state', () => {

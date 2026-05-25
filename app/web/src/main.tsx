@@ -19,6 +19,8 @@ import {
   normalizePortRelayListenPort,
   normalizePortRelayTarget,
   normalizePortRelayTargets,
+  orderPortRelayTargetsForMenu,
+  portRelayTargetKey,
   removePortRelayTarget,
   reconcilePortRelayTargetSelection,
   samePortRelayTarget,
@@ -358,6 +360,12 @@ type FloatingDragState = {
   startTop: number;
   currentTop: number;
   cooldownUntil: number;
+};
+type PortRelayTargetMenuPressState = {
+  pointerId: number;
+  originX: number;
+  originY: number;
+  longPressed: boolean;
 };
 type GestureNavigationState = {
   phase: 'pressing' | 'neutral' | 'expanded';
@@ -2850,7 +2858,12 @@ function App() {
   const [portRelayFrameOpen, setPortRelayFrameOpen] = useState(false);
   const [portRelayFramePath, setPortRelayFramePath] = useState('');
   const [portRelayFrameAutoOpenPending, setPortRelayFrameAutoOpenPending] = useState(false);
+  const [portRelayTargetMenuOpen, setPortRelayTargetMenuOpen] = useState(false);
+  const [portRelayMenuSwitchingTarget, setPortRelayMenuSwitchingTarget] = useState<PortRelayTarget | null>(null);
   const portRelayCodeCopyTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const portRelayTargetMenuTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const portRelayTargetMenuPressRef = useRef<PortRelayTargetMenuPressState | null>(null);
+  const portRelayTargetMenuRef = useRef<HTMLDivElement | null>(null);
   const portRelayReady = portRelaySnapshot.enabled && portRelaySnapshot.status === 'Up';
   const portRelayAccessCodeUnknown = portRelaySnapshot.enabled && (
     !portRelayAccessCode ||
@@ -2874,6 +2887,17 @@ function App() {
       portRelayFrameAccessCode,
     );
   }, [address, portRelayFrameAccessCode, portRelayFramePath, portRelayListenPort, portRelayReady, portRelaySnapshot.listenPort, portRelaySnapshot.relayUrl]);
+  const snapshotPortRelayTarget = useMemo(() => normalizePortRelayTarget({
+    hubId: portRelaySnapshot.hubId,
+    targetPort: portRelaySnapshot.targetPort,
+  }), [portRelaySnapshot.hubId, portRelaySnapshot.targetPort]);
+  const activePortRelayTarget = portRelaySnapshot.enabled
+    ? snapshotPortRelayTarget ?? selectedPortRelayTarget
+    : selectedPortRelayTarget ?? snapshotPortRelayTarget;
+  const portRelayTargetMenuTargets = useMemo(
+    () => orderPortRelayTargetsForMenu(portRelayTargets, activePortRelayTarget),
+    [activePortRelayTarget, portRelayTargets],
+  );
   const mobilePortRelayFrameOpen = !isWide && portRelayFrameOpen && !!portRelayFrameUrl;
 
   useEffect(() => {
@@ -2909,6 +2933,48 @@ function App() {
     setDrawerOpen(false);
     setSidebarSettingsOpen(false);
   }, [mobilePortRelayFrameOpen, setDrawerOpen, setSidebarSettingsOpen]);
+
+  const clearPortRelayTargetMenuTimer = useCallback(() => {
+    if (portRelayTargetMenuTimerRef.current) {
+      window.clearTimeout(portRelayTargetMenuTimerRef.current);
+      portRelayTargetMenuTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => {
+    clearPortRelayTargetMenuTimer();
+  }, [clearPortRelayTargetMenuTimer]);
+
+  useEffect(() => {
+    if (!mobilePortRelayFrameOpen) {
+      setPortRelayTargetMenuOpen(false);
+      setPortRelayMenuSwitchingTarget(null);
+    }
+  }, [mobilePortRelayFrameOpen]);
+
+  useEffect(() => {
+    if (!portRelayTargetMenuOpen) {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target instanceof Node ? event.target : null;
+      if (target && portRelayTargetMenuRef.current?.contains(target)) {
+        return;
+      }
+      setPortRelayTargetMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPortRelayTargetMenuOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [portRelayTargetMenuOpen]);
 
   useEffect(() => () => {
     if (portRelayCodeCopyTimerRef.current) {
@@ -5119,6 +5185,7 @@ function App() {
     if (floatingClickCooldownUntilRef.current > Date.now()) {
       return;
     }
+    setPortRelayTargetMenuOpen(false);
     if (!portRelayReady || !portRelayFrameUrl) {
       setPortRelayFrameOpen(false);
       return;
@@ -5127,6 +5194,80 @@ function App() {
     setSidebarSettingsOpen(false);
     setPortRelayFrameOpen(open => !open);
   }, [portRelayFrameUrl, portRelayReady, setDrawerOpen, setSidebarSettingsOpen]);
+  const handlePortRelayFloatingPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      if (isWide || event.button !== 0) {
+        return;
+      }
+      if (floatingClickCooldownUntilRef.current > Date.now()) {
+        return;
+      }
+      if (!mobilePortRelayFrameOpen) {
+        return;
+      }
+      clearPortRelayTargetMenuTimer();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      portRelayTargetMenuPressRef.current = {
+        pointerId: event.pointerId,
+        originX: event.clientX,
+        originY: event.clientY,
+        longPressed: false,
+      };
+      portRelayTargetMenuTimerRef.current = window.setTimeout(() => {
+        const current = portRelayTargetMenuPressRef.current;
+        if (!current || current.pointerId !== event.pointerId) {
+          return;
+        }
+        portRelayTargetMenuPressRef.current = {
+          ...current,
+          longPressed: true,
+        };
+        portRelayTargetMenuTimerRef.current = null;
+        floatingClickCooldownUntilRef.current = Date.now() + 180;
+        setPortRelayTargetMenuOpen(true);
+      }, GESTURE_LONG_PRESS_MS);
+    },
+    [clearPortRelayTargetMenuTimer, isWide, mobilePortRelayFrameOpen],
+  );
+  const handlePortRelayFloatingPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      const current = portRelayTargetMenuPressRef.current;
+      if (!current || current.pointerId !== event.pointerId || current.longPressed) {
+        return;
+      }
+      const distancePx = Math.hypot(event.clientX - current.originX, event.clientY - current.originY);
+      if (distancePx < 10) {
+        return;
+      }
+      clearPortRelayTargetMenuTimer();
+      portRelayTargetMenuPressRef.current = null;
+    },
+    [clearPortRelayTargetMenuTimer],
+  );
+  const finishPortRelayFloatingPress = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      const current = portRelayTargetMenuPressRef.current;
+      if (!current || current.pointerId !== event.pointerId) {
+        return;
+      }
+      clearPortRelayTargetMenuTimer();
+      portRelayTargetMenuPressRef.current = null;
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture can already be released by the browser on some mobile WebViews.
+      }
+      if (!current.longPressed) {
+        return;
+      }
+      event.preventDefault();
+      floatingClickCooldownUntilRef.current = Date.now() + 180;
+    },
+    [clearPortRelayTargetMenuTimer],
+  );
   useEffect(() => {
     if (isWide || !sidebarSettingsOpen) {
       mobileSettingsHistoryKeyRef.current = null;
@@ -7921,6 +8062,33 @@ function App() {
     portRelaySnapshot.enabled,
     portRelaySnapshot.listenPort,
     selectedPortRelayTarget,
+  ]);
+
+  const handleMobilePortRelayTargetMenuSelect = useCallback(async (target: PortRelayTarget) => {
+    setPortRelayTargetMenuOpen(false);
+    if (samePortRelayTarget(activePortRelayTarget, target)) {
+      return;
+    }
+    if (portRelayAccessCodeUnknown) {
+      setPortRelayFrameOpen(false);
+      openSettingsDetail('portRelay');
+      setPortRelayError('Access code is unknown on this device. Generate a new code before switching target.');
+      return;
+    }
+    setPortRelayMenuSwitchingTarget(target);
+    try {
+      await enablePortRelayForTarget(target, String(portRelaySnapshot.listenPort || portRelayListenPort), {framePath: '', openFrame: true});
+      setPortRelayFrameOpen(true);
+    } finally {
+      setPortRelayMenuSwitchingTarget(null);
+    }
+  }, [
+    activePortRelayTarget,
+    enablePortRelayForTarget,
+    openSettingsDetail,
+    portRelayAccessCodeUnknown,
+    portRelayListenPort,
+    portRelaySnapshot.listenPort,
   ]);
 
   const deletePortRelayTarget = useCallback(async (target: PortRelayTarget) => {
@@ -13635,6 +13803,42 @@ function App() {
     </nav>
   ) : null;
 
+  const portRelayTargetMenu = portRelayTargetMenuOpen && mobilePortRelayFrameOpen ? (
+    <div
+      ref={portRelayTargetMenuRef}
+      className="port-relay-target-switch-menu"
+      role="menu"
+      aria-label="Port Relay targets"
+      onPointerDown={event => event.stopPropagation()}
+    >
+      {portRelayTargetMenuTargets.map(target => {
+        const selected = samePortRelayTarget(activePortRelayTarget, target);
+        const switching = samePortRelayTarget(portRelayMenuSwitchingTarget, target);
+        return (
+          <button
+            key={portRelayTargetKey(target)}
+            type="button"
+            className="port-relay-target-switch-item"
+            data-selected={selected}
+            data-loading={switching}
+            role="menuitemradio"
+            aria-checked={selected}
+            onClick={() => handleMobilePortRelayTargetMenuSelect(target).catch(() => undefined)}
+          >
+            <span className="port-relay-target-switch-check" aria-hidden="true">
+              {switching ? (
+                <span className="codicon codicon-loading codicon-modifier-spin" />
+              ) : selected ? (
+                <span className="codicon codicon-check" />
+              ) : null}
+            </span>
+            <span className="port-relay-target-switch-label">{`${target.hubId}:${target.targetPort}`}</span>
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
   const floatingControlStack = !isWide ? (
     <div className="floating-control-stack-layer">
       <div
@@ -13689,7 +13893,11 @@ function App() {
             type="button"
             className="drawer-toggle-bubble port-relay-floating-bubble"
             data-active={portRelayFrameOpen}
-            onPointerDown={handleFloatingControlButtonPointerDown}
+            onPointerDown={handlePortRelayFloatingPointerDown}
+            onPointerMove={handlePortRelayFloatingPointerMove}
+            onPointerUp={finishPortRelayFloatingPress}
+            onPointerCancel={finishPortRelayFloatingPress}
+            onContextMenu={event => event.preventDefault()}
             onClick={handlePortRelayFloatingToggle}
             title={portRelayFrameOpen ? 'Close relay page' : 'Open relay page'}
             aria-label={portRelayFrameOpen ? 'Close relay page' : 'Open relay page'}
@@ -13698,6 +13906,7 @@ function App() {
             <span className="codicon codicon-radio-tower" />
           </button>
         ) : null}
+        {portRelayTargetMenu}
         {mobilePortRelayFrameOpen ? null : gestureNavigation ? (
           <div
             className="gesture-nav-control"
