@@ -8998,12 +8998,15 @@ function App() {
       setError('No agent selected for resume');
       return;
     }
-    setWideProjectActionMenu({
+    setWideProjectActionMenu(current => ({
       projectId: targetProjectId,
       kind: 'resume',
       phase: 'sessions',
       agentType,
-    });
+      popover: current?.projectId === targetProjectId && current.kind === 'resume'
+        ? current.popover
+        : null,
+    }));
     setResumeLoading(true);
     setResumeSessions([]);
     try {

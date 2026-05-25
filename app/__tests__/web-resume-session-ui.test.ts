@@ -2,6 +2,29 @@ import fs from 'fs';
 import path from 'path';
 
 describe('web resume session ui', () => {
+  test('preserves wide resume popover placement when showing resumable sessions', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'main.tsx'),
+      'utf8',
+    );
+    const resumeAgentStart = mainTsx.indexOf(
+      'const handleWideProjectResumeAgent = async (targetProjectId: string, agentType: string) => {',
+    );
+    const resumeAgentEnd = mainTsx.indexOf(
+      'const handleWideProjectResumeImport = async',
+      resumeAgentStart,
+    );
+    expect(resumeAgentStart).toBeGreaterThanOrEqual(0);
+    expect(resumeAgentEnd).toBeGreaterThan(resumeAgentStart);
+
+    const resumeAgentBlock = mainTsx.slice(resumeAgentStart, resumeAgentEnd);
+    expect(resumeAgentBlock).toContain('setWideProjectActionMenu(current => ({');
+    expect(resumeAgentBlock).toContain("current?.projectId === targetProjectId && current.kind === 'resume'");
+    expect(resumeAgentBlock).toContain('popover:');
+    expect(resumeAgentBlock).toContain('? current.popover');
+  });
+
   test('uses project-scoped resume controls without legacy chat pickers', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(
