@@ -116,7 +116,7 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).toContain('commitPortRelayDraftTarget();');
     expect(mainTsx).not.toContain('<span>Target Host</span>');
     expect(mainTsx).not.toContain('onClick={openPortRelay}');
-    expect(mainTsx).toContain("if (settingsDetailView !== 'portRelay' || portRelayAccessCode) {");
+    expect(mainTsx).toContain("if (settingsDetailView !== 'portRelay' || portRelayAccessCode || portRelaySnapshot.enabled) {");
     expect(mainTsx).toContain('setPortRelayAccessCode(generatePortRelayAccessCode());');
 
     expect(stylesCss).toContain('.port-relay-section');
@@ -164,5 +164,17 @@ describe('port relay settings UI source structure', () => {
     expect(statusCss).toContain('text-overflow: ellipsis;');
     expect(stylesCss).toContain('.port-relay-code-row {');
     expect(stylesCss).toContain('flex-wrap: wrap;');
+  });
+
+  test('does not invent an access code for an already-enabled relay from another device', () => {
+    expect(mainTsx).toContain('const [portRelayKnownAccessCodeGeneration, setPortRelayKnownAccessCodeGeneration] = useState<number | null>(null);');
+    expect(mainTsx).toContain('const portRelayAccessCodeUnknown = portRelaySnapshot.enabled &&');
+    expect(mainTsx).toContain("settingsDetailView !== 'portRelay' || portRelayAccessCode || portRelaySnapshot.enabled");
+    expect(mainTsx).toContain('setPortRelayError(\'Access code is unknown on this device. Generate a new code before switching target.\');');
+    expect(mainTsx).toContain("placeholder={portRelayAccessCodeUnknown ? 'Unknown' : ''}");
+    expect(mainTsx).toContain('disabled={portRelayAccessCodeUnknown || !portRelayAccessCode}');
+    expect(mainTsx).toContain("portRelayAccessCodeUnknown ? 'Reset Code' : 'Generate'");
+    expect(mainTsx).toContain("setPortRelayError('Access code is unknown on this device. Generate a new code before copying.');");
+    expect(mainTsx).toContain('setPortRelayKnownAccessCodeGeneration(typeof snapshot.accessCodeGeneration === \'number\' ? snapshot.accessCodeGeneration : null);');
   });
 });

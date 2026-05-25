@@ -2834,10 +2834,18 @@ function App() {
   const [portRelayDraftHubId, setPortRelayDraftHubId] = useState('');
   const [portRelayDraftPort, setPortRelayDraftPort] = useState('80');
   const [portRelayAccessCode, setPortRelayAccessCode] = useState('');
+  const [portRelayKnownAccessCodeGeneration, setPortRelayKnownAccessCodeGeneration] = useState<number | null>(null);
   const [portRelayCodeCopied, setPortRelayCodeCopied] = useState(false);
   const [portRelayFrameOpen, setPortRelayFrameOpen] = useState(false);
   const portRelayCodeCopyTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const portRelayReady = portRelaySnapshot.enabled && portRelaySnapshot.status === 'Up';
+  const portRelayAccessCodeUnknown = portRelaySnapshot.enabled && (
+    !portRelayAccessCode ||
+    (
+      typeof portRelaySnapshot.accessCodeGeneration === 'number' &&
+      portRelayKnownAccessCodeGeneration !== portRelaySnapshot.accessCodeGeneration
+    )
+  );
   const portRelayFrameUrl = useMemo(() => {
     if (!portRelayReady) {
       return '';
@@ -7696,11 +7704,11 @@ function App() {
   }, [settingsDetailView]);
 
   useEffect(() => {
-    if (settingsDetailView !== 'portRelay' || portRelayAccessCode) {
+    if (settingsDetailView !== 'portRelay' || portRelayAccessCode || portRelaySnapshot.enabled) {
       return;
     }
     setPortRelayAccessCode(generatePortRelayAccessCode());
-  }, [portRelayAccessCode, settingsDetailView]);
+  }, [portRelayAccessCode, portRelaySnapshot.enabled, settingsDetailView]);
 
   const commitPortRelayDraftTarget = useCallback((): PortRelayTarget | null => {
     const target = normalizePortRelayTarget({
@@ -7725,6 +7733,10 @@ function App() {
   const enablePortRelayForTarget = useCallback(async (target: PortRelayTarget | null, listenPortValue = portRelayListenPort) => {
     const normalizedTarget = normalizePortRelayTarget(target);
     const listenPort = Number(listenPortValue);
+    if (portRelayAccessCodeUnknown) {
+      setPortRelayError('Access code is unknown on this device. Generate a new code before switching target.');
+      return;
+    }
     const accessCode = portRelayAccessCode || generatePortRelayAccessCode();
     setPortRelayAccessCode(accessCode);
     if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) {
@@ -7753,13 +7765,14 @@ function App() {
         targetPort: normalizedTarget.targetPort,
         accessCode,
       });
+      setPortRelayKnownAccessCodeGeneration(typeof snapshot.accessCodeGeneration === 'number' ? snapshot.accessCodeGeneration : null);
       applyPortRelaySnapshot(snapshot);
     } catch (err) {
       setPortRelayError(err instanceof Error ? err.message : String(err));
     } finally {
       setPortRelayLoading(false);
     }
-  }, [applyPortRelaySnapshot, persistPortRelaySettings, portRelayAccessCode, portRelayListenPort, portRelayTargets]);
+  }, [applyPortRelaySnapshot, persistPortRelaySettings, portRelayAccessCode, portRelayAccessCodeUnknown, portRelayListenPort, portRelayTargets]);
 
   const enablePortRelay = useCallback(async () => {
     const target = selectedPortRelayTarget ?? commitPortRelayDraftTarget();
@@ -7790,6 +7803,7 @@ function App() {
     setPortRelayError('');
     try {
       const snapshot = await service.regeneratePortRelayAccessCode(accessCode);
+      setPortRelayKnownAccessCodeGeneration(typeof snapshot.accessCodeGeneration === 'number' ? snapshot.accessCodeGeneration : null);
       applyPortRelaySnapshot(snapshot);
     } catch (err) {
       setPortRelayError(err instanceof Error ? err.message : String(err));
@@ -7801,6 +7815,11 @@ function App() {
   const copyPortRelayAccessCode = useCallback(async () => {
     setPortRelayError('');
     try {
+      if (portRelayAccessCodeUnknown) {
+        setPortRelayCodeCopied(false);
+        setPortRelayError('Access code is unknown on this device. Generate a new code before copying.');
+        return;
+      }
       if (!portRelayAccessCode) {
         const accessCode = generatePortRelayAccessCode();
         setPortRelayAccessCode(accessCode);
@@ -7820,7 +7839,7 @@ function App() {
       setPortRelayCodeCopied(false);
       setPortRelayError(err instanceof Error ? err.message : String(err));
     }
-  }, [portRelayAccessCode]);
+  }, [portRelayAccessCode, portRelayAccessCodeUnknown]);
 
   const selectPortRelayTarget = useCallback(async (target: PortRelayTarget) => {
     setSelectedPortRelayTarget(target);
@@ -10725,7 +10744,8 @@ function App() {
           </div>
           <div className="port-relay-code-row">
             <input
-              value={portRelayAccessCode}
+              value={portRelayAccessCodeUnknown ? '' : portRelayAccessCode}
+              placeholder={portRelayAccessCodeUnknown ? 'Unknown' : ''}
               readOnly
               aria-label="Port relay access code"
             />
@@ -10735,13 +10755,13 @@ function App() {
               onClick={() => regeneratePortRelayAccessCode().catch(() => undefined)}
               disabled={portRelayLoading}
             >
-              Generate
+              {portRelayAccessCodeUnknown ? 'Reset Code' : 'Generate'}
             </button>
             <button
               type="button"
               className="settings-detail-action-btn port-relay-copy-btn"
               onClick={() => copyPortRelayAccessCode().catch(() => undefined)}
-              disabled={!portRelayAccessCode}
+              disabled={portRelayAccessCodeUnknown || !portRelayAccessCode}
               aria-label="Copy port relay access code"
             >
               <span className={`codicon ${portRelayCodeCopied ? 'codicon-check' : 'codicon-copy'}`} aria-hidden="true" />
