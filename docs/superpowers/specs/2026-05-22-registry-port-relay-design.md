@@ -508,7 +508,7 @@ Hub 侧请求目标服务时设置固定浏览器风格 `User-Agent`。V1 不强
 
 ## App UI
 
-Settings 增加 `Port Relay` detail 页面，并配合桌面左侧工具栏、移动端悬浮按钮打开内嵌 iframe。
+Settings 增加 `Port Relay` detail 页面，并配合桌面左侧工具栏、移动端悬浮按钮打开内嵌 iframe。桌面端 `Port Relay` 是常用工作区切换项，放在左侧 primary activity bar 的 `Git` 下方，而不是和 `Update` / `Skills` / `Settings` 放在 secondary 设置区。
 
 页面状态：
 

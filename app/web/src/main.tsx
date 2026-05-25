@@ -13463,6 +13463,15 @@ function App() {
         >
           <span className="codicon codicon-source-control" />
         </button>
+        <button
+          type="button"
+          className={`desktop-activity-button${sidebarSettingsOpen && settingsDetailView === 'portRelay' ? ' active' : ''}`}
+          onClick={handleDesktopPortRelaySelect}
+          title="Port Relay"
+          aria-label="Port Relay"
+        >
+          <span className="codicon codicon-radio-tower" />
+        </button>
       </div>
       <div className="desktop-activity-secondary">
         <button
@@ -13505,15 +13514,6 @@ function App() {
           aria-label="Token Stats"
         >
           <span className="codicon codicon-graph-line" />
-        </button>
-        <button
-          type="button"
-          className={`desktop-activity-button${sidebarSettingsOpen && settingsDetailView === 'portRelay' ? ' active' : ''}`}
-          onClick={handleDesktopPortRelaySelect}
-          title="Port Relay"
-          aria-label="Port Relay"
-        >
-          <span className="codicon codicon-radio-tower" />
         </button>
         <button
           type="button"

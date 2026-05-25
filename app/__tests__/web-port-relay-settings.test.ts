@@ -80,6 +80,20 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).toContain("const refreshPortRelayStatus = useCallback(async (options?: {silent?: boolean}) => {");
   });
 
+  test('places desktop Port Relay shortcut with primary workspace tabs after Git', () => {
+    const activityBarStart = mainTsx.indexOf('const desktopActivityBar = isWide ? (');
+    const activityBarEnd = mainTsx.indexOf('const floatingControlStack = !isWide ? (', activityBarStart);
+    const activityBar = mainTsx.slice(activityBarStart, activityBarEnd);
+    const primaryStart = activityBar.indexOf('className="desktop-activity-primary"');
+    const secondaryStart = activityBar.indexOf('className="desktop-activity-secondary"');
+    const primary = activityBar.slice(primaryStart, secondaryStart);
+    const secondary = activityBar.slice(secondaryStart);
+
+    expect(primary.indexOf('title="Git"')).toBeLessThan(primary.indexOf('title="Port Relay"'));
+    expect(primary).toContain('onClick={handleDesktopPortRelaySelect}');
+    expect(secondary).not.toContain('title="Port Relay"');
+  });
+
   test('keeps the mobile relay iframe locked to the visible viewport', () => {
     const mobileSurfaceStart = stylesCss.indexOf('.port-relay-frame-surface.mobile');
     const mobileSurfaceEnd = stylesCss.indexOf('.port-relay-frame {', mobileSurfaceStart);

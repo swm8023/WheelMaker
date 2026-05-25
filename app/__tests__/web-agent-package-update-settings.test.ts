@@ -255,8 +255,10 @@ describe('agent package update settings UI source structure', () => {
       activityBar.indexOf('title="Update"'),
     );
     expect(activityBar.indexOf('title="Update"')).toBeLessThan(activityBar.indexOf('title="Token Stats"'));
-    expect(activityBar.indexOf('title="Token Stats"')).toBeLessThan(activityBar.indexOf('title="Port Relay"'));
-    expect(activityBar.indexOf('title="Port Relay"')).toBeLessThan(activityBar.indexOf('title="Settings"'));
+    expect(activityBar.indexOf('title="Token Stats"')).toBeLessThan(activityBar.indexOf('title="Settings"'));
+    expect(activityBar.indexOf('title="Port Relay"')).toBeLessThan(
+      activityBar.indexOf("title={reconnecting ? 'Reconnecting...' : 'Refresh project'}"),
+    );
     expect(activityBar).toContain("settingsDetailView === 'update'");
     expect(activityBar).toContain("settingsDetailView === 'tokenStats'");
     expect(activityBar).toContain("settingsDetailView === 'portRelay'");
