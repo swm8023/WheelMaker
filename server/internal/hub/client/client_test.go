@@ -6026,6 +6026,21 @@ func TestHandleSessionRequestSessionReloadRecordsAgentOnlyReplay(t *testing.T) {
 	}
 }
 
+func TestCodexRecoveryListMatchesEquivalentWindowsCWDSeparators(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	writeCodexSessionFixture(t, homeDir, "sess-mixed-cwd", `D:\Code\WheelMaker\`, "Resume me", "assistant preview")
+
+	items, err := codexRecoverySource{}.List("D:/Code/WheelMaker/", nil)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(items) != 1 || items[0].SessionID != "sess-mixed-cwd" {
+		t.Fatalf("items = %+v, want sess-mixed-cwd", items)
+	}
+}
+
 func TestHandleSessionRequestSessionResumeRejectsCodexAppAfterMigration(t *testing.T) {
 	c := newSessionViewTestClient(t)
 

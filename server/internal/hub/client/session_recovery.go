@@ -213,7 +213,7 @@ func findRecoverySession(items []recoverySession, sessionID string) *recoverySes
 
 func normalizeRecoveryCWD(cwd string) string {
 	s := strings.TrimSpace(cwd)
-	s = strings.TrimRight(s, string(filepath.Separator))
+	s = strings.ReplaceAll(s, "\\", "/")
 	s = strings.TrimRight(s, "/")
 	return strings.ToLower(s)
 }
