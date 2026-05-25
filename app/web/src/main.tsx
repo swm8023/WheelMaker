@@ -28,7 +28,6 @@ import {
 } from './portRelayTargets';
 import { initializePWAFoundation } from './pwa';
 import { DesktopTitleBar } from './shell/DesktopTitleBar';
-import { getDesktopWindowBridge } from './shell/desktopRuntime';
 import { submitDesktopRemoteWebCandidate } from './shell/desktop/webSource';
 import { ResponsiveShell } from './shell/ResponsiveShell';
 import {
@@ -2580,7 +2579,6 @@ function ShikiDiffPane({
 }
 function App() {
   const defaultRegistryAddress = useMemo(() => getDefaultRegistryAddress(), []);
-  const preferDirectPortRelayUrl = useMemo(() => !!getDesktopWindowBridge(), []);
   const persistedGlobal = useMemo(
     () => workspaceStore.getGlobalState(defaultRegistryAddress),
     [defaultRegistryAddress],
@@ -2870,13 +2868,12 @@ function App() {
       relayUrl: portRelaySnapshot.relayUrl,
       registryAddress: address,
       listenPort: portRelaySnapshot.listenPort || portRelayListenPort,
-      preferSnapshotRelayUrl: preferDirectPortRelayUrl,
     });
     return appendPortRelayAutoAuthCode(
       appendPortRelayOpenPath(baseUrl, portRelayFramePath),
       portRelayFrameAccessCode,
     );
-  }, [address, portRelayFrameAccessCode, portRelayFramePath, portRelayListenPort, portRelayReady, portRelaySnapshot.listenPort, portRelaySnapshot.relayUrl, preferDirectPortRelayUrl]);
+  }, [address, portRelayFrameAccessCode, portRelayFramePath, portRelayListenPort, portRelayReady, portRelaySnapshot.listenPort, portRelaySnapshot.relayUrl]);
   const mobilePortRelayFrameOpen = !isWide && portRelayFrameOpen && !!portRelayFrameUrl;
 
   useEffect(() => {

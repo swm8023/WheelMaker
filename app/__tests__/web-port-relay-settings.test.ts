@@ -32,6 +32,9 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).toContain('relayUrl: portRelaySnapshot.relayUrl');
     expect(mainTsx).toContain('const portRelayFrameAccessCode = portRelayAccessCodeUnknown ? \'\' : portRelayAccessCode;');
     expect(mainTsx).toContain('appendPortRelayAutoAuthCode(');
+    expect(mainTsx).not.toContain('preferDirectPortRelayUrl');
+    expect(mainTsx).not.toContain('preferSnapshotRelayUrl');
+    expect(mainTsx).not.toContain('getDesktopWindowBridge');
     expect(mainTsx).not.toContain('window.open(openUrl, \'_blank\', \'noopener,noreferrer\')');
 
     expect(stylesCss).toContain('.port-relay-panel');
