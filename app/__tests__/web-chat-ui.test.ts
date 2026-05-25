@@ -15,6 +15,46 @@ function cssNumericProperty(stylesCss: string, selector: string, property: strin
 }
 
 describe('web chat integration', () => {
+  test('keeps iOS long-press session menus from selecting text or activating the row', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+    const nonSelectableSelectors = [
+      '.desktop-titlebar',
+      '.floating-control-stack',
+      '.registry-debug-panel-header',
+      '.item',
+      '.wide-project-toggle',
+      '.wide-session-row',
+      '.project-session-menu-btn',
+      '.chat-thought-header',
+      '.thinking-header',
+      '.diff-inline .wm-shiki-diff-gutter',
+    ];
+
+    for (const selector of nonSelectableSelectors) {
+      const block = cssRuleBlock(stylesCss, selector);
+      expect(block).toContain('-webkit-touch-callout: none;');
+      expect(block).toContain('-webkit-user-select: none;');
+      expect(block).toContain('user-select: none;');
+    }
+
+    const selectableMarketplaceUrlBlock = cssRuleBlock(stylesCss, '.settings-skills-marketplace-url');
+    expect(selectableMarketplaceUrlBlock).toContain('-webkit-user-select: text;');
+    expect(selectableMarketplaceUrlBlock).toContain('user-select: text;');
+    expect(selectableMarketplaceUrlBlock).not.toContain('-webkit-touch-callout: none;');
+
+    const contextMenuStart = mainTsx.indexOf('const openProjectSessionContextMenu = (');
+    const contextMenuEnd = mainTsx.indexOf('setProjectSessionActionMenu({', contextMenuStart);
+    expect(contextMenuStart).toBeGreaterThanOrEqual(0);
+    expect(contextMenuEnd).toBeGreaterThan(contextMenuStart);
+    const contextMenuBody = mainTsx.slice(contextMenuStart, contextMenuEnd);
+    expect(contextMenuBody).toContain(
+      'projectSessionLongPressTargetRef.current = projectSessionActionKey(targetProjectId, normalizedSessionId);',
+    );
+    expect(contextMenuBody).not.toContain("projectSessionLongPressTargetRef.current = '';");
+  });
+
   test('defines registry session protocol and uses real chat UI instead of placeholder sessions', () => {
     const projectRoot = path.join(__dirname, '..');
     const registryTypes = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'types', 'registry.ts'), 'utf8');

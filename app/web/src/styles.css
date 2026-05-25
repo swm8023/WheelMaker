@@ -177,6 +177,8 @@ body,
   background: color-mix(in srgb, var(--bg) 76%, var(--panel));
   border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   color: var(--text);
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -1492,6 +1494,7 @@ body,
   color: var(--text);
   font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
   font-size: 11px;
+  -webkit-user-select: text;
   user-select: text;
 }
 
@@ -2151,6 +2154,8 @@ body,
   gap: 8px;
   pointer-events: auto;
   touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
   transition: top 180ms ease, transform 180ms ease, opacity 180ms ease, box-shadow 180ms ease;
 }
@@ -2912,6 +2917,8 @@ body,
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--panel-2) 88%, var(--panel-3));
   cursor: move;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -3708,6 +3715,8 @@ body,
   min-height: 22px;
   padding: 0 10px;
   cursor: pointer;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
   white-space: nowrap;
   overflow: hidden;
@@ -3766,6 +3775,8 @@ body,
   padding: 0;
   text-align: left;
   cursor: pointer;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
   touch-action: manipulation;
   transition: transform 140ms ease;
@@ -3980,6 +3991,8 @@ body,
   padding: 0 6px 0 3px;
   cursor: pointer;
   text-align: left;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
   touch-action: manipulation;
   transition: background 120ms ease, color 120ms ease;
@@ -4074,6 +4087,9 @@ body,
   gap: 8px;
   padding: 0 9px;
   cursor: pointer;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
@@ -6111,6 +6127,8 @@ body,
   gap: 6px;
   padding: 2px 0;
   cursor: pointer;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -7217,6 +7235,8 @@ body,
   line-height: 1.4;
   text-align: left;
   cursor: pointer;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
   transition: background-color 100ms ease;
 }
@@ -7361,6 +7381,8 @@ body,
   align-items: center;
   padding: 0 0.45em 0 0.25em;
   border-right: 1px solid rgba(127, 127, 127, 0.22);
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
   color: var(--muted);
   background: transparent;

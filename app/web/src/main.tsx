@@ -5623,11 +5623,11 @@ function App() {
     event.preventDefault();
     event.stopPropagation();
     clearProjectSessionLongPress();
-    projectSessionLongPressTargetRef.current = '';
     const normalizedSessionId = sessionId.trim();
     if (!targetProjectId || !normalizedSessionId) {
       return;
     }
+    projectSessionLongPressTargetRef.current = projectSessionActionKey(targetProjectId, normalizedSessionId);
     setProjectSessionActionMenu({
       projectId: targetProjectId,
       sessionId: normalizedSessionId,
