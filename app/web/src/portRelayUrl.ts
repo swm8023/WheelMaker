@@ -17,12 +17,31 @@ export function buildPortRelayOpenUrl(registryAddress: string, portRelayListenPo
   }
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  const value = hostname.trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+  return value === 'localhost' || value === '127.0.0.1' || value === '::1';
+}
+
+function urlHostIsLoopback(rawUrl: string): boolean {
+  try {
+    return isLoopbackHost(new URL(rawUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function resolvePortRelayOpenUrl(args: {
   relayUrl?: string;
   registryAddress: string;
   listenPort: string | number;
 }): string {
   const relayUrl = args.relayUrl?.trim();
-  if (relayUrl) return relayUrl;
-  return buildPortRelayOpenUrl(args.registryAddress, args.listenPort);
+  const derivedUrl = buildPortRelayOpenUrl(args.registryAddress, args.listenPort);
+  if (relayUrl) {
+    if (urlHostIsLoopback(relayUrl) && derivedUrl && !urlHostIsLoopback(derivedUrl)) {
+      return derivedUrl;
+    }
+    return relayUrl;
+  }
+  return derivedUrl;
 }

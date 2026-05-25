@@ -43,8 +43,10 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).toContain('readPortRelayFloatingSlot()');
     expect(mainTsx).toContain('window.localStorage.setItem(PORT_RELAY_FLOATING_SLOT_STORAGE_KEY, nextSlot);');
     expect(mainTsx).toContain('const [portRelayFrameOpen, setPortRelayFrameOpen] = useState(false);');
+    expect(mainTsx).toContain('const [portRelayFrameAutoOpenPending, setPortRelayFrameAutoOpenPending] = useState(false);');
     expect(mainTsx).toContain("portRelaySnapshot.enabled && portRelaySnapshot.status === 'Up'");
     expect(mainTsx).toContain('setPortRelayFrameOpen(false);');
+    expect(mainTsx).toContain('setPortRelayFrameAutoOpenPending(false);');
     expect(mainTsx).toContain('const handleDesktopPortRelaySelect = useCallback(() => {');
     expect(mainTsx).toContain('setPortRelayFrameOpen(open => !open);');
     expect(mainTsx).toContain('onClick={handleDesktopPortRelaySelect}');
@@ -67,6 +69,15 @@ describe('port relay settings UI source structure', () => {
     expect(stylesCss).toContain('.port-relay-frame-surface.mobile');
     expect(stylesCss).toContain('.port-relay-frame');
     expect(stylesCss).toContain('.port-relay-floating-bubble');
+  });
+
+  test('auto-opens the desktop relay frame after enable and polls opening status silently', () => {
+    expect(mainTsx).toContain('setPortRelayFrameAutoOpenPending(isWide && snapshot.enabled);');
+    expect(mainTsx).toContain("if (!isWide || !portRelayFrameAutoOpenPending) {");
+    expect(mainTsx).toContain('setPortRelayFrameOpen(true);');
+    expect(mainTsx).toContain("portRelaySnapshot.status !== 'Opening'");
+    expect(mainTsx).toContain('refreshPortRelayStatus({silent: true}).catch(() => undefined);');
+    expect(mainTsx).toContain("const refreshPortRelayStatus = useCallback(async (options?: {silent?: boolean}) => {");
   });
 
   test('keeps the mobile relay iframe locked to the visible viewport', () => {

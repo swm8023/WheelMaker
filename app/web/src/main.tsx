@@ -2837,6 +2837,7 @@ function App() {
   const [portRelayKnownAccessCodeGeneration, setPortRelayKnownAccessCodeGeneration] = useState<number | null>(null);
   const [portRelayCodeCopied, setPortRelayCodeCopied] = useState(false);
   const [portRelayFrameOpen, setPortRelayFrameOpen] = useState(false);
+  const [portRelayFrameAutoOpenPending, setPortRelayFrameAutoOpenPending] = useState(false);
   const portRelayCodeCopyTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const portRelayReady = portRelaySnapshot.enabled && portRelaySnapshot.status === 'Up';
   const portRelayAccessCodeUnknown = portRelaySnapshot.enabled && (
@@ -2863,6 +2864,27 @@ function App() {
       setPortRelayFrameOpen(false);
     }
   }, [portRelayFrameUrl, portRelayReady]);
+
+  useEffect(() => {
+    if (!isWide || !portRelayFrameAutoOpenPending) {
+      return;
+    }
+    if (portRelayReady && portRelayFrameUrl) {
+      setPortRelayFrameOpen(true);
+      setPortRelayFrameAutoOpenPending(false);
+      return;
+    }
+    if (!portRelaySnapshot.enabled || portRelaySnapshot.status === 'Error') {
+      setPortRelayFrameAutoOpenPending(false);
+    }
+  }, [
+    isWide,
+    portRelayFrameAutoOpenPending,
+    portRelayFrameUrl,
+    portRelayReady,
+    portRelaySnapshot.enabled,
+    portRelaySnapshot.status,
+  ]);
 
   useEffect(() => {
     if (!mobilePortRelayFrameOpen) {
@@ -7674,18 +7696,37 @@ function App() {
     });
   }, [persistPortRelaySettings, portRelayTargets, selectedPortRelayTarget]);
 
-  const refreshPortRelayStatus = useCallback(async () => {
-    setPortRelayLoading(true);
-    setPortRelayError('');
+  const refreshPortRelayStatus = useCallback(async (options?: {silent?: boolean}) => {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setPortRelayLoading(true);
+      setPortRelayError('');
+    }
     try {
       const snapshot = await service.getPortRelayStatus();
       applyPortRelaySnapshot(snapshot);
     } catch (err) {
-      setPortRelayError(err instanceof Error ? err.message : String(err));
+      if (!silent) {
+        setPortRelayError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
-      setPortRelayLoading(false);
+      if (!silent) {
+        setPortRelayLoading(false);
+      }
     }
   }, [applyPortRelaySnapshot]);
+
+  useEffect(() => {
+    if (!connected || !portRelaySnapshot.enabled || portRelaySnapshot.status !== 'Opening') {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      refreshPortRelayStatus({silent: true}).catch(() => undefined);
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [connected, portRelaySnapshot.enabled, portRelaySnapshot.status, refreshPortRelayStatus]);
 
   useEffect(() => {
     if (selectedPortRelayTarget || portRelayTargets.length === 0) {
@@ -7766,13 +7807,14 @@ function App() {
         accessCode,
       });
       setPortRelayKnownAccessCodeGeneration(typeof snapshot.accessCodeGeneration === 'number' ? snapshot.accessCodeGeneration : null);
+      setPortRelayFrameAutoOpenPending(isWide && snapshot.enabled);
       applyPortRelaySnapshot(snapshot);
     } catch (err) {
       setPortRelayError(err instanceof Error ? err.message : String(err));
     } finally {
       setPortRelayLoading(false);
     }
-  }, [applyPortRelaySnapshot, persistPortRelaySettings, portRelayAccessCode, portRelayAccessCodeUnknown, portRelayListenPort, portRelayTargets]);
+  }, [applyPortRelaySnapshot, isWide, persistPortRelaySettings, portRelayAccessCode, portRelayAccessCodeUnknown, portRelayListenPort, portRelayTargets]);
 
   const enablePortRelay = useCallback(async () => {
     const target = selectedPortRelayTarget ?? commitPortRelayDraftTarget();
@@ -7874,6 +7916,7 @@ function App() {
     setPortRelayError('');
     try {
       const snapshot = await service.disablePortRelay();
+      setPortRelayFrameAutoOpenPending(false);
       applyPortRelaySnapshot(snapshot);
     } catch (err) {
       setPortRelayError(err instanceof Error ? err.message : String(err));

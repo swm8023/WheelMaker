@@ -12,4 +12,20 @@ describe('port relay URL helpers', () => {
       listenPort: 28801,
     })).toBe('https://relay.example.com:28801/');
   });
+
+  test('derives from external registry address when snapshot relay URL is loopback', () => {
+    expect(resolvePortRelayOpenUrl({
+      relayUrl: 'http://127.0.0.1:28801/',
+      registryAddress: 'wss://vimernas.myqnapcloud.com/ws',
+      listenPort: 28801,
+    })).toBe('https://vimernas.myqnapcloud.com:28801/');
+  });
+
+  test('keeps loopback relay URL for local desktop registry connections', () => {
+    expect(resolvePortRelayOpenUrl({
+      relayUrl: 'http://127.0.0.1:28801/',
+      registryAddress: 'ws://127.0.0.1:9630/ws',
+      listenPort: 28801,
+    })).toBe('http://127.0.0.1:28801/');
+  });
 });
