@@ -48,6 +48,7 @@ import {
   encodeChatSessionKey,
   type ChatSessionKey,
 } from './chat/chatSessionKey';
+import {buildMobileChatQuickSwitchSections} from './chat/mobileChatQuickSwitch';
 import { resolveChatSessionTitle } from './chat/chatSessionTitle';
 import {decodeSessionTurnToMessage, normalizeSessionMessagePayload} from './chat/chatWire';
 import {
@@ -362,6 +363,12 @@ type FloatingDragState = {
   cooldownUntil: number;
 };
 type PortRelayTargetMenuPressState = {
+  pointerId: number;
+  originX: number;
+  originY: number;
+  longPressed: boolean;
+};
+type ChatQuickSwitchPressState = {
   pointerId: number;
   originX: number;
   originY: number;
@@ -3132,6 +3139,10 @@ function App() {
   const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');
   const [chatHubMenuOpen, setChatHubMenuOpen] = useState(false);
   const chatHubMenuRef = useRef<HTMLDivElement | null>(null);
+  const [chatQuickSwitchMenuOpen, setChatQuickSwitchMenuOpen] = useState(false);
+  const chatQuickSwitchTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const chatQuickSwitchPressRef = useRef<ChatQuickSwitchPressState | null>(null);
+  const chatQuickSwitchMenuRef = useRef<HTMLDivElement | null>(null);
   const [chatSlashActiveIndex, setChatSlashActiveIndex] = useState(0);
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
   const [resumeLoading, setResumeLoading] = useState(false);
@@ -3809,6 +3820,17 @@ function App() {
     [projects],
   );
   const sortedProjectItems = useMemo(() => sortProjectsByPin(projects, pinnedProjectIds), [projects, pinnedProjectIds]);
+  const mobileChatQuickSwitchSections = useMemo(
+    () => buildMobileChatQuickSwitchSections({
+      projects: sortedProjectItems,
+      sessionsByProjectId: projectSessionsByProjectId,
+      limit: 5,
+    }),
+    [projectSessionsByProjectId, sortedProjectItems],
+  );
+  const chatQuickSwitchMenuStyle = useMemo<React.CSSProperties>(() => ({
+    top: portRelayReady && portRelayFrameUrl ? 56 : 0,
+  }), [portRelayFrameUrl, portRelayReady]);
   const projectSessionCountKey = useMemo(
     () => Object.entries(projectSessionsByProjectId)
       .map(([entryProjectId, sessions]) => `${entryProjectId}:${sessions.length}`)
@@ -4734,6 +4756,12 @@ function App() {
       floatingCooldownTimerRef.current = null;
     }, remaining);
   }, [clearFloatingCooldownTimer]);
+  const clearChatQuickSwitchTimer = useCallback(() => {
+    if (chatQuickSwitchTimerRef.current) {
+      window.clearTimeout(chatQuickSwitchTimerRef.current);
+      chatQuickSwitchTimerRef.current = null;
+    }
+  }, []);
   const beginFloatingPress = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
       if (isWide || event.button !== 0) {
@@ -4773,6 +4801,109 @@ function App() {
     },
     [beginFloatingPress],
   );
+  const handleChatQuickSwitchPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      if (isWide || event.button !== 0) {
+        return;
+      }
+      if (floatingClickCooldownUntilRef.current > Date.now()) {
+        return;
+      }
+      clearChatQuickSwitchTimer();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      chatQuickSwitchPressRef.current = {
+        pointerId: event.pointerId,
+        originX: event.clientX,
+        originY: event.clientY,
+        longPressed: false,
+      };
+      chatQuickSwitchTimerRef.current = window.setTimeout(() => {
+        const current = chatQuickSwitchPressRef.current;
+        if (!current || current.pointerId !== event.pointerId) {
+          return;
+        }
+        chatQuickSwitchPressRef.current = {
+          ...current,
+          longPressed: true,
+        };
+        chatQuickSwitchTimerRef.current = null;
+        floatingClickCooldownUntilRef.current = Date.now() + 180;
+        setPortRelayTargetMenuOpen(false);
+        setChatQuickSwitchMenuOpen(true);
+      }, GESTURE_LONG_PRESS_MS);
+    },
+    [clearChatQuickSwitchTimer, isWide],
+  );
+  const handleChatQuickSwitchPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      const current = chatQuickSwitchPressRef.current;
+      if (!current || current.pointerId !== event.pointerId || current.longPressed) {
+        return;
+      }
+      const distancePx = Math.hypot(event.clientX - current.originX, event.clientY - current.originY);
+      if (distancePx < 10) {
+        return;
+      }
+      clearChatQuickSwitchTimer();
+      chatQuickSwitchPressRef.current = null;
+    },
+    [clearChatQuickSwitchTimer],
+  );
+  const finishChatQuickSwitchPress = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      const current = chatQuickSwitchPressRef.current;
+      if (!current || current.pointerId !== event.pointerId) {
+        return;
+      }
+      clearChatQuickSwitchTimer();
+      chatQuickSwitchPressRef.current = null;
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture can already be released by the browser on some mobile WebViews.
+      }
+      if (!current.longPressed) {
+        return;
+      }
+      event.preventDefault();
+      floatingClickCooldownUntilRef.current = Date.now() + 180;
+    },
+    [clearChatQuickSwitchTimer],
+  );
+  useEffect(() => () => {
+    clearChatQuickSwitchTimer();
+  }, [clearChatQuickSwitchTimer]);
+  useEffect(() => {
+    if (mobilePortRelayFrameOpen) {
+      setChatQuickSwitchMenuOpen(false);
+    }
+  }, [mobilePortRelayFrameOpen]);
+  useEffect(() => {
+    if (!chatQuickSwitchMenuOpen) {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target instanceof Node ? event.target : null;
+      if (target && chatQuickSwitchMenuRef.current?.contains(target)) {
+        return;
+      }
+      setChatQuickSwitchMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setChatQuickSwitchMenuOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [chatQuickSwitchMenuOpen]);
   const handleFloatingPointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       const current = floatingDragStateRef.current;
@@ -4882,6 +5013,7 @@ function App() {
     if (floatingClickCooldownUntilRef.current > Date.now()) {
       return;
     }
+    setChatQuickSwitchMenuOpen(false);
     if (nextTab === tab) {
       if (nextTab === 'chat' && drawerOpen) {
         setDrawerOpen(false);
@@ -9114,6 +9246,20 @@ function App() {
   const selectWideProjectSession = async (targetProjectId: string, sessionId: string) => {
     await selectProjectChatSession(targetProjectId, sessionId);
   };
+
+  const handleMobileChatQuickSwitchSelect = useCallback(async (targetProjectId: string, session: RegistryChatSession) => {
+    setChatQuickSwitchMenuOpen(false);
+    setPortRelayTargetMenuOpen(false);
+    setPortRelayFrameOpen(false);
+    setSidebarSettingsOpen(false);
+    setDrawerOpen(false);
+    setTab('chat');
+    const currentKey = selectedChatKeyRef.current;
+    if (currentKey?.projectId === targetProjectId && currentKey.sessionId === session.sessionId) {
+      return;
+    }
+    await selectProjectChatSession(targetProjectId, session.sessionId, {closeMobileDrawer: true});
+  }, [selectProjectChatSession, setDrawerOpen, setSidebarSettingsOpen, setTab]);
 
   const handleProjectCreateSession = async (
     targetProjectId: string,
@@ -13839,6 +13985,59 @@ function App() {
     </div>
   ) : null;
 
+  const chatQuickSwitchMenu = chatQuickSwitchMenuOpen && !mobilePortRelayFrameOpen ? (
+    <div
+      ref={chatQuickSwitchMenuRef}
+      className="chat-quick-switch-menu"
+      style={chatQuickSwitchMenuStyle}
+      role="menu"
+      aria-label="Recent chats"
+      onPointerDown={event => event.stopPropagation()}
+    >
+      {mobileChatQuickSwitchSections.length === 0 ? (
+        <div className="chat-quick-switch-empty">No chats</div>
+      ) : (
+        mobileChatQuickSwitchSections.map(section => (
+          <div key={`chat-quick-switch-project:${section.projectId}`} className="chat-quick-switch-project">
+            <div className="chat-quick-switch-project-name" title={section.projectName}>
+              {section.projectName}
+            </div>
+            <div className="chat-quick-switch-session-list">
+              {section.sessions.map(session => {
+                const selected = selectedChatEncodedKey === buildChatRuntimeKey(section.projectId, session.sessionId);
+                const unreadCount = session.unreadCount ?? 0;
+                return (
+                  <button
+                    key={`chat-quick-switch-session:${section.projectId}:${session.sessionId}`}
+                    type="button"
+                    className="chat-quick-switch-item"
+                    data-selected={selected}
+                    role="menuitem"
+                    onClick={() => handleMobileChatQuickSwitchSelect(section.projectId, session).catch(() => undefined)}
+                  >
+                    {renderSessionStateMarker(session, section.projectId)}
+                    <span className="chat-quick-switch-title">
+                      {resolveSessionDisplayTitle(session) || session.sessionId}
+                    </span>
+                    <span className="chat-quick-switch-time" title={session.updatedAt || ''}>
+                      {formatCompactRelativeAge(session.updatedAt)}
+                    </span>
+                    {unreadCount > 0 ? (
+                      <span className="chat-quick-switch-unread">{Math.min(99, unreadCount)}</span>
+                    ) : null}
+                    {selected ? (
+                      <span className="chat-quick-switch-selected codicon codicon-check" aria-label="Current chat" />
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  ) : null;
+
   const floatingControlStack = !isWide ? (
     <div className="floating-control-stack-layer">
       <div
@@ -13907,6 +14106,7 @@ function App() {
           </button>
         ) : null}
         {portRelayTargetMenu}
+        {chatQuickSwitchMenu}
         {mobilePortRelayFrameOpen ? null : gestureNavigation ? (
           <div
             className="gesture-nav-control"
@@ -13983,7 +14183,11 @@ function App() {
                 type="button"
                 className="floating-nav-button"
                 data-active={tab === 'chat'}
-                onPointerDown={handleFloatingControlButtonPointerDown}
+                onPointerDown={handleChatQuickSwitchPointerDown}
+                onPointerMove={handleChatQuickSwitchPointerMove}
+                onPointerUp={finishChatQuickSwitchPress}
+                onPointerCancel={finishChatQuickSwitchPress}
+                onContextMenu={event => event.preventDefault()}
                 onClick={() => handleFloatingNavSelect('chat')}
                 title="Chat"
                 aria-label="Chat"
