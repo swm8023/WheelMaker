@@ -100,14 +100,20 @@ describe('port relay settings UI source structure', () => {
   });
 
   test('keeps relay settings focused on hub local port mapping', () => {
-    expect(mainTsx).toContain("const [portRelayTargetPort, setPortRelayTargetPort] = useState('80');");
+    expect(mainTsx).toContain("const [portRelayTargets, setPortRelayTargets] = useState<PortRelayTarget[]>(");
+    expect(mainTsx).toContain("const [selectedPortRelayTarget, setSelectedPortRelayTarget] = useState<PortRelayTarget | null>(");
+    expect(mainTsx).toContain("const [portRelayDraftPort, setPortRelayDraftPort] = useState('80');");
     expect(mainTsx).not.toContain('const [portRelayTargetHost, setPortRelayTargetHost]');
     expect(mainTsx).not.toContain('setPortRelayTargetHost(snapshot.targetHost)');
     expect(mainTsx).toContain("targetHost: '127.0.0.1',");
-    expect(mainTsx).toContain("const portRelayTargetDisplay = selectedHubId ? `${selectedHubId} -> 127.0.0.1:${portRelayTargetPort || '80'}` : 'No hub';");
-    expect(mainTsx).toContain('<span>Hub Local Port</span>');
+    expect(mainTsx).toContain("const portRelayTargetDisplay = selectedTarget ? `${selectedTarget.hubId} -> 127.0.0.1:${selectedTarget.targetPort}` : 'No target';");
     expect(mainTsx).toContain('<span>Target</span>');
     expect(mainTsx).toContain('{portRelayTargetDisplay}');
+    expect(mainTsx).toContain('className="port-relay-target-list"');
+    expect(mainTsx).toContain('type="checkbox"');
+    expect(mainTsx).toContain('selectPortRelayTarget(target)');
+    expect(mainTsx).toContain('deletePortRelayTarget(target)');
+    expect(mainTsx).toContain('commitPortRelayDraftTarget();');
     expect(mainTsx).not.toContain('<span>Target Host</span>');
     expect(mainTsx).not.toContain('onClick={openPortRelay}');
     expect(mainTsx).toContain("if (settingsDetailView !== 'portRelay' || portRelayAccessCode) {");
@@ -116,5 +122,7 @@ describe('port relay settings UI source structure', () => {
     expect(stylesCss).toContain('.port-relay-section');
     expect(stylesCss).toContain('.port-relay-target-row');
     expect(stylesCss).toContain('.port-relay-target-value');
+    expect(stylesCss).toContain('.port-relay-target-list-row');
+    expect(stylesCss).toContain('.port-relay-target-delete');
   });
 });

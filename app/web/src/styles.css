@@ -1784,6 +1784,11 @@ body,
   white-space: nowrap;
 }
 
+.port-relay-pending-note {
+  color: #d29922;
+  font-size: 11.5px;
+}
+
 .port-relay-target-row {
   display: grid;
   gap: 5px;
@@ -1809,7 +1814,7 @@ body,
 
 .port-relay-form-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
@@ -1823,7 +1828,10 @@ body,
 
 .port-relay-form-grid input,
 .port-relay-form-grid select,
-.port-relay-code-row input {
+.port-relay-code-row input,
+.port-relay-target-list-row select,
+.port-relay-target-list-row input[type='text'],
+.port-relay-target-list-row input[inputmode='numeric'] {
   min-width: 0;
   height: 30px;
   padding: 0 8px;
@@ -1841,6 +1849,95 @@ body,
 
 .port-relay-code-section {
   padding: 8px;
+}
+
+.port-relay-targets-section {
+  gap: 8px;
+}
+
+.port-relay-targets-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.port-relay-target-list {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.port-relay-target-list-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 74px 28px;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.port-relay-target-list-row.selected {
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.port-relay-target-list-row input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.port-relay-target-hub,
+.port-relay-target-port {
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px 7px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel-3) 70%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.port-relay-target-port {
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  text-align: right;
+}
+
+.port-relay-target-delete {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.port-relay-target-delete:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.port-relay-target-check-spacer,
+.port-relay-target-delete-spacer {
+  width: 22px;
+  height: 1px;
+}
+
+.port-relay-target-list-row.draft {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
 }
 
 .port-relay-actions {

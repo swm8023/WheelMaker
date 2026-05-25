@@ -15,6 +15,12 @@ import {
   isChatFontId,
   type ChatFontId,
 } from '../chat/chatTypography';
+import {
+  normalizePortRelayListenPort,
+  normalizePortRelayTarget,
+  normalizePortRelayTargets,
+  type PortRelayTarget,
+} from '../portRelayTargets';
 
 export type PersistedTab = 'chat' | 'file' | 'git';
 export type PersistedThemeMode = 'dark' | 'light';
@@ -78,6 +84,9 @@ export type PersistedGlobalState = {
   collapsedProjectIds: string[];
   desktopCollapsedProjectIds: string[];
   pinnedProjectIds: string[];
+  portRelayTargets: PortRelayTarget[];
+  selectedPortRelayTarget: PortRelayTarget | null;
+  portRelayListenPort: number;
 };
 
 export type PersistedChatCursor = {
@@ -148,6 +157,9 @@ const GLOBAL_KEYS = {
   collapsedProjectIds: 'collapsedProjectIds',
   desktopCollapsedProjectIds: 'desktopCollapsedProjectIds',
   pinnedProjectIds: 'pinnedProjectIds',
+  portRelayTargets: 'portRelayTargets',
+  selectedPortRelayTarget: 'selectedPortRelayTarget',
+  portRelayListenPort: 'portRelayListenPort',
 } as const;
 
 function defaultGlobalState(): PersistedGlobalState {
@@ -177,6 +189,9 @@ function defaultGlobalState(): PersistedGlobalState {
     collapsedProjectIds: [],
     desktopCollapsedProjectIds: [],
     pinnedProjectIds: [],
+    portRelayTargets: [],
+    selectedPortRelayTarget: null,
+    portRelayListenPort: 28810,
   };
 }
 
@@ -383,6 +398,9 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     collapsedProjectIds,
     desktopCollapsedProjectIds: collapsedProjectIds,
     pinnedProjectIds,
+    portRelayTargets: normalizePortRelayTargets(input.portRelayTargets),
+    selectedPortRelayTarget: normalizePortRelayTarget(input.selectedPortRelayTarget),
+    portRelayListenPort: normalizePortRelayListenPort(input.portRelayListenPort, base.portRelayListenPort),
   };
 }
 
@@ -847,6 +865,9 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(this.state.global.collapsedProjectIds), updatedAt: now},
       {k: GLOBAL_KEYS.desktopCollapsedProjectIds, v: serialize(this.state.global.desktopCollapsedProjectIds), updatedAt: now},
       {k: GLOBAL_KEYS.pinnedProjectIds, v: serialize(this.state.global.pinnedProjectIds), updatedAt: now},
+      {k: GLOBAL_KEYS.portRelayTargets, v: serialize(this.state.global.portRelayTargets), updatedAt: now},
+      {k: GLOBAL_KEYS.selectedPortRelayTarget, v: serialize(this.state.global.selectedPortRelayTarget), updatedAt: now},
+      {k: GLOBAL_KEYS.portRelayListenPort, v: serialize(this.state.global.portRelayListenPort), updatedAt: now},
     ];
 
     for (const row of globalRows) {
@@ -1191,6 +1212,9 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(next.collapsedProjectIds), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.desktopCollapsedProjectIds, v: serialize(next.desktopCollapsedProjectIds), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.pinnedProjectIds, v: serialize(next.pinnedProjectIds), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.portRelayTargets, v: serialize(next.portRelayTargets), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedPortRelayTarget, v: serialize(next.selectedPortRelayTarget), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.portRelayListenPort, v: serialize(next.portRelayListenPort), updatedAt: now});
     }).catch(() => undefined);
   }
 

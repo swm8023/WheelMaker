@@ -1631,6 +1631,8 @@ App 侧不使用 `query`。如果 `operation.running=true`，继续定时发 `sc
 
 `relay.*` 方法由 `client` 角色调用，用于管理 Registry 进程上的单例端口中转。它不按 `projectId` 路由，也不允许 `hub` 或 `monitor` 角色调用。Registry 只暴露公开方法；内部下发给 Hub 的 `relay.open` / `relay.close` 不属于 Client API。
 
+App 可以在本地保存多个 `{hubId, targetPort}` target preset，但这只是 UI 状态。协议层仍然只有一个 active relay slot；切换目标时 Client 继续调用 `relay.enable` 替换当前 slot。
+
 #### 5.13.1 `relay.status`
 
 查询当前 relay slot，不改变状态，不返回访问码明文。

@@ -14,6 +14,17 @@ declare const require: (id: string) => any;
 
 import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
 import { resolvePortRelayOpenUrl } from './portRelayUrl';
+import {
+  normalizePortRelayListenPort,
+  normalizePortRelayTarget,
+  normalizePortRelayTargets,
+  removePortRelayTarget,
+  reconcilePortRelayTargetSelection,
+  samePortRelayTarget,
+  samePortRelayTargets,
+  upsertPortRelayTarget,
+  type PortRelayTarget,
+} from './portRelayTargets';
 import { initializePWAFoundation } from './pwa';
 import { DesktopTitleBar } from './shell/DesktopTitleBar';
 import { submitDesktopRemoteWebCandidate } from './shell/desktop/webSource';
@@ -2813,9 +2824,15 @@ function App() {
   const [portRelaySnapshot, setPortRelaySnapshot] = useState<RegistryPortRelaySnapshot>(DEFAULT_PORT_RELAY_SNAPSHOT);
   const [portRelayLoading, setPortRelayLoading] = useState(false);
   const [portRelayError, setPortRelayError] = useState('');
-  const [portRelayListenPort, setPortRelayListenPort] = useState('28810');
-  const [portRelayHubId, setPortRelayHubId] = useState('');
-  const [portRelayTargetPort, setPortRelayTargetPort] = useState('80');
+  const [portRelayListenPort, setPortRelayListenPort] = useState(String(persistedGlobal.portRelayListenPort || 28810));
+  const [portRelayTargets, setPortRelayTargets] = useState<PortRelayTarget[]>(
+    normalizePortRelayTargets(persistedGlobal.portRelayTargets),
+  );
+  const [selectedPortRelayTarget, setSelectedPortRelayTarget] = useState<PortRelayTarget | null>(
+    normalizePortRelayTarget(persistedGlobal.selectedPortRelayTarget),
+  );
+  const [portRelayDraftHubId, setPortRelayDraftHubId] = useState('');
+  const [portRelayDraftPort, setPortRelayDraftPort] = useState('80');
   const [portRelayAccessCode, setPortRelayAccessCode] = useState('');
   const [portRelayFrameOpen, setPortRelayFrameOpen] = useState(false);
   const portRelayReady = portRelaySnapshot.enabled && portRelaySnapshot.status === 'Up';
@@ -2826,9 +2843,9 @@ function App() {
     return resolvePortRelayOpenUrl({
       relayUrl: portRelaySnapshot.relayUrl,
       registryAddress: address,
-      listenPort: portRelayListenPort,
+      listenPort: portRelaySnapshot.listenPort || portRelayListenPort,
     });
-  }, [address, portRelayListenPort, portRelayReady, portRelaySnapshot.relayUrl]);
+  }, [address, portRelayListenPort, portRelayReady, portRelaySnapshot.listenPort, portRelaySnapshot.relayUrl]);
   const mobilePortRelayFrameOpen = !isWide && portRelayFrameOpen && !!portRelayFrameUrl;
 
   useEffect(() => {
@@ -7598,21 +7615,48 @@ function App() {
     return deriveRegistryHubIds(snapshot.hubs);
   }, []);
 
+  const persistPortRelaySettings = useCallback((patch: {
+    targets?: PortRelayTarget[];
+    selectedTarget?: PortRelayTarget | null;
+    listenPort?: string | number;
+  }) => {
+    const nextListenPort = normalizePortRelayListenPort(
+      patch.listenPort ?? portRelayListenPort,
+      normalizePortRelayListenPort(portRelayListenPort),
+    );
+    workspaceStore.rememberGlobalState({
+      portRelayTargets: patch.targets ?? portRelayTargets,
+      selectedPortRelayTarget: patch.selectedTarget !== undefined ? patch.selectedTarget : selectedPortRelayTarget,
+      portRelayListenPort: nextListenPort,
+    });
+  }, [portRelayListenPort, portRelayTargets, selectedPortRelayTarget]);
+
   const applyPortRelaySnapshot = useCallback((snapshot: RegistryPortRelaySnapshot) => {
     setPortRelaySnapshot(snapshot);
+    if (typeof snapshot.listenPort === 'number') {
+      setPortRelayListenPort(String(snapshot.listenPort));
+      persistPortRelaySettings({listenPort: snapshot.listenPort});
+    }
     if (!snapshot.enabled) {
       return;
     }
-    if (typeof snapshot.listenPort === 'number') {
-      setPortRelayListenPort(String(snapshot.listenPort));
+    const reconciled = reconcilePortRelayTargetSelection({
+      targets: portRelayTargets,
+      selectedTarget: selectedPortRelayTarget,
+      snapshot,
+    });
+    if (!samePortRelayTargets(portRelayTargets, reconciled.targets)) {
+      setPortRelayTargets(reconciled.targets);
     }
-    if (snapshot.hubId) {
-      setPortRelayHubId(snapshot.hubId);
+    if (!samePortRelayTarget(selectedPortRelayTarget, reconciled.selectedTarget)) {
+      setSelectedPortRelayTarget(reconciled.selectedTarget);
     }
-    if (typeof snapshot.targetPort === 'number') {
-      setPortRelayTargetPort(String(snapshot.targetPort));
-    }
-  }, []);
+    persistPortRelaySettings({
+      targets: reconciled.targets,
+      selectedTarget: reconciled.selectedTarget,
+      listenPort: snapshot.listenPort,
+    });
+  }, [persistPortRelaySettings, portRelayTargets, selectedPortRelayTarget]);
 
   const refreshPortRelayStatus = useCallback(async () => {
     setPortRelayLoading(true);
@@ -7628,21 +7672,20 @@ function App() {
   }, [applyPortRelaySnapshot]);
 
   useEffect(() => {
-    if (portRelayHubId || registryHubs.length === 0) {
+    if (selectedPortRelayTarget || portRelayTargets.length === 0) {
       return;
     }
-    const firstHub = deriveRegistryHubIds(registryHubs)[0];
-    if (firstHub) {
-      setPortRelayHubId(firstHub);
-    }
-  }, [portRelayHubId, registryHubs]);
+    const nextTarget = portRelayTargets[0];
+    setSelectedPortRelayTarget(nextTarget);
+    persistPortRelaySettings({selectedTarget: nextTarget});
+  }, [persistPortRelaySettings, portRelayTargets, selectedPortRelayTarget]);
 
   useEffect(() => {
     if (settingsDetailView !== 'portRelay') {
       return;
     }
     refreshPortRelayStatus().catch(() => undefined);
-  }, [settingsDetailView, refreshPortRelayStatus]);
+  }, [settingsDetailView]);
 
   useEffect(() => {
     if (settingsDetailView !== 'portRelay' || portRelayAccessCode) {
@@ -7651,31 +7694,55 @@ function App() {
     setPortRelayAccessCode(generatePortRelayAccessCode());
   }, [portRelayAccessCode, settingsDetailView]);
 
-  const enablePortRelay = useCallback(async () => {
-    const listenPort = Number(portRelayListenPort);
-    const targetPort = Number(portRelayTargetPort);
+  const commitPortRelayDraftTarget = useCallback((): PortRelayTarget | null => {
+    const target = normalizePortRelayTarget({
+      hubId: portRelayDraftHubId,
+      targetPort: portRelayDraftPort,
+    });
+    if (!target) {
+      return null;
+    }
+    const nextTargets = upsertPortRelayTarget(portRelayTargets, target);
+    setPortRelayTargets(nextTargets);
+    setSelectedPortRelayTarget(target);
+    setPortRelayDraftHubId('');
+    setPortRelayDraftPort('80');
+    persistPortRelaySettings({
+      targets: nextTargets,
+      selectedTarget: target,
+    });
+    return target;
+  }, [persistPortRelaySettings, portRelayDraftHubId, portRelayDraftPort, portRelayTargets]);
+
+  const enablePortRelayForTarget = useCallback(async (target: PortRelayTarget | null, listenPortValue = portRelayListenPort) => {
+    const normalizedTarget = normalizePortRelayTarget(target);
+    const listenPort = Number(listenPortValue);
     const accessCode = portRelayAccessCode || generatePortRelayAccessCode();
     setPortRelayAccessCode(accessCode);
     if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) {
       setPortRelayError('Listen port must be in 1..65535.');
       return;
     }
-    if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
-      setPortRelayError('Target port must be in 1..65535.');
+    if (!normalizedTarget) {
+      setPortRelayError('Target is required.');
       return;
     }
-    if (!portRelayHubId) {
-      setPortRelayError('Hub is required.');
-      return;
-    }
+    const nextTargets = upsertPortRelayTarget(portRelayTargets, normalizedTarget);
+    setPortRelayTargets(nextTargets);
+    setSelectedPortRelayTarget(normalizedTarget);
+    persistPortRelaySettings({
+      targets: nextTargets,
+      selectedTarget: normalizedTarget,
+      listenPort,
+    });
     setPortRelayLoading(true);
     setPortRelayError('');
     try {
       const snapshot = await service.enablePortRelay({
         listenPort,
-        hubId: portRelayHubId,
+        hubId: normalizedTarget.hubId,
         targetHost: '127.0.0.1',
-        targetPort,
+        targetPort: normalizedTarget.targetPort,
         accessCode,
       });
       applyPortRelaySnapshot(snapshot);
@@ -7684,7 +7751,12 @@ function App() {
     } finally {
       setPortRelayLoading(false);
     }
-  }, [applyPortRelaySnapshot, portRelayAccessCode, portRelayHubId, portRelayListenPort, portRelayTargetPort]);
+  }, [applyPortRelaySnapshot, persistPortRelaySettings, portRelayAccessCode, portRelayListenPort, portRelayTargets]);
+
+  const enablePortRelay = useCallback(async () => {
+    const target = selectedPortRelayTarget ?? commitPortRelayDraftTarget();
+    await enablePortRelayForTarget(target, portRelayListenPort);
+  }, [commitPortRelayDraftTarget, enablePortRelayForTarget, portRelayListenPort, selectedPortRelayTarget]);
 
   const disablePortRelay = useCallback(async () => {
     setPortRelayLoading(true);
@@ -7716,6 +7788,47 @@ function App() {
       setPortRelayLoading(false);
     }
   }, [applyPortRelaySnapshot, portRelaySnapshot.enabled]);
+
+  const selectPortRelayTarget = useCallback(async (target: PortRelayTarget) => {
+    setSelectedPortRelayTarget(target);
+    persistPortRelaySettings({selectedTarget: target});
+    if (!portRelaySnapshot.enabled || samePortRelayTarget(selectedPortRelayTarget, target)) {
+      return;
+    }
+    await enablePortRelayForTarget(target, String(portRelaySnapshot.listenPort || portRelayListenPort));
+  }, [
+    enablePortRelayForTarget,
+    persistPortRelaySettings,
+    portRelayListenPort,
+    portRelaySnapshot.enabled,
+    portRelaySnapshot.listenPort,
+    selectedPortRelayTarget,
+  ]);
+
+  const deletePortRelayTarget = useCallback(async (target: PortRelayTarget) => {
+    const nextTargets = removePortRelayTarget(portRelayTargets, target);
+    const deletingSelected = samePortRelayTarget(selectedPortRelayTarget, target);
+    const nextSelectedTarget = deletingSelected ? nextTargets[0] ?? null : selectedPortRelayTarget;
+    setPortRelayTargets(nextTargets);
+    setSelectedPortRelayTarget(nextSelectedTarget);
+    persistPortRelaySettings({
+      targets: nextTargets,
+      selectedTarget: nextSelectedTarget,
+    });
+    if (!deletingSelected || !portRelaySnapshot.enabled) {
+      return;
+    }
+    setPortRelayLoading(true);
+    setPortRelayError('');
+    try {
+      const snapshot = await service.disablePortRelay();
+      applyPortRelaySnapshot(snapshot);
+    } catch (err) {
+      setPortRelayError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPortRelayLoading(false);
+    }
+  }, [applyPortRelaySnapshot, persistPortRelaySettings, portRelaySnapshot.enabled, portRelayTargets, selectedPortRelayTarget]);
 
   const updateHubCards = useMemo(() => {
     const hubIds = new Set<string>([
@@ -10525,9 +10638,15 @@ function App() {
 
   const renderPortRelaySettingsDetail = (options?: SettingsDetailShellOptions) => {
     const hubIds = deriveRegistryHubIds(registryHubs);
-    const selectedHubId = portRelayHubId || hubIds[0] || '';
+    const selectedTarget = selectedPortRelayTarget ?? portRelayTargets[0] ?? null;
     const statusClass = String(portRelaySnapshot.status || 'Disabled').toLowerCase();
-    const portRelayTargetDisplay = selectedHubId ? `${selectedHubId} -> 127.0.0.1:${portRelayTargetPort || '80'}` : 'No hub';
+    const portRelayTargetDisplay = selectedTarget ? `${selectedTarget.hubId} -> 127.0.0.1:${selectedTarget.targetPort}` : 'No target';
+    const listenPortNumber = Number(portRelayListenPort);
+    const hasPendingListenPortChange =
+      portRelaySnapshot.enabled &&
+      typeof portRelaySnapshot.listenPort === 'number' &&
+      Number.isInteger(listenPortNumber) &&
+      listenPortNumber !== portRelaySnapshot.listenPort;
     return renderSettingsDetailShell(
       'Port Relay',
       <div className="port-relay-panel">
@@ -10536,6 +10655,9 @@ function App() {
             <span className={`port-relay-status-pill ${statusClass}`}>{portRelaySnapshot.status}</span>
             {portRelaySnapshot.relayUrl ? <span className="port-relay-url">{portRelaySnapshot.relayUrl}</span> : null}
           </div>
+          {hasPendingListenPortChange ? (
+            <div className="port-relay-pending-note">Listen port change applies on Enable.</div>
+          ) : null}
           <div className="port-relay-target-row">
             <span>Target</span>
             <code className="port-relay-target-value">{portRelayTargetDisplay}</code>
@@ -10551,32 +10673,17 @@ function App() {
               <input
                 value={portRelayListenPort}
                 inputMode="numeric"
-                onChange={event => setPortRelayListenPort(event.target.value.replace(/[^\d]/g, '').slice(0, 5))}
-              />
-            </label>
-            <label>
-              <span>Hub</span>
-              <select
-                value={selectedHubId}
-                onChange={event => setPortRelayHubId(event.target.value)}
-              >
-                {hubIds.length === 0 ? <option value="">No hub</option> : null}
-                {hubIds.map(hubId => (
-                  <option key={hubId} value={hubId}>{hubId}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Hub Local Port</span>
-              <input
-                value={portRelayTargetPort}
-                inputMode="numeric"
-                onChange={event => setPortRelayTargetPort(event.target.value.replace(/[^\d]/g, '').slice(0, 5))}
+                onChange={event => {
+                  const nextValue = event.target.value.replace(/[^\d]/g, '').slice(0, 5);
+                  const nextPort = Number(nextValue);
+                  setPortRelayListenPort(nextValue);
+                  if (Number.isInteger(nextPort) && nextPort >= 1 && nextPort <= 65535) {
+                    persistPortRelaySettings({listenPort: nextPort});
+                  }
+                }}
               />
             </label>
           </div>
-        </div>
-        <div className="port-relay-section port-relay-code-section">
           <div className="port-relay-code-row">
             <input
               value={portRelayAccessCode}
@@ -10593,12 +10700,84 @@ function App() {
             </button>
           </div>
         </div>
+        <div className="port-relay-section port-relay-targets-section">
+          <div className="port-relay-targets-header">
+            <span>Targets</span>
+            <span>{'Hub -> 127.0.0.1:Port'}</span>
+          </div>
+          <div className="port-relay-target-list">
+            {portRelayTargets.map(target => {
+              const selected = samePortRelayTarget(selectedTarget, target);
+              return (
+                <div
+                  key={`${target.hubId}:${target.targetPort}`}
+                  className={`port-relay-target-list-row${selected ? ' selected' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={event => {
+                      if (!event.target.checked) {
+                        return;
+                      }
+                      selectPortRelayTarget(target).catch(() => undefined);
+                    }}
+                    aria-label={`Use ${target.hubId}:${target.targetPort}`}
+                  />
+                  <span className="port-relay-target-hub">{target.hubId}</span>
+                  <code className="port-relay-target-port">{target.targetPort}</code>
+                  <button
+                    type="button"
+                    className="port-relay-target-delete"
+                    onClick={() => deletePortRelayTarget(target).catch(() => undefined)}
+                    disabled={portRelayLoading}
+                    title="Delete target"
+                    aria-label={`Delete ${target.hubId}:${target.targetPort}`}
+                  >
+                    <span className="codicon codicon-close" />
+                  </button>
+                </div>
+              );
+            })}
+            <div className="port-relay-target-list-row draft">
+              <span className="port-relay-target-check-spacer" aria-hidden="true" />
+              <select
+                value={portRelayDraftHubId}
+                onChange={event => setPortRelayDraftHubId(event.target.value)}
+                disabled={hubIds.length === 0}
+                aria-label="New relay target hub"
+              >
+                <option value="">{hubIds.length === 0 ? 'No hub' : 'Hub'}</option>
+                {hubIds.map(hubId => (
+                  <option key={hubId} value={hubId}>{hubId}</option>
+                ))}
+              </select>
+              <input
+                value={portRelayDraftPort}
+                inputMode="numeric"
+                onChange={event => setPortRelayDraftPort(event.target.value.replace(/[^\d]/g, '').slice(0, 5))}
+                onBlur={() => {
+                  commitPortRelayDraftTarget();
+                }}
+                onKeyDown={event => {
+                  if (event.key !== 'Enter') {
+                    return;
+                  }
+                  event.preventDefault();
+                  commitPortRelayDraftTarget();
+                }}
+                aria-label="New relay target port"
+              />
+              <span className="port-relay-target-delete-spacer" aria-hidden="true" />
+            </div>
+          </div>
+        </div>
         <div className="port-relay-actions">
           <button
             type="button"
             className="settings-detail-action-btn"
             onClick={() => enablePortRelay().catch(() => undefined)}
-            disabled={portRelayLoading || !selectedHubId}
+            disabled={portRelayLoading || !selectedTarget}
           >
             {portRelayLoading ? 'Working...' : 'Enable'}
           </button>
