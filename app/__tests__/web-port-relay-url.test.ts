@@ -35,6 +35,10 @@ describe('port relay URL helpers', () => {
   });
 
   test('parses localhost http URLs into relay target port and path', () => {
+    expect(parsePortRelayLocalHttpUrl('http://localhost:58647')).toEqual({
+      targetPort: 58647,
+      path: '/',
+    });
     expect(parsePortRelayLocalHttpUrl('http://localhost:58647/session?id=1#logs')).toEqual({
       targetPort: 58647,
       path: '/session?id=1#logs',

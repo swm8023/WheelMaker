@@ -28,6 +28,7 @@ import {
 } from './portRelayTargets';
 import { initializePWAFoundation } from './pwa';
 import { DesktopTitleBar } from './shell/DesktopTitleBar';
+import { getDesktopWindowBridge } from './shell/desktopRuntime';
 import { submitDesktopRemoteWebCandidate } from './shell/desktop/webSource';
 import { ResponsiveShell } from './shell/ResponsiveShell';
 import {
@@ -2579,6 +2580,7 @@ function ShikiDiffPane({
 }
 function App() {
   const defaultRegistryAddress = useMemo(() => getDefaultRegistryAddress(), []);
+  const preferDirectPortRelayUrl = useMemo(() => !!getDesktopWindowBridge(), []);
   const persistedGlobal = useMemo(
     () => workspaceStore.getGlobalState(defaultRegistryAddress),
     [defaultRegistryAddress],
@@ -2867,9 +2869,10 @@ function App() {
       relayUrl: portRelaySnapshot.relayUrl,
       registryAddress: address,
       listenPort: portRelaySnapshot.listenPort || portRelayListenPort,
+      preferSnapshotRelayUrl: preferDirectPortRelayUrl,
     });
     return appendPortRelayOpenPath(baseUrl, portRelayFramePath);
-  }, [address, portRelayFramePath, portRelayListenPort, portRelayReady, portRelaySnapshot.listenPort, portRelaySnapshot.relayUrl]);
+  }, [address, portRelayFramePath, portRelayListenPort, portRelayReady, portRelaySnapshot.listenPort, portRelaySnapshot.relayUrl, preferDirectPortRelayUrl]);
   const mobilePortRelayFrameOpen = !isWide && portRelayFrameOpen && !!portRelayFrameUrl;
 
   useEffect(() => {
@@ -12400,23 +12403,55 @@ function App() {
     }
     return value;
   }, []);
+  const renderChatInlineCode = useCallback(
+    ({ className, children }: { className?: string; children?: React.ReactNode }) => {
+      const languageMatch = /language-([\w-]+)/.exec(className || '');
+      const codeText = String(children ?? '').replace(/\n$/, '');
+      const relayLocalUrl = parsePortRelayLocalHttpUrl(codeText);
+      if (!languageMatch && !codeText.includes('\n') && relayLocalUrl) {
+        return (
+          <a
+            className="chat-relay-link chat-relay-code-link"
+            href={codeText.trim()}
+            title="Open through Port Relay"
+            onClick={event => {
+              event.preventDefault();
+              openChatPortRelayLink(relayLocalUrl).catch(() => undefined);
+            }}
+          >
+            <code className={className}>{children}</code>
+          </a>
+        );
+      }
+
+      return markdownCodeRenderer({
+        className,
+        children,
+        themeMode,
+        codeTheme,
+        codeFont,
+        codeFontSize,
+        codeLineHeight,
+        codeTabSize,
+        wrap: true,
+        lineNumbers: false,
+      });
+    },
+    [
+      themeMode,
+      codeTheme,
+      codeFont,
+      codeFontSize,
+      codeLineHeight,
+      codeTabSize,
+      openChatPortRelayLink,
+    ],
+  );
 
   const chatMarkdownComponents = useMemo<Components>(
     () => ({
       pre: markdownPreRenderer,
-      code: ({ className, children }) =>
-        markdownCodeRenderer({
-          className,
-          children,
-          themeMode,
-          codeTheme,
-          codeFont,
-          codeFontSize,
-          codeLineHeight,
-          codeTabSize,
-          wrap: true,
-          lineNumbers: false,
-        }),
+      code: renderChatInlineCode,
       img: ({ src, alt, ...rest }) => (
         <img
           {...rest}
@@ -12484,14 +12519,9 @@ function App() {
       },
     }),
     [
-      themeMode,
-      codeTheme,
-      codeFont,
-      codeFontSize,
-      codeLineHeight,
-      codeTabSize,
       currentProject?.path,
       openChatPortRelayLink,
+      renderChatInlineCode,
     ],
   );
 

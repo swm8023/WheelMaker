@@ -6338,6 +6338,19 @@ body,
   word-break: break-word;
 }
 
+.chat-main-message .chat-relay-code-link {
+  text-decoration: none;
+}
+
+.chat-main-message .chat-relay-code-link code {
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
+  cursor: pointer;
+}
+
+.chat-main-message .chat-relay-code-link:hover code {
+  text-decoration: underline;
+}
+
 .chat-main-message .wm-shiki-code {
   white-space: normal;
 }

@@ -106,6 +106,11 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).toContain('const relayLocalUrl = parsePortRelayLocalHttpUrl(linkHref);');
     expect(mainTsx).toContain('openChatPortRelayLink(relayLocalUrl).catch(() => undefined);');
     expect(mainTsx).toContain('className={[rest.className, relayLocalUrl ? \'chat-relay-link\' : \'\'].filter(Boolean).join(\' \') || undefined}');
+    expect(mainTsx).toContain('const renderChatInlineCode = useCallback');
+    expect(mainTsx).toContain('const relayLocalUrl = parsePortRelayLocalHttpUrl(codeText);');
+    expect(mainTsx).toContain("className=\"chat-relay-link chat-relay-code-link\"");
+    expect(mainTsx).toContain('openChatPortRelayLink(relayLocalUrl).catch(() => undefined);');
+    expect(mainTsx).toContain('code: renderChatInlineCode,');
   });
 
   test('keeps the mobile relay iframe locked to the visible viewport', () => {

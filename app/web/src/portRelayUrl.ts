@@ -44,10 +44,14 @@ export function resolvePortRelayOpenUrl(args: {
   relayUrl?: string;
   registryAddress: string;
   listenPort: string | number;
+  preferSnapshotRelayUrl?: boolean;
 }): string {
   const relayUrl = args.relayUrl?.trim();
   const derivedUrl = buildPortRelayOpenUrl(args.registryAddress, args.listenPort);
   if (relayUrl) {
+    if (args.preferSnapshotRelayUrl) {
+      return relayUrl;
+    }
     if (urlHostIsLoopback(relayUrl) && derivedUrl && !urlHostIsLoopback(derivedUrl)) {
       return derivedUrl;
     }
