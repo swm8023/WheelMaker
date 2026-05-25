@@ -10565,7 +10565,7 @@ function App() {
                 </div>
                 <div className="wheelmaker-update-panel">
                   <div className="wheelmaker-update-title-line">
-                    <span className="wheelmaker-update-product" title={card.hubId}>{card.hubId}</span>
+                    <span className="wheelmaker-update-scope">Release</span>
                     <span className={`agent-package-status status-${wheelMakerStatus}`}>
                       {wheelMaker?.loading ? 'Checking' : wheelMakerUpdateStatusLabel(wheelMakerStatus)}
                     </span>

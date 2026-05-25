@@ -1120,7 +1120,7 @@ body,
   gap: 6px;
 }
 
-.wheelmaker-update-product {
+.wheelmaker-update-scope {
   flex: 0 0 auto;
   color: var(--text);
   font-size: 13px;

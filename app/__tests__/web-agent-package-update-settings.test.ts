@@ -103,6 +103,8 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).not.toContain('title={hub?.npmPrefix');
     expect(mainTsx).not.toContain('Updated: {agentCard.updatedAt}');
     expect(mainTsx).not.toContain('<span className="wheelmaker-update-product">WheelMaker</span>');
+    expect(mainTsx).not.toContain('<span className="wheelmaker-update-product" title={card.hubId}>{card.hubId}</span>');
+    expect(mainTsx).toContain('<span className="wheelmaker-update-scope">Release</span>');
 
     expect(stylesCss).toContain('.agent-package-hub-list');
     expect(stylesCss).toContain('.update-hub-header .wide-project-hub-tag');
@@ -150,7 +152,7 @@ describe('agent package update settings UI source structure', () => {
     expect(wheelMakerBlockStart).toBeGreaterThanOrEqual(0);
     expect(agentPackagesStart).toBeGreaterThan(wheelMakerBlockStart);
     const wheelMakerBlock = mainTsx.slice(wheelMakerBlockStart, agentPackagesStart);
-    expect(wheelMakerBlock).toContain('className="wheelmaker-update-product"');
+    expect(wheelMakerBlock).toContain('className="wheelmaker-update-scope"');
     expect(wheelMakerBlock).toContain('className="wheelmaker-update-version-line"');
     expect(wheelMakerBlock).toContain('className="wheelmaker-update-ref-tag"');
     expect(wheelMakerBlock).toContain('wheelMakerReleaseRef(wheelMakerData)');
