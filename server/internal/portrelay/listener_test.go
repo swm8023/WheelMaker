@@ -236,6 +236,47 @@ func TestUnauthenticatedRelayRequestRedirectsToLoginWithNext(t *testing.T) {
 	}
 }
 
+func TestRelayURLAccessCodeAuthenticatesAndStripsCodeQuery(t *testing.T) {
+	c := NewController(ControllerConfig{})
+	c.mu.Lock()
+	c.slot = relaySlot{
+		Enabled:              true,
+		Status:               rp.RelayStatusOpening,
+		RelayID:              "relay-test",
+		AccessCode:           "123456",
+		AccessCodeGeneration: 1,
+	}
+	c.mu.Unlock()
+
+	req := httptest.NewRequest(http.MethodGet, "/console?tab=relay&__wm_relay_code=123456&x=1", nil)
+	resp := httptest.NewRecorder()
+	c.handleDataPlane(resp, req)
+
+	if resp.Code != http.StatusSeeOther {
+		t.Fatalf("inline code status=%d, want 303", resp.Code)
+	}
+	if got := resp.Header().Get("Location"); got != "/console?tab=relay&x=1" {
+		t.Fatalf("inline code Location=%q, want code-stripped target", got)
+	}
+	if got := resp.Header().Get("Set-Cookie"); !strings.Contains(got, relayCookieName+"=") {
+		t.Fatalf("inline code missing relay auth cookie: %q", got)
+	}
+
+	badReq := httptest.NewRequest(http.MethodGet, "/console?tab=relay&__wm_relay_code=000000", nil)
+	badResp := httptest.NewRecorder()
+	c.handleDataPlane(badResp, badReq)
+
+	if badResp.Code != http.StatusSeeOther {
+		t.Fatalf("bad inline code status=%d, want 303", badResp.Code)
+	}
+	if got := badResp.Header().Get("Location"); got != internalLoginPath+"?error=1&next=%2Fconsole%3Ftab%3Drelay" {
+		t.Fatalf("bad inline code Location=%q, want login without leaked code", got)
+	}
+	if strings.Contains(badResp.Header().Get("Location"), "__wm_relay_code") {
+		t.Fatalf("bad inline code leaked code query in Location=%q", badResp.Header().Get("Location"))
+	}
+}
+
 func reserveRelayTestPort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

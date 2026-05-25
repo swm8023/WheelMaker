@@ -1747,6 +1747,8 @@ Relay data plane 监听在 `listenPort` 上，同一端口处理普通 HTTP 与 
 - `GET /__wheelmaker/relay/logout`：清除 cookie。
 - `GET /__wheelmaker/relay/status`：只读状态。
 
+App 内嵌 iframe 打开 relay 页面时，如果本机知道当前 `accessCodeGeneration` 对应的 6 位访问码，可以在目标 URL 上附加内部查询参数 `__wm_relay_code=<code>`。Registry data plane 必须先消费该参数：验证成功时设置 `wm_port_relay` HttpOnly cookie，并 303 跳回移除 `__wm_relay_code` 后的同站相对 URL；验证失败时 303 跳回登录页，`next` 同样不得包含该参数。`__wm_relay_code` 不得转发给 Hub 或第三方目标服务。外部浏览器直接访问 relay 端口时仍可使用登录页手动输入访问码。
+
 其他路径必须先通过 data-plane cookie 认证；未认证访问会 303 跳转到登录页，并将原同站相对路径写入 `next`。认证通过后，HTTP 请求和 WebSocket text/binary frame 通过 Hub 主动建立的 binary tunnel 转发到所选 Hub 机器上的 `127.0.0.1:targetPort`。Hub 侧目标请求固定设置浏览器风格 `User-Agent`。Registry 不改写第三方 HTML 内容。
 
 ### 5.14 Chat / Session 透传方法

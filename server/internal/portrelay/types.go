@@ -24,6 +24,7 @@ const (
 	internalStatusPath = "/__wheelmaker/relay/status"
 
 	relayCookieName   = "wm_port_relay"
+	relayURLCodeParam = "__wm_relay_code"
 	relayTargetHost   = "127.0.0.1"
 	defaultTunnelWait = 2 * time.Second
 	defaultStreamWait = 10 * time.Second

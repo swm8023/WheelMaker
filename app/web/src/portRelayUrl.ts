@@ -22,6 +22,8 @@ export type PortRelayLocalHttpUrl = {
   path: string;
 };
 
+const PORT_RELAY_AUTO_AUTH_QUERY = '__wm_relay_code';
+
 function isLoopbackHost(hostname: string): boolean {
   const value = hostname.trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
   return value === 'localhost' || value === '127.0.0.1' || value === '::1';
@@ -94,5 +96,19 @@ export function appendPortRelayOpenPath(baseUrl: string, path: string): string {
     return url.toString();
   } catch {
     return baseUrl;
+  }
+}
+
+export function appendPortRelayAutoAuthCode(openUrl: string, accessCode: string): string {
+  const code = accessCode.trim();
+  if (!/^\d{6}$/.test(code)) {
+    return openUrl;
+  }
+  try {
+    const url = new URL(openUrl);
+    url.searchParams.set(PORT_RELAY_AUTO_AUTH_QUERY, code);
+    return url.toString();
+  } catch {
+    return openUrl;
   }
 }

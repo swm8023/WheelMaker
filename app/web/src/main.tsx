@@ -13,7 +13,7 @@ import remarkGfm from 'remark-gfm';
 declare const require: (id: string) => any;
 
 import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
-import { appendPortRelayOpenPath, parsePortRelayLocalHttpUrl, resolvePortRelayOpenUrl } from './portRelayUrl';
+import { appendPortRelayAutoAuthCode, appendPortRelayOpenPath, parsePortRelayLocalHttpUrl, resolvePortRelayOpenUrl } from './portRelayUrl';
 import type { PortRelayLocalHttpUrl } from './portRelayUrl';
 import {
   normalizePortRelayListenPort,
@@ -2861,6 +2861,7 @@ function App() {
       portRelayKnownAccessCodeGeneration !== portRelaySnapshot.accessCodeGeneration
     )
   );
+  const portRelayFrameAccessCode = portRelayAccessCodeUnknown ? '' : portRelayAccessCode;
   const portRelayFrameUrl = useMemo(() => {
     if (!portRelayReady) {
       return '';
@@ -2871,8 +2872,11 @@ function App() {
       listenPort: portRelaySnapshot.listenPort || portRelayListenPort,
       preferSnapshotRelayUrl: preferDirectPortRelayUrl,
     });
-    return appendPortRelayOpenPath(baseUrl, portRelayFramePath);
-  }, [address, portRelayFramePath, portRelayListenPort, portRelayReady, portRelaySnapshot.listenPort, portRelaySnapshot.relayUrl, preferDirectPortRelayUrl]);
+    return appendPortRelayAutoAuthCode(
+      appendPortRelayOpenPath(baseUrl, portRelayFramePath),
+      portRelayFrameAccessCode,
+    );
+  }, [address, portRelayFrameAccessCode, portRelayFramePath, portRelayListenPort, portRelayReady, portRelaySnapshot.listenPort, portRelaySnapshot.relayUrl, preferDirectPortRelayUrl]);
   const mobilePortRelayFrameOpen = !isWide && portRelayFrameOpen && !!portRelayFrameUrl;
 
   useEffect(() => {

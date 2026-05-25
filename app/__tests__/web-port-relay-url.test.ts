@@ -1,4 +1,5 @@
 import {
+  appendPortRelayAutoAuthCode,
   appendPortRelayOpenPath,
   buildPortRelayOpenUrl,
   parsePortRelayLocalHttpUrl,
@@ -57,6 +58,15 @@ describe('port relay URL helpers', () => {
 
   test('appends original local URL path to relay iframe URL', () => {
     expect(appendPortRelayOpenPath('https://relay.example.com:28801/', '/session?id=1#logs')).toBe(
+      'https://relay.example.com:28801/session?id=1#logs',
+    );
+  });
+
+  test('appends known relay access code as an internal auto-auth query parameter', () => {
+    expect(appendPortRelayAutoAuthCode('https://relay.example.com:28801/session?id=1#logs', '123456')).toBe(
+      'https://relay.example.com:28801/session?id=1&__wm_relay_code=123456#logs',
+    );
+    expect(appendPortRelayAutoAuthCode('https://relay.example.com:28801/session?id=1#logs', '')).toBe(
       'https://relay.example.com:28801/session?id=1#logs',
     );
   });

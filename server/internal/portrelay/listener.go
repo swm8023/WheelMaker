@@ -71,6 +71,10 @@ func (c *Controller) handleDataPlane(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "relay disabled", http.StatusServiceUnavailable)
 		return
 	}
+	if code := r.URL.Query().Get(relayURLCodeParam); code != "" {
+		c.handleURLAccessCode(w, r, slot, code)
+		return
+	}
 	if !c.authenticated(r, slot) {
 		http.Redirect(w, r, relayLoginLocation(requestNextPath(r), false), http.StatusSeeOther)
 		return
@@ -130,6 +134,16 @@ func (c *Controller) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	next := safeRelayNext(r.Form.Get("next"))
 	if r.Form.Get("code") != slot.AccessCode {
+		http.Redirect(w, r, relayLoginLocation(next, true), http.StatusSeeOther)
+		return
+	}
+	c.setAuthCookie(w, slot)
+	http.Redirect(w, r, next, http.StatusSeeOther)
+}
+
+func (c *Controller) handleURLAccessCode(w http.ResponseWriter, r *http.Request, slot relaySlot, code string) {
+	next := requestPathWithoutRelayURLCode(r)
+	if code != slot.AccessCode {
 		http.Redirect(w, r, relayLoginLocation(next, true), http.StatusSeeOther)
 		return
 	}
@@ -382,6 +396,26 @@ func requestNextPath(r *http.Request) string {
 		next += "?" + r.URL.RawQuery
 	}
 	return next
+}
+
+func requestPathWithoutRelayURLCode(r *http.Request) string {
+	if r == nil || r.URL == nil {
+		return "/"
+	}
+	u := *r.URL
+	if u.Path == "" {
+		u.Path = "/"
+	}
+	query := u.Query()
+	query.Del(relayURLCodeParam)
+	u.RawQuery = query.Encode()
+	u.Scheme = ""
+	u.Host = ""
+	next := u.RequestURI()
+	if next == "" {
+		return "/"
+	}
+	return safeRelayNext(next)
 }
 
 func safeRelayNext(value string) string {
