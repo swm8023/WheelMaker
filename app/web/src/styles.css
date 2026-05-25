@@ -983,11 +983,17 @@ body,
 }
 
 .agent-package-hub-card {
-  gap: 8px;
+  gap: 10px;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-2) 98%, var(--accent)) 0%, var(--panel-2) 100%);
+  padding: 12px;
 }
 
 .update-hub-header {
-  padding-bottom: 1px;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 0;
 }
 
 .agent-package-hub-meta {
@@ -998,6 +1004,108 @@ body,
   color: var(--muted);
   font-size: 11px;
   line-height: 1.25;
+}
+
+.npm-update-section {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  padding: 8px;
+}
+
+.npm-update-disclosure {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.npm-update-disclosure-btn {
+  min-width: 0;
+  min-height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 6px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.npm-update-disclosure-btn:hover {
+  background: var(--hover);
+}
+
+.npm-update-disclosure-btn .codicon {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.npm-update-title {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.npm-update-count,
+.npm-update-total {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.npm-update-count {
+  color: color-mix(in srgb, var(--text) 78%, var(--muted));
+}
+
+.npm-update-action-btn {
+  min-width: 88px;
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 10px;
+}
+
+.npm-update-action-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, var(--hover));
+}
+
+.npm-update-action-btn:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.npm-update-body {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  padding-top: 8px;
+}
+
+@media (max-width: 560px) {
+  .npm-update-disclosure {
+    grid-template-columns: 1fr;
+  }
+
+  .npm-update-action-btn {
+    width: 100%;
+  }
 }
 
 .wheelmaker-update-panel {

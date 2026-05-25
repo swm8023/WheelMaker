@@ -1,10 +1,18 @@
 import type {
   RegistryHub,
+  RegistryNpmPackage,
   RegistryNpmPackageStatus,
   RegistryWheelMakerUpdateResponse,
 } from './types/registry';
 
 export const AGENT_PACKAGE_SCAN_TIMEOUT_MS = 65000;
+
+export type NpmPackageUpdateTarget = {
+  packageName: string;
+  displayName: string;
+  installedVersion: string;
+  latestVersion: string;
+};
 
 export function deriveRegistryHubIds(hubs: RegistryHub[]): string[] {
   const hubIds = new Set<string>();
@@ -50,6 +58,22 @@ export function packageStatusLabel(status: RegistryNpmPackageStatus | string): s
     default:
       return status || 'Unknown';
   }
+}
+
+export function deriveNpmPackageUpdateTargets(packages: RegistryNpmPackage[]): NpmPackageUpdateTarget[] {
+  return packages
+    .filter(pkg => pkg.canInstall || pkg.canUpdate)
+    .map(pkg => ({
+      packageName: pkg.packageName,
+      displayName: pkg.displayName,
+      installedVersion: pkg.installedVersion,
+      latestVersion: pkg.latestVersion,
+    }));
+}
+
+export function npmPackageUpdateSummary(count: number): string {
+  if (count <= 0) return 'No npm updates';
+  return `${count} npm ${count === 1 ? 'update' : 'updates'}`;
 }
 
 export function wheelMakerUpdateStatusLabel(status: string): string {

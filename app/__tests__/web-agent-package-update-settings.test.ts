@@ -72,9 +72,19 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).not.toContain('service.queryNpmPackageTask');
     expect(mainTsx).not.toContain('pollAgentPackageTask');
     expect(mainTsx).toContain("kind: 'npmPackage'");
+    expect(mainTsx).toContain("kind: 'npmPackageHubUpdate'");
     expect(mainTsx).toContain('requestAgentPackageAction');
+    expect(mainTsx).toContain('requestAgentPackageHubUpdate(card.hubId, npmUpdateTargets)');
     expect(mainTsx).toContain('handleAgentPackageConfirmedAction');
+    expect(mainTsx).toContain('handleAgentPackageHubUpdateConfirmedAction');
     expect(mainTsx).toContain('packageStatusLabel');
+    expect(mainTsx).toContain('deriveNpmPackageUpdateTargets(hub?.packages ?? [])');
+    expect(mainTsx).toContain('npmPackageUpdateSummary(npmUpdateTargets.length)');
+    expect(mainTsx).toContain('const [expandedNpmUpdateHubIds, setExpandedNpmUpdateHubIds] = useState<Record<string, boolean>>({});');
+    expect(mainTsx).toContain("const [agentPackageHubUpdatePendingId, setAgentPackageHubUpdatePendingId] = useState('');");
+    expect(mainTsx).toContain('const npmExpanded = expandedNpmUpdateHubIds[card.hubId] === true;');
+    expect(mainTsx).toContain('aria-expanded={npmExpanded}');
+    expect(mainTsx).toContain('{npmExpanded ? (');
     expect(mainTsx).toContain('const showWheelMakerUpdateAction =');
     expect(mainTsx).toContain('shouldShowWheelMakerUpdateAction({');
     expect(mainTsx).toContain('loading: wheelMaker?.loading === true,');
@@ -89,6 +99,7 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).not.toContain('>Prefix:');
     expect(mainTsx).not.toContain('title={hub?.npmPrefix');
     expect(mainTsx).not.toContain('Updated: {agentCard.updatedAt}');
+    expect(mainTsx).not.toContain('<span className="wheelmaker-update-product">WheelMaker</span>');
 
     expect(stylesCss).toContain('.agent-package-hub-list');
     expect(stylesCss).toContain('.update-hub-header .wide-project-hub-tag');
@@ -105,6 +116,10 @@ describe('agent package update settings UI source structure', () => {
     expect(stylesCss).toContain('.wheelmaker-update-ref-tag');
     expect(stylesCss).toContain('.wheelmaker-update-sha-line');
     expect(stylesCss).toContain('.wheelmaker-update-action-btn');
+    expect(stylesCss).toContain('.npm-update-disclosure');
+    expect(stylesCss).toContain('.npm-update-section');
+    expect(stylesCss).toContain('.npm-update-action-btn');
+    expect(stylesCss).toContain('.npm-update-body');
     expect(stylesCss).toContain('.agent-package-row');
     expect(stylesCss).toContain('.agent-package-name-line');
     expect(stylesCss).toContain('.agent-package-agent-tags');
@@ -116,7 +131,7 @@ describe('agent package update settings UI source structure', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
 
-    expect(mainTsx).toContain('const pending = agentPackageActionPendingKey === pendingKey || operation?.running === true;');
+    expect(mainTsx).toContain('const pending = agentPackageActionPendingKey === pendingKey || operation?.running === true || npmHubUpdatePending;');
     expect(mainTsx).toContain('disabled={pending}');
     expect(mainTsx).not.toContain('agentPackageAnyOperationRunning');
     expect(mainTsx).not.toContain('disabled={pending || agentPackageAnyOperationRunning}');

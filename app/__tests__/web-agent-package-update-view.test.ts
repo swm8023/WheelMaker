@@ -1,5 +1,7 @@
 import {
+  deriveNpmPackageUpdateTargets,
   deriveRegistryHubIds,
+  npmPackageUpdateSummary,
   packageStatusLabel,
   shouldShowWheelMakerUpdateAction,
   wheelMakerUpdateStatusLabel,
@@ -28,6 +30,70 @@ describe('agent package update view helpers', () => {
     expect(packageStatusLabel('checking_failed')).toBe('Checking failed');
     expect(packageStatusLabel('deprecated')).toBe('Deprecated');
     expect(packageStatusLabel('running')).toBe('Running');
+  });
+
+  test('derives hub-level npm update targets without uninstalling deprecated packages', () => {
+    const targets = deriveNpmPackageUpdateTargets([
+      {
+        packageName: '@openai/codex',
+        displayName: 'Codex',
+        agentTypes: ['codex'],
+        kind: 'runtime',
+        installed: true,
+        installedVersion: '0.1.0',
+        latestVersion: '0.2.0',
+        status: 'update_available',
+        error: '',
+        canInstall: false,
+        canUpdate: true,
+        canUninstall: false,
+      },
+      {
+        packageName: '@anthropic/claude-code',
+        displayName: 'Claude Code',
+        agentTypes: ['claude'],
+        kind: 'runtime',
+        installed: false,
+        installedVersion: '',
+        latestVersion: '1.0.0',
+        status: 'not_installed',
+        error: '',
+        canInstall: true,
+        canUpdate: false,
+        canUninstall: false,
+      },
+      {
+        packageName: '@zed-industries/claude-agent-acp',
+        displayName: 'Deprecated Claude ACP',
+        agentTypes: [],
+        kind: 'deprecated',
+        installed: true,
+        installedVersion: '0.0.1',
+        latestVersion: '',
+        status: 'deprecated',
+        error: '',
+        canInstall: false,
+        canUpdate: false,
+        canUninstall: true,
+      },
+    ]);
+
+    expect(targets).toEqual([
+      {
+        packageName: '@openai/codex',
+        displayName: 'Codex',
+        installedVersion: '0.1.0',
+        latestVersion: '0.2.0',
+      },
+      {
+        packageName: '@anthropic/claude-code',
+        displayName: 'Claude Code',
+        installedVersion: '',
+        latestVersion: '1.0.0',
+      },
+    ]);
+    expect(npmPackageUpdateSummary(targets.length)).toBe('2 npm updates');
+    expect(npmPackageUpdateSummary(0)).toBe('No npm updates');
   });
 
   test('maps WheelMaker update status values to concise labels', () => {

@@ -130,11 +130,14 @@ import {
 } from './tokenStatsView';
 import {
   AGENT_PACKAGE_SCAN_TIMEOUT_MS,
+  deriveNpmPackageUpdateTargets,
   deriveRegistryHubIds,
+  npmPackageUpdateSummary,
   packageStatusLabel,
   shouldShowWheelMakerUpdateAction,
   wheelMakerUpdateStatusLabel,
   withAgentPackageTimeout,
+  type NpmPackageUpdateTarget,
 } from './agentPackageUpdateView';
 import {
   deriveSkillHubIds,
@@ -190,6 +193,7 @@ import type {
   RegistryGitCommit,
   RegistryGitCommitFile,
   RegistryGitStatus,
+  RegistryNpmCommandResponse,
   RegistryNpmHubSnapshot,
   RegistryNpmOperation,
   RegistryNpmPackage,
@@ -255,6 +259,11 @@ type ConfirmTarget =
       displayName: string;
       installedVersion: string;
       latestVersion: string;
+    }
+  | {
+      kind: 'npmPackageHubUpdate';
+      hubId: string;
+      packages: NpmPackageUpdateTarget[];
     }
   | {
       kind: 'wheelMakerUpdate';
@@ -2807,6 +2816,8 @@ function App() {
   const [agentPackagesLoading, setAgentPackagesLoading] = useState(false);
   const [agentPackagesError, setAgentPackagesError] = useState('');
   const [agentPackageActionPendingKey, setAgentPackageActionPendingKey] = useState('');
+  const [agentPackageHubUpdatePendingId, setAgentPackageHubUpdatePendingId] = useState('');
+  const [expandedNpmUpdateHubIds, setExpandedNpmUpdateHubIds] = useState<Record<string, boolean>>({});
   const agentPackageScanPollTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const [skillHubs, setSkillHubs] = useState<Record<string, SkillHubView>>({});
   const [skillsLoading, setSkillsLoading] = useState(false);
@@ -8465,6 +8476,18 @@ function App() {
     });
   }, []);
 
+  const requestAgentPackageHubUpdate = useCallback((hubId: string, packages: NpmPackageUpdateTarget[]) => {
+    if (packages.length === 0) {
+      return;
+    }
+    setConfirmError('');
+    setConfirmTarget({
+      kind: 'npmPackageHubUpdate',
+      hubId,
+      packages,
+    });
+  }, []);
+
   const requestWheelMakerUpdatePublish = useCallback((hubId: string, data: RegistryWheelMakerUpdateResponse | null) => {
     setConfirmError('');
     setConfirmTarget({
@@ -8609,6 +8632,66 @@ function App() {
       setAgentPackageActionPendingKey('');
     }
   }, [agentPackageActionKey, refreshAgentPackages]);
+
+  const handleAgentPackageHubUpdateConfirmedAction = useCallback(async (target: Extract<ConfirmTarget, {kind: 'npmPackageHubUpdate'}>) => {
+    if (target.packages.length === 0) {
+      setConfirmTarget(null);
+      return;
+    }
+    setConfirmError('');
+    setAgentPackagesError('');
+    setAgentPackageHubUpdatePendingId(target.hubId);
+    try {
+      const responses = [];
+      for (const pkg of target.packages) {
+        try {
+          const result = await service.installNpmPackage(target.hubId, pkg.packageName, 'latest');
+          responses.push({
+            packageName: pkg.packageName,
+            result,
+            error: result.ok ? '' : result.operation?.errorSummary || result.operation?.message || 'Update request failed.',
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          responses.push({packageName: pkg.packageName, error: message});
+        }
+      }
+      const lastOperation = [...responses]
+        .reverse()
+        .find((entry): entry is {packageName: string; result: RegistryNpmCommandResponse; error: string} => 'result' in entry)
+        ?.result.operation ?? null;
+      setAgentPackageHubs(prev => ({
+        ...prev,
+        [target.hubId]: {
+          ...(prev[target.hubId] ?? {hubId: target.hubId, loading: false, error: '', updatedAt: '', hub: null, operation: null}),
+          operation: lastOperation,
+        },
+      }));
+      setConfirmTarget(null);
+      setConfirmError('');
+      await refreshAgentPackages();
+      const failedUpdates = responses.filter(entry => entry.error);
+      if (failedUpdates.length > 0) {
+        const message = `Failed to update ${failedUpdates.length} of ${target.packages.length} npm packages on ${target.hubId}: ${failedUpdates.map(entry => entry.packageName).join(', ')}`;
+        setAgentPackagesError(message);
+        setAgentPackageHubs(prev => ({
+          ...prev,
+          [target.hubId]: {
+            ...(prev[target.hubId] ?? {hubId: target.hubId, loading: false, error: '', updatedAt: '', hub: null, operation: null}),
+            error: message,
+          },
+        }));
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setConfirmTarget(null);
+      setConfirmError('');
+      setAgentPackagesError(message);
+      setError(message);
+    } finally {
+      setAgentPackageHubUpdatePendingId('');
+    }
+  }, [refreshAgentPackages]);
 
   const formatDatabaseDump = (dump: Awaited<ReturnType<typeof workspaceStore.dumpDatabase>>): string => {
     return JSON.stringify(
@@ -10453,6 +10536,10 @@ function App() {
             const agentCard = card.agentPackage;
             const hub = agentCard?.hub;
             const operation = agentCard?.operation;
+            const npmUpdateTargets = deriveNpmPackageUpdateTargets(hub?.packages ?? []);
+            const npmExpanded = expandedNpmUpdateHubIds[card.hubId] === true;
+            const npmHubUpdatePending = agentPackageHubUpdatePendingId === card.hubId;
+            const npmActionDisabled = npmHubUpdatePending || operation?.running === true || agentCard?.loading === true;
             const wheelMakerPending = wheelMakerUpdatePendingHubId === card.hubId;
             const showWheelMakerUpdateAction = shouldShowWheelMakerUpdateAction({
               data: wheelMakerData,
@@ -10470,7 +10557,7 @@ function App() {
                 <div className="settings-metadata-line settings-metadata-line-tags update-hub-header">
                   <span className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', card.hubId)}`}>
                     <span className="wide-project-hub-dot" aria-hidden="true" />
-                    <span className="wide-project-hub-label">Hub: {card.hubId}</span>
+                    <span className="wide-project-hub-label">{card.hubId}</span>
                   </span>
                   {wheelMaker?.loading || agentCard?.loading ? (
                     <span className="wide-session-agent-tag">Scanning</span>
@@ -10478,7 +10565,7 @@ function App() {
                 </div>
                 <div className="wheelmaker-update-panel">
                   <div className="wheelmaker-update-title-line">
-                    <span className="wheelmaker-update-product">WheelMaker</span>
+                    <span className="wheelmaker-update-product" title={card.hubId}>{card.hubId}</span>
                     <span className={`agent-package-status status-${wheelMakerStatus}`}>
                       {wheelMaker?.loading ? 'Checking' : wheelMakerUpdateStatusLabel(wheelMakerStatus)}
                     </span>
@@ -10513,64 +10600,94 @@ function App() {
                     </button>
                   ) : null}
                 </div>
-                {hub?.warning ? (
-                  <div className="settings-metadata-line settings-metadata-error">{hub.warning}</div>
-                ) : null}
-                {agentCard?.error || hub?.error ? (
-                  <div className="settings-metadata-line settings-metadata-error">{agentCard?.error || hub?.error}</div>
-                ) : null}
-                {operation ? (
-                  <div className={`agent-package-task ${operation.status === 'failed' ? 'failed' : ''}`}>
-                    <span>{packageStatusLabel(operation.status)}</span>
-                    {operation.packageName ? <span>{operation.packageName}</span> : null}
-                    {operation.message ? <span>{operation.message}</span> : null}
-                    {operation.errorSummary ? <span>{operation.errorSummary}</span> : null}
+                <section className="npm-update-section">
+                  <div className="npm-update-disclosure">
+                    <button
+                      type="button"
+                      className="npm-update-disclosure-btn"
+                      aria-expanded={npmExpanded}
+                      onClick={() => setExpandedNpmUpdateHubIds(prev => ({
+                        ...prev,
+                        [card.hubId]: !prev[card.hubId],
+                      }))}
+                    >
+                      <span className={`codicon ${npmExpanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} aria-hidden="true" />
+                      <span className="npm-update-title">NPM Update</span>
+                      <span className="npm-update-count">{npmPackageUpdateSummary(npmUpdateTargets.length)}</span>
+                      <span className="npm-update-total">{hub?.packages.length ?? 0} packages</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="npm-update-action-btn"
+                      disabled={npmUpdateTargets.length === 0 || npmActionDisabled}
+                      onClick={() => requestAgentPackageHubUpdate(card.hubId, npmUpdateTargets)}
+                    >
+                      {npmHubUpdatePending ? 'Updating...' : 'Update NPM'}
+                    </button>
                   </div>
-                ) : null}
-                <div className="agent-package-row-list">
-                  {(hub?.packages ?? []).map(pkg => {
-                    const action = agentPackageActionForPackage(pkg);
-                    const pendingKey = agentPackageActionKey(card.hubId, pkg.packageName);
-                    const pending = agentPackageActionPendingKey === pendingKey || operation?.running === true;
-                    return (
-                      <div key={`${card.hubId}:${pkg.packageName}`} className="agent-package-row">
-                        <div className="agent-package-title-line">
-                          <span className="settings-metadata-title" title={pkg.displayName}>{pkg.displayName}</span>
-                          {pkg.agentTypes.length > 0 ? (
-                            <span className="agent-package-agent-tags">
-                              {pkg.agentTypes.map(agent => (
-                                <span key={`${pkg.packageName}:${agent}`} className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', agent)}`}>
-                                  {agent}
-                                </span>
-                              ))}
-                            </span>
-                          ) : null}
+                  {npmExpanded ? (
+                    <div className="npm-update-body">
+                      {hub?.warning ? (
+                        <div className="settings-metadata-line settings-metadata-error">{hub.warning}</div>
+                      ) : null}
+                      {agentCard?.error || hub?.error ? (
+                        <div className="settings-metadata-line settings-metadata-error">{agentCard?.error || hub?.error}</div>
+                      ) : null}
+                      {operation ? (
+                        <div className={`agent-package-task ${operation.status === 'failed' ? 'failed' : ''}`}>
+                          <span>{packageStatusLabel(operation.status)}</span>
+                          {operation.packageName ? <span>{operation.packageName}</span> : null}
+                          {operation.message ? <span>{operation.message}</span> : null}
+                          {operation.errorSummary ? <span>{operation.errorSummary}</span> : null}
                         </div>
-                        <div className="agent-package-name-line">
-                          <span className="agent-package-name" title={pkg.packageName}>{pkg.packageName}</span>
-                        </div>
-                        {action ? (
-                          <button
-                            type="button"
-                            className={`agent-package-action-btn ${action === 'uninstall' ? 'danger' : ''}`}
-                            disabled={pending}
-                            onClick={() => requestAgentPackageAction(action, card.hubId, pkg)}
-                          >
-                            {pending ? 'Running...' : agentPackageActionLabel(action)}
-                          </button>
-                        ) : null}
-                        <div className="agent-package-version-line">
-                          <span>Installed: {pkg.installedVersion || '-'}</span>
-                          <span>Latest: {pkg.latestVersion || '-'}</span>
-                          <span className={`agent-package-status agent-package-version-status status-${pkg.status}`}>{packageStatusLabel(pkg.status)}</span>
-                        </div>
-                        {pkg.error ? (
-                          <div className="settings-metadata-error">{pkg.error}</div>
-                        ) : null}
+                      ) : null}
+                      <div className="agent-package-row-list">
+                        {(hub?.packages ?? []).map(pkg => {
+                          const action = agentPackageActionForPackage(pkg);
+                          const pendingKey = agentPackageActionKey(card.hubId, pkg.packageName);
+                          const pending = agentPackageActionPendingKey === pendingKey || operation?.running === true || npmHubUpdatePending;
+                          return (
+                            <div key={`${card.hubId}:${pkg.packageName}`} className="agent-package-row">
+                              <div className="agent-package-title-line">
+                                <span className="settings-metadata-title" title={pkg.displayName}>{pkg.displayName}</span>
+                                {pkg.agentTypes.length > 0 ? (
+                                  <span className="agent-package-agent-tags">
+                                    {pkg.agentTypes.map(agent => (
+                                      <span key={`${pkg.packageName}:${agent}`} className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', agent)}`}>
+                                        {agent}
+                                      </span>
+                                    ))}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="agent-package-name-line">
+                                <span className="agent-package-name" title={pkg.packageName}>{pkg.packageName}</span>
+                              </div>
+                              {action ? (
+                                <button
+                                  type="button"
+                                  className={`agent-package-action-btn ${action === 'uninstall' ? 'danger' : ''}`}
+                                  disabled={pending}
+                                  onClick={() => requestAgentPackageAction(action, card.hubId, pkg)}
+                                >
+                                  {pending ? 'Running...' : agentPackageActionLabel(action)}
+                                </button>
+                              ) : null}
+                              <div className="agent-package-version-line">
+                                <span>Installed: {pkg.installedVersion || '-'}</span>
+                                <span>Latest: {pkg.latestVersion || '-'}</span>
+                                <span className={`agent-package-status agent-package-version-status status-${pkg.status}`}>{packageStatusLabel(pkg.status)}</span>
+                              </div>
+                              {pkg.error ? (
+                                <div className="settings-metadata-error">{pkg.error}</div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
+                  ) : null}
+                </section>
               </div>
             );
           })}
@@ -13639,6 +13756,7 @@ function App() {
   const archiveTarget = confirmTarget?.kind === 'archive' ? confirmTarget : null;
   const deleteTarget = confirmTarget?.kind === 'delete' ? confirmTarget : null;
   const npmPackageTarget = confirmTarget?.kind === 'npmPackage' ? confirmTarget : null;
+  const npmPackageHubUpdateTarget = confirmTarget?.kind === 'npmPackageHubUpdate' ? confirmTarget : null;
   const wheelMakerUpdateTarget = confirmTarget?.kind === 'wheelMakerUpdate' ? confirmTarget : null;
   const wheelMakerUpdateAllTarget = confirmTarget?.kind === 'wheelMakerUpdateAll' ? confirmTarget : null;
   const skillInstallConfirmTarget = confirmTarget?.kind === 'skillInstall' ? confirmTarget : null;
@@ -13663,100 +13781,112 @@ function App() {
       ? chatDeletingSessionId === deleteTarget.sessionId
       : npmPackageTarget
         ? agentPackageActionPendingKey === npmPackageConfirmPendingKey
-        : wheelMakerUpdateTarget
-          ? wheelMakerUpdatePendingHubId === wheelMakerUpdateTarget.hubId
-          : wheelMakerUpdateAllTarget
-            ? wheelMakerUpdateAllPending
-            : skillConfirmTarget
-              ? skillsPendingKey === skillConfirmPendingKey
-              : false;
+        : npmPackageHubUpdateTarget
+          ? agentPackageHubUpdatePendingId === npmPackageHubUpdateTarget.hubId
+          : wheelMakerUpdateTarget
+            ? wheelMakerUpdatePendingHubId === wheelMakerUpdateTarget.hubId
+            : wheelMakerUpdateAllTarget
+              ? wheelMakerUpdateAllPending
+              : skillConfirmTarget
+                ? skillsPendingKey === skillConfirmPendingKey
+                : false;
   const confirmTitle = confirmTarget?.kind === 'clearCache'
     ? 'Clear local cache?'
     : deleteTarget
       ? 'Delete session?'
       : npmPackageTarget
         ? `${agentPackageActionLabel(npmPackageTarget.action)} package?`
-        : wheelMakerUpdateTarget
-          ? 'Update and publish WheelMaker?'
-          : wheelMakerUpdateAllTarget
-            ? 'Update all hubs?'
-            : skillInstallConfirmTarget
-              ? 'Install skills?'
-              : skillUninstallConfirmTarget
-                ? 'Uninstall skill?'
-                : skillUpdateConfirmTarget
-                  ? 'Update skills?'
-                  : 'Archive session?';
+        : npmPackageHubUpdateTarget
+          ? 'Update npm packages?'
+          : wheelMakerUpdateTarget
+            ? 'Update and publish WheelMaker?'
+            : wheelMakerUpdateAllTarget
+              ? 'Update all hubs?'
+              : skillInstallConfirmTarget
+                ? 'Install skills?'
+                : skillUninstallConfirmTarget
+                  ? 'Uninstall skill?'
+                  : skillUpdateConfirmTarget
+                    ? 'Update skills?'
+                    : 'Archive session?';
   const confirmName = confirmTarget?.kind === 'clearCache'
     ? 'Token and server address will be preserved.'
     : deleteTarget
       ? deleteTarget.title || 'Untitled session'
       : npmPackageTarget
         ? npmPackageTarget.displayName || npmPackageTarget.packageName
-        : wheelMakerUpdateTarget
-          ? `Hub: ${wheelMakerUpdateTarget.hubId}`
-          : wheelMakerUpdateAllTarget
-            ? `${wheelMakerUpdateAllTarget.hubIds.length} hubs`
-            : skillInstallConfirmTarget
-              ? skillScopeLabel(skillInstallConfirmTarget)
-              : skillUninstallConfirmTarget
-                ? skillUninstallConfirmTarget.skillName
-                : skillUpdateConfirmTarget
-                  ? skillScopeLabel(skillUpdateConfirmTarget)
-                  : archiveTarget?.title || 'Untitled session';
+        : npmPackageHubUpdateTarget
+          ? `${npmPackageHubUpdateTarget.hubId} - ${npmPackageUpdateSummary(npmPackageHubUpdateTarget.packages.length)}`
+          : wheelMakerUpdateTarget
+            ? `Hub: ${wheelMakerUpdateTarget.hubId}`
+            : wheelMakerUpdateAllTarget
+              ? `${wheelMakerUpdateAllTarget.hubIds.length} hubs`
+              : skillInstallConfirmTarget
+                ? skillScopeLabel(skillInstallConfirmTarget)
+                : skillUninstallConfirmTarget
+                  ? skillUninstallConfirmTarget.skillName
+                  : skillUpdateConfirmTarget
+                    ? skillScopeLabel(skillUpdateConfirmTarget)
+                    : archiveTarget?.title || 'Untitled session';
   const confirmCopy = confirmTarget?.kind === 'clearCache'
     ? 'The app will reload after local cached workspace data is cleared.'
     : deleteTarget
       ? 'This permanently deletes the session data from the Hub.'
       : npmPackageTarget
         ? `Hub: ${npmPackageTarget.hubId}. Package: ${npmPackageTarget.packageName}. Installed: ${npmPackageTarget.installedVersion || '-'}. Target: ${npmPackageTarget.action === 'uninstall' ? 'remove deprecated package' : npmPackageTarget.latestVersion || 'latest'}. Restart WheelMaker or start a new agent session for changes to take effect.`
-        : wheelMakerUpdateTarget
-          ? `Current: ${shortGitSha(wheelMakerUpdateTarget.currentSha)}. Latest: ${shortGitSha(wheelMakerUpdateTarget.latestSha)}. ${wheelMakerUpdateTarget.behindCount > 0 ? `${wheelMakerUpdateTarget.behindCount} commits behind. ` : ''}This writes a full-update signal; updater will pull, build, publish Web, and restart Hub/Monitor. Updater itself is not restarted.`
-          : wheelMakerUpdateAllTarget
-            ? `This sends update-publish to ${wheelMakerUpdateAllTarget.hubIds.length} hubs. Each hub may pull, build, publish Web, and restart independently.`
-            : skillInstallConfirmTarget
-              ? `Source: ${skillInstallConfirmTarget.source}. Skills: ${skillInstallConfirmTarget.skills.join(', ')}.`
-              : skillUninstallConfirmTarget
-                ? `Remove from ${skillScopeLabel(skillUninstallConfirmTarget)}.`
-                : skillUpdateConfirmTarget
-                  ? skillUpdateConfirmTarget.includeProjects
-                    ? 'Updates Hub Skills and online Project Skills on this Hub.'
-                    : `Updates installed skills in ${skillScopeLabel(skillUpdateConfirmTarget)}.`
-                  : 'Archived sessions leave the chat list.';
+        : npmPackageHubUpdateTarget
+          ? `Runs latest install/update for ${npmPackageHubUpdateTarget.packages.map(pkg => pkg.displayName || pkg.packageName).join(', ')}. Restart WheelMaker or start a new agent session for changes to take effect.`
+          : wheelMakerUpdateTarget
+            ? `Current: ${shortGitSha(wheelMakerUpdateTarget.currentSha)}. Latest: ${shortGitSha(wheelMakerUpdateTarget.latestSha)}. ${wheelMakerUpdateTarget.behindCount > 0 ? `${wheelMakerUpdateTarget.behindCount} commits behind. ` : ''}This writes a full-update signal; updater will pull, build, publish Web, and restart Hub/Monitor. Updater itself is not restarted.`
+            : wheelMakerUpdateAllTarget
+              ? `This sends update-publish to ${wheelMakerUpdateAllTarget.hubIds.length} hubs. Each hub may pull, build, publish Web, and restart independently.`
+              : skillInstallConfirmTarget
+                ? `Source: ${skillInstallConfirmTarget.source}. Skills: ${skillInstallConfirmTarget.skills.join(', ')}.`
+                : skillUninstallConfirmTarget
+                  ? `Remove from ${skillScopeLabel(skillUninstallConfirmTarget)}.`
+                  : skillUpdateConfirmTarget
+                    ? skillUpdateConfirmTarget.includeProjects
+                      ? 'Updates Hub Skills and online Project Skills on this Hub.'
+                      : `Updates installed skills in ${skillScopeLabel(skillUpdateConfirmTarget)}.`
+                    : 'Archived sessions leave the chat list.';
   const confirmIcon = confirmTarget?.kind === 'clearCache'
     ? 'codicon-trash'
     : deleteTarget
       ? 'codicon-trash'
       : npmPackageTarget
         ? npmPackageTarget.action === 'uninstall' ? 'codicon-trash' : 'codicon-cloud-download'
-        : wheelMakerUpdateTarget
+        : npmPackageHubUpdateTarget
           ? 'codicon-cloud-download'
-          : wheelMakerUpdateAllTarget
+          : wheelMakerUpdateTarget
             ? 'codicon-cloud-download'
-            : skillInstallConfirmTarget
+            : wheelMakerUpdateAllTarget
               ? 'codicon-cloud-download'
-              : skillUninstallConfirmTarget
-                ? 'codicon-trash'
-                : skillUpdateConfirmTarget
-                  ? 'codicon-sync'
-                  : 'codicon-archive';
+              : skillInstallConfirmTarget
+                ? 'codicon-cloud-download'
+                : skillUninstallConfirmTarget
+                  ? 'codicon-trash'
+                  : skillUpdateConfirmTarget
+                    ? 'codicon-sync'
+                    : 'codicon-archive';
   const confirmPrimaryLabel = confirmTarget?.kind === 'clearCache'
     ? 'Clear Cache'
     : deleteTarget
       ? 'Delete'
       : npmPackageTarget
         ? agentPackageActionLabel(npmPackageTarget.action)
-        : wheelMakerUpdateTarget
+        : npmPackageHubUpdateTarget
           ? 'Update'
-          : wheelMakerUpdateAllTarget
+          : wheelMakerUpdateTarget
             ? 'Update'
-            : skillInstallConfirmTarget
-              ? 'Install'
-              : skillUninstallConfirmTarget
-                ? 'Uninstall'
-                : skillUpdateConfirmTarget
-                  ? 'Update'
-                  : 'Archive';
+            : wheelMakerUpdateAllTarget
+              ? 'Update'
+              : skillInstallConfirmTarget
+                ? 'Install'
+                : skillUninstallConfirmTarget
+                  ? 'Uninstall'
+                  : skillUpdateConfirmTarget
+                    ? 'Update'
+                    : 'Archive';
   const confirmPrimaryClassName = confirmTarget?.kind === 'clearCache' || !!deleteTarget || npmPackageTarget?.action === 'uninstall' || !!skillUninstallConfirmTarget
     ? 'app-confirm-btn primary danger'
     : 'app-confirm-btn primary';
@@ -13780,6 +13910,10 @@ function App() {
     }
     if (confirmTarget.kind === 'npmPackage') {
       handleAgentPackageConfirmedAction(confirmTarget).catch(() => undefined);
+      return;
+    }
+    if (confirmTarget.kind === 'npmPackageHubUpdate') {
+      handleAgentPackageHubUpdateConfirmedAction(confirmTarget).catch(() => undefined);
       return;
     }
     if (confirmTarget.kind === 'wheelMakerUpdate') {
