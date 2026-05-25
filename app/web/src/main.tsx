@@ -193,7 +193,6 @@ import type {
   RegistryGitCommit,
   RegistryGitCommitFile,
   RegistryGitStatus,
-  RegistryNpmCommandResponse,
   RegistryNpmHubSnapshot,
   RegistryNpmOperation,
   RegistryNpmPackage,
@@ -8642,37 +8641,19 @@ function App() {
     setAgentPackagesError('');
     setAgentPackageHubUpdatePendingId(target.hubId);
     try {
-      const responses = [];
-      for (const pkg of target.packages) {
-        try {
-          const result = await service.installNpmPackage(target.hubId, pkg.packageName, 'latest');
-          responses.push({
-            packageName: pkg.packageName,
-            result,
-            error: result.ok ? '' : result.operation?.errorSummary || result.operation?.message || 'Update request failed.',
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          responses.push({packageName: pkg.packageName, error: message});
-        }
-      }
-      const lastOperation = [...responses]
-        .reverse()
-        .find((entry): entry is {packageName: string; result: RegistryNpmCommandResponse; error: string} => 'result' in entry)
-        ?.result.operation ?? null;
+      const result = await service.installNpmPackages(target.hubId, target.packages.map(pkg => pkg.packageName), 'latest');
       setAgentPackageHubs(prev => ({
         ...prev,
         [target.hubId]: {
           ...(prev[target.hubId] ?? {hubId: target.hubId, loading: false, error: '', updatedAt: '', hub: null, operation: null}),
-          operation: lastOperation,
+          operation: result.operation ?? null,
         },
       }));
       setConfirmTarget(null);
       setConfirmError('');
       await refreshAgentPackages();
-      const failedUpdates = responses.filter(entry => entry.error);
-      if (failedUpdates.length > 0) {
-        const message = `Failed to update ${failedUpdates.length} of ${target.packages.length} npm packages on ${target.hubId}: ${failedUpdates.map(entry => entry.packageName).join(', ')}`;
+      if (!result.ok) {
+        const message = result.operation?.errorSummary || result.operation?.message || 'Update request failed.';
         setAgentPackagesError(message);
         setAgentPackageHubs(prev => ({
           ...prev,

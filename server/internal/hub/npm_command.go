@@ -83,10 +83,11 @@ func newNPMCommandWithRunner(runner npmCommandRunner) *NPMCommand {
 }
 
 type npmCommandPayload struct {
-	Action      string `json:"action"`
-	HubID       string `json:"hubId"`
-	PackageName string `json:"packageName,omitempty"`
-	Version     string `json:"version,omitempty"`
+	Action       string   `json:"action"`
+	HubID        string   `json:"hubId"`
+	PackageName  string   `json:"packageName,omitempty"`
+	PackageNames []string `json:"packageNames,omitempty"`
+	Version      string   `json:"version,omitempty"`
 }
 
 type npmCommandResponse struct {
@@ -123,16 +124,17 @@ type npmPackageStatus struct {
 }
 
 type npmOperationSnapshot struct {
-	Running      bool   `json:"running"`
-	Action       string `json:"action"`
-	PackageName  string `json:"packageName"`
-	Version      string `json:"version"`
-	Status       string `json:"status"`
-	StartedAt    string `json:"startedAt"`
-	FinishedAt   string `json:"finishedAt"`
-	ExitCode     *int   `json:"exitCode"`
-	ErrorSummary string `json:"errorSummary"`
-	Message      string `json:"message,omitempty"`
+	Running      bool     `json:"running"`
+	Action       string   `json:"action"`
+	PackageName  string   `json:"packageName"`
+	PackageNames []string `json:"packageNames,omitempty"`
+	Version      string   `json:"version"`
+	Status       string   `json:"status"`
+	StartedAt    string   `json:"startedAt"`
+	FinishedAt   string   `json:"finishedAt"`
+	ExitCode     *int     `json:"exitCode"`
+	ErrorSummary string   `json:"errorSummary"`
+	Message      string   `json:"message,omitempty"`
 }
 
 type npmCommandError struct {
@@ -178,6 +180,7 @@ func (c *NPMCommand) Handle(ctx context.Context, raw json.RawMessage) (any, *npm
 	payload.Action = strings.TrimSpace(payload.Action)
 	payload.HubID = strings.TrimSpace(payload.HubID)
 	payload.PackageName = strings.TrimSpace(payload.PackageName)
+	payload.PackageNames = normalizeNPMPackageNames(payload.PackageNames)
 	payload.Version = strings.TrimSpace(payload.Version)
 	if payload.HubID == "" {
 		return nil, &npmCommandError{Code: rp.CodeInvalidArgument, Message: "hubId is required"}
@@ -188,6 +191,8 @@ func (c *NPMCommand) Handle(ctx context.Context, raw json.RawMessage) (any, *npm
 		return c.scan(ctx, payload.HubID), nil
 	case "install":
 		return c.startInstall(payload)
+	case "install_many":
+		return c.startInstallMany(payload)
 	case "uninstall":
 		return c.startUninstall(payload)
 	default:
@@ -217,7 +222,7 @@ func (c *NPMCommand) scan(ctx context.Context, hubID string) npmCommandResponse 
 	latest, missingLatest := c.latestResultsForScan(now)
 	operation := c.currentOperationSnapshot()
 	if len(missingLatest) > 0 && (operation == nil || !operation.Running) {
-		started, cmdErr := c.acceptOperation("scan_latest", "", "")
+		started, cmdErr := c.acceptOperation("scan_latest", "", "", nil)
 		if cmdErr == nil {
 			operation = cloneNPMOperation(started)
 			go c.runLatestOperation(started, missingLatest)
@@ -268,6 +273,23 @@ func cloneNPMStringSlice(values []string) []string {
 		return []string{}
 	}
 	return append([]string(nil), values...)
+}
+
+func normalizeNPMPackageNames(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		packageName := strings.TrimSpace(value)
+		if packageName == "" {
+			continue
+		}
+		if _, ok := seen[packageName]; ok {
+			continue
+		}
+		seen[packageName] = struct{}{}
+		out = append(out, packageName)
+	}
+	return out
 }
 
 type npmLatestResult struct {
@@ -383,11 +405,35 @@ func (c *NPMCommand) startInstall(payload npmCommandPayload) (any, *npmCommandEr
 	if !runtimePackageAllowed(payload.PackageName) {
 		return nil, &npmCommandError{Code: rp.CodeForbidden, Message: "package is not installable"}
 	}
-	operation, cmdErr := c.acceptOperation("install", payload.PackageName, version)
+	operation, cmdErr := c.acceptOperation("install", payload.PackageName, version, nil)
 	if cmdErr != nil {
 		return nil, cmdErr
 	}
 	go c.runCommandOperation(operation, "npm", "install", "-g", payload.PackageName+"@"+version)
+	return npmCommandResponse{OK: true, Accepted: true, Operation: cloneNPMOperation(operation)}, nil
+}
+
+func (c *NPMCommand) startInstallMany(payload npmCommandPayload) (any, *npmCommandError) {
+	if len(payload.PackageNames) == 0 {
+		return nil, &npmCommandError{Code: rp.CodeInvalidArgument, Message: "packageNames is required"}
+	}
+	version := payload.Version
+	if version == "" {
+		version = "latest"
+	}
+	if version != "latest" {
+		return nil, &npmCommandError{Code: rp.CodeInvalidArgument, Message: "version must be latest"}
+	}
+	for _, packageName := range payload.PackageNames {
+		if !runtimePackageAllowed(packageName) {
+			return nil, &npmCommandError{Code: rp.CodeForbidden, Message: "package is not installable"}
+		}
+	}
+	operation, cmdErr := c.acceptOperation("install_many", "", version, payload.PackageNames)
+	if cmdErr != nil {
+		return nil, cmdErr
+	}
+	go c.runInstallManyOperation(operation, payload.PackageNames, version)
 	return npmCommandResponse{OK: true, Accepted: true, Operation: cloneNPMOperation(operation)}, nil
 }
 
@@ -398,7 +444,7 @@ func (c *NPMCommand) startUninstall(payload npmCommandPayload) (any, *npmCommand
 	if !deprecatedPackageAllowed(payload.PackageName) {
 		return nil, &npmCommandError{Code: rp.CodeForbidden, Message: "package is not uninstallable"}
 	}
-	operation, cmdErr := c.acceptOperation("uninstall", payload.PackageName, "")
+	operation, cmdErr := c.acceptOperation("uninstall", payload.PackageName, "", nil)
 	if cmdErr != nil {
 		return nil, cmdErr
 	}
@@ -406,7 +452,7 @@ func (c *NPMCommand) startUninstall(payload npmCommandPayload) (any, *npmCommand
 	return npmCommandResponse{OK: true, Accepted: true, Operation: cloneNPMOperation(operation)}, nil
 }
 
-func (c *NPMCommand) acceptOperation(action string, packageName string, version string) (*npmOperationSnapshot, *npmCommandError) {
+func (c *NPMCommand) acceptOperation(action string, packageName string, version string, packageNames []string) (*npmOperationSnapshot, *npmCommandError) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.operation != nil && c.operation.Running {
@@ -417,12 +463,13 @@ func (c *NPMCommand) acceptOperation(action string, packageName string, version 
 		status = "checking_latest"
 	}
 	operation := &npmOperationSnapshot{
-		Running:     true,
-		Action:      action,
-		PackageName: packageName,
-		Version:     version,
-		Status:      status,
-		StartedAt:   c.now().Format(time.RFC3339),
+		Running:      true,
+		Action:       action,
+		PackageName:  packageName,
+		PackageNames: cloneNPMStringSlice(packageNames),
+		Version:      version,
+		Status:       status,
+		StartedAt:    c.now().Format(time.RFC3339),
 	}
 	c.operation = operation
 	return operation, nil
@@ -452,6 +499,39 @@ func (c *NPMCommand) runCommandOperation(operation *npmOperationSnapshot, name s
 	} else {
 		operation.Message = fmt.Sprintf("Installed %s@%s. Restart WheelMaker or start a new agent session for the change to take effect.", operation.PackageName, operation.Version)
 	}
+}
+
+func (c *NPMCommand) runInstallManyOperation(operation *npmOperationSnapshot, packageNames []string, version string) {
+	var failed []string
+	var exitCode *int
+	for _, packageName := range packageNames {
+		result := c.runner.Run(context.Background(), "npm", "install", "-g", packageName+"@"+version)
+		if commandFailed(result) {
+			code := result.ExitCode
+			exitCode = &code
+			failed = append(failed, packageName+": "+formatNPMTaskErrorSummary(result.ExitCode, result.Stdout, result.Stderr))
+		}
+	}
+	finishedAt := c.now().Format(time.RFC3339)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.operation != operation {
+		return
+	}
+	operation.Running = false
+	operation.FinishedAt = finishedAt
+	if exitCode != nil {
+		code := *exitCode
+		operation.ExitCode = &code
+	}
+	if len(failed) > 0 {
+		operation.Status = "failed"
+		operation.ErrorSummary = "Failed npm package installs: " + strings.Join(failed, "; ")
+		return
+	}
+	operation.Status = "succeeded"
+	operation.Message = fmt.Sprintf("Installed %d npm %s. Restart WheelMaker or start a new agent session for the change to take effect.", len(packageNames), pluralNoun(len(packageNames), "package", "packages"))
 }
 
 func (c *NPMCommand) currentOperationSnapshot() *npmOperationSnapshot {
@@ -575,9 +655,17 @@ func cloneNPMOperation(operation *npmOperationSnapshot) *npmOperationSnapshot {
 		return nil
 	}
 	cp := *operation
+	cp.PackageNames = cloneNPMStringSlice(operation.PackageNames)
 	if operation.ExitCode != nil {
 		exitCode := *operation.ExitCode
 		cp.ExitCode = &exitCode
 	}
 	return &cp
+}
+
+func pluralNoun(count int, singular string, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }

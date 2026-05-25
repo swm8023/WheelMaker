@@ -264,6 +264,39 @@ func TestNPMCommandAcceptsRuntimeInstallAndDeprecatedUninstall(t *testing.T) {
 	}
 }
 
+func TestNPMCommandAcceptsBulkRuntimeInstallAsSingleOperation(t *testing.T) {
+	runner := newFakeNPMRunner()
+	cmd := newNPMCommandWithRunner(runner)
+
+	resp, cmdErr := cmd.Handle(context.Background(), rawNPMCommandPayload(t, map[string]any{
+		"action":       "install_many",
+		"hubId":        "hub-a",
+		"packageNames": []string{"@openai/codex", "@anthropic-ai/claude-code"},
+		"version":      "latest",
+	}))
+	if cmdErr != nil {
+		t.Fatalf("bulk install error: %#v", cmdErr)
+	}
+	body := resp.(npmCommandResponse)
+	if !body.Accepted || body.Operation == nil || body.Operation.Action != "install_many" {
+		t.Fatalf("response=%#v, want accepted install_many operation", body)
+	}
+	if !reflect.DeepEqual(body.Operation.PackageNames, []string{"@openai/codex", "@anthropic-ai/claude-code"}) {
+		t.Fatalf("package names=%#v", body.Operation.PackageNames)
+	}
+
+	operation := waitForNPMTestOperation(t, cmd)
+	if operation.Status != "succeeded" || !strings.Contains(operation.Message, "Installed 2 npm packages") {
+		t.Fatalf("operation=%#v, want succeeded bulk install", operation)
+	}
+	if !runner.hasCall("npm", "install", "-g", "@openai/codex@latest") {
+		t.Fatalf("codex install call not found: %#v", runner.calls)
+	}
+	if !runner.hasCall("npm", "install", "-g", "@anthropic-ai/claude-code@latest") {
+		t.Fatalf("claude install call not found: %#v", runner.calls)
+	}
+}
+
 func TestNPMCommandRejectsUnsupportedPackagePolicy(t *testing.T) {
 	cmd := newNPMCommandWithRunner(newFakeNPMRunner())
 	cases := []struct {

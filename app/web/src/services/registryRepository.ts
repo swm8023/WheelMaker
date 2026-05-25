@@ -986,6 +986,19 @@ export class RegistryRepository {
     return normalizeNpmCommandResponse(resp.payload, hubId);
   }
 
+  async installNpmPackages(hubId: string, packageNames: string[], version = 'latest'): Promise<RegistryNpmCommandResponse> {
+    const resp = await this.client.request({
+      method: 'cmd.npm',
+      payload: {
+        action: 'install_many',
+        hubId,
+        packageNames,
+        version,
+      },
+    });
+    return normalizeNpmCommandResponse(resp.payload, hubId);
+  }
+
   async uninstallNpmPackage(hubId: string, packageName: string): Promise<RegistryNpmCommandResponse> {
     const resp = await this.client.request({
       method: 'cmd.npm',

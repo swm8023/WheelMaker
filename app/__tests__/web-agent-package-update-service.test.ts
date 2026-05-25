@@ -96,6 +96,7 @@ describe('agent package update registry service', () => {
 
     await repository.installNpmPackage('hub-a', '@openai/codex', 'latest');
     await repository.uninstallNpmPackage('hub-a', '@zed-industries/claude-agent-acp');
+    await repository.installNpmPackages('hub-a', ['@openai/codex', '@anthropic-ai/claude-code'], 'latest');
 
     expect(client.request).toHaveBeenNthCalledWith(1, {
       method: 'cmd.npm',
@@ -114,7 +115,16 @@ describe('agent package update registry service', () => {
         packageName: '@zed-industries/claude-agent-acp',
       },
     });
-    expect(client.request).toHaveBeenCalledTimes(2);
+    expect(client.request).toHaveBeenNthCalledWith(3, {
+      method: 'cmd.npm',
+      payload: {
+        action: 'install_many',
+        hubId: 'hub-a',
+        packageNames: ['@openai/codex', '@anthropic-ai/claude-code'],
+        version: 'latest',
+      },
+    });
+    expect(client.request).toHaveBeenCalledTimes(3);
   });
 
   test('sends cmd.update query and update-publish with controlled payloads', async () => {

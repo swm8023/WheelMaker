@@ -209,8 +209,9 @@ export interface RegistryNpmHubSnapshot {
 
 export interface RegistryNpmOperation {
   running: boolean;
-  action: 'scan_latest' | 'install' | 'uninstall' | string;
+  action: 'scan_latest' | 'install' | 'install_many' | 'uninstall' | string;
   packageName: string;
+  packageNames?: string[];
   version: string;
   status: RegistryNpmPackageStatus;
   startedAt: string;

@@ -556,6 +556,13 @@ export class RegistryWorkspaceService {
     return this.repository.installNpmPackage(hubId, packageName, version);
   }
 
+  async installNpmPackages(hubId: string, packageNames: string[], version = 'latest'): Promise<RegistryNpmCommandResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.installNpmPackages(hubId, packageNames, version);
+  }
+
   async uninstallNpmPackage(hubId: string, packageName: string): Promise<RegistryNpmCommandResponse> {
     if (!this.repository) {
       throw new Error('session is not ready');

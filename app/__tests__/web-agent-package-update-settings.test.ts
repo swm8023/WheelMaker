@@ -68,6 +68,7 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('withAgentPackageTimeout(');
     expect(mainTsx).toContain('service.scanNpmPackages');
     expect(mainTsx).toContain('service.installNpmPackage');
+    expect(mainTsx).toContain('service.installNpmPackages');
     expect(mainTsx).toContain('service.uninstallNpmPackage');
     expect(mainTsx).not.toContain('service.queryNpmPackageTask');
     expect(mainTsx).not.toContain('pollAgentPackageTask');
@@ -77,6 +78,8 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('requestAgentPackageHubUpdate(card.hubId, npmUpdateTargets)');
     expect(mainTsx).toContain('handleAgentPackageConfirmedAction');
     expect(mainTsx).toContain('handleAgentPackageHubUpdateConfirmedAction');
+    expect(mainTsx).toContain("await service.installNpmPackages(target.hubId, target.packages.map(pkg => pkg.packageName), 'latest');");
+    expect(mainTsx).not.toContain("for (const pkg of target.packages)");
     expect(mainTsx).toContain('packageStatusLabel');
     expect(mainTsx).toContain('deriveNpmPackageUpdateTargets(hub?.packages ?? [])');
     expect(mainTsx).toContain('npmPackageUpdateSummary(npmUpdateTargets.length)');
