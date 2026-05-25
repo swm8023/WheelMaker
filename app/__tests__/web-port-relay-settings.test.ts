@@ -107,7 +107,7 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).not.toContain('setPortRelayTargetHost(snapshot.targetHost)');
     expect(mainTsx).toContain("targetHost: '127.0.0.1',");
     expect(mainTsx).toContain("const portRelayTargetDisplay = selectedTarget ? `${selectedTarget.hubId} -> 127.0.0.1:${selectedTarget.targetPort}` : 'No target';");
-    expect(mainTsx).toContain('<span>Target</span>');
+    expect(mainTsx).toContain('className="port-relay-target-inline"');
     expect(mainTsx).toContain('{portRelayTargetDisplay}');
     expect(mainTsx).toContain('className="port-relay-target-list"');
     expect(mainTsx).toContain('type="checkbox"');
@@ -120,8 +120,7 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).toContain('setPortRelayAccessCode(generatePortRelayAccessCode());');
 
     expect(stylesCss).toContain('.port-relay-section');
-    expect(stylesCss).toContain('.port-relay-target-row');
-    expect(stylesCss).toContain('.port-relay-target-value');
+    expect(stylesCss).toContain('.port-relay-target-inline');
     expect(stylesCss).toContain('.port-relay-target-list-row');
     expect(stylesCss).toContain('.port-relay-target-delete');
   });
@@ -143,5 +142,27 @@ describe('port relay settings UI source structure', () => {
     expect(stylesCss).toContain('.port-relay-section-title');
     expect(stylesCss).toContain('.port-relay-copy-btn');
     expect(stylesCss).toContain('.port-relay-status-section::before');
+  });
+
+  test('keeps the relay status area to one line without widening the settings panel', () => {
+    const statusStart = mainTsx.indexOf('className="port-relay-section port-relay-status-section"');
+    const statusEnd = mainTsx.indexOf('{portRelayError || portRelaySnapshot.error ?', statusStart);
+    const statusMarkup = mainTsx.slice(statusStart, statusEnd);
+
+    expect(statusMarkup).toContain('className="port-relay-header"');
+    expect(statusMarkup).toContain('className="port-relay-target-inline"');
+    expect(statusMarkup).not.toContain('className="port-relay-target-row"');
+    expect(statusMarkup).not.toContain('className="port-relay-url"');
+
+    const statusCssStart = stylesCss.indexOf('.port-relay-status-section');
+    const statusCssEnd = stylesCss.indexOf('.port-relay-form-grid', statusCssStart);
+    const statusCss = stylesCss.slice(statusCssStart, statusCssEnd);
+
+    expect(statusCss).toContain('min-width: 0;');
+    expect(statusCss).toContain('overflow: hidden;');
+    expect(statusCss).toContain('.port-relay-target-inline');
+    expect(statusCss).toContain('text-overflow: ellipsis;');
+    expect(stylesCss).toContain('.port-relay-code-row {');
+    expect(stylesCss).toContain('flex-wrap: wrap;');
   });
 });

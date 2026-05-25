@@ -10690,15 +10690,13 @@ function App() {
               Relay
             </span>
             <span className={`port-relay-status-pill ${statusClass}`}>{portRelaySnapshot.status}</span>
-            {portRelaySnapshot.relayUrl ? <span className="port-relay-url">{portRelaySnapshot.relayUrl}</span> : null}
+            <code className="port-relay-target-inline" title={portRelayTargetDisplay}>
+              {portRelayTargetDisplay}
+            </code>
           </div>
           {hasPendingListenPortChange ? (
             <div className="port-relay-pending-note">Listen port change applies on Enable.</div>
           ) : null}
-          <div className="port-relay-target-row">
-            <span>Target</span>
-            <code className="port-relay-target-value">{portRelayTargetDisplay}</code>
-          </div>
         </div>
         {portRelayError || portRelaySnapshot.error ? (
           <div className="settings-metadata-error">{portRelayError || portRelaySnapshot.error}</div>

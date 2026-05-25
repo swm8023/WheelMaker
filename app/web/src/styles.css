@@ -1725,6 +1725,7 @@ body,
   display: grid;
   gap: 10px;
   min-width: 0;
+  overflow: hidden;
   padding: 11px;
   border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   border-radius: 8px;
@@ -1760,9 +1761,12 @@ body,
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .port-relay-header {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
   min-height: 28px;
 }
 
@@ -1815,11 +1819,15 @@ body,
   border-color: rgba(255, 123, 114, 0.35);
 }
 
-.port-relay-url {
-  flex: 1 1 auto;
+.port-relay-target-inline {
+  display: block;
   min-width: 0;
   overflow: hidden;
-  color: var(--muted);
+  padding: 5px 7px;
+  border: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
+  border-radius: 6px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel-3) 56%, transparent);
   font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
   font-size: 11.5px;
   text-overflow: ellipsis;
@@ -1831,33 +1839,11 @@ body,
   font-size: 11.5px;
 }
 
-.port-relay-target-row {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-  color: var(--muted);
-  font-size: 11.5px;
-}
-
-.port-relay-target-value {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  padding: 7px 8px;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  border-radius: 6px;
-  color: var(--text);
-  background: color-mix(in srgb, var(--panel-3) 72%, transparent);
-  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
-  font-size: 11.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .port-relay-form-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+  min-width: 0;
 }
 
 .port-relay-form-grid label {
@@ -1884,12 +1870,17 @@ body,
 }
 
 .port-relay-code-row input {
-  flex: 1 1 auto;
+  flex: 1 1 96px;
   font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0;
   text-align: center;
+}
+
+.port-relay-code-row {
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .port-relay-code-section {
@@ -1926,7 +1917,7 @@ body,
 
 .port-relay-target-list-row {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 74px 28px;
+  grid-template-columns: 22px minmax(0, 1fr) minmax(54px, 70px) 28px;
   align-items: center;
   gap: 7px;
   min-width: 0;
