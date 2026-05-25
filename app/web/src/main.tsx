@@ -10612,7 +10612,6 @@ function App() {
                       }))}
                     >
                       <span className={`codicon ${npmExpanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} aria-hidden="true" />
-                      <span className="npm-update-title">NPM Update</span>
                       <span className="npm-update-count">{npmPackageUpdateSummary(npmUpdateTargets.length)}</span>
                       <span className="npm-update-total">{hub?.packages.length ?? 0} packages</span>
                     </button>
@@ -10622,7 +10621,7 @@ function App() {
                       disabled={npmUpdateTargets.length === 0 || npmActionDisabled}
                       onClick={() => requestAgentPackageHubUpdate(card.hubId, npmUpdateTargets)}
                     >
-                      {npmHubUpdatePending ? 'Updating...' : 'Update NPM'}
+                      {npmHubUpdatePending ? 'Updating...' : 'Update All'}
                     </button>
                   </div>
                   {npmExpanded ? (

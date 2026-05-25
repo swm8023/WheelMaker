@@ -85,6 +85,9 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('const npmExpanded = expandedNpmUpdateHubIds[card.hubId] === true;');
     expect(mainTsx).toContain('aria-expanded={npmExpanded}');
     expect(mainTsx).toContain('{npmExpanded ? (');
+    expect(mainTsx).not.toContain('<span className="npm-update-title">NPM Update</span>');
+    expect(mainTsx).toContain("npmHubUpdatePending ? 'Updating...' : 'Update All'");
+    expect(mainTsx).not.toContain("npmHubUpdatePending ? 'Updating...' : 'Update NPM'");
     expect(mainTsx).toContain('const showWheelMakerUpdateAction =');
     expect(mainTsx).toContain('shouldShowWheelMakerUpdateAction({');
     expect(mainTsx).toContain('loading: wheelMaker?.loading === true,');
@@ -157,10 +160,21 @@ describe('agent package update settings UI source structure', () => {
     expect(wheelMakerBlock).toContain(": 'Update'}");
     expect(mainTsx).not.toContain('Update+Publish');
 
+    const hubCardBlock = stylesCss.match(/\.agent-package-hub-card \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(hubCardBlock).toContain('border-left: 3px solid');
+
     const panelBlock = stylesCss.match(/\.wheelmaker-update-panel \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(panelBlock).toContain('border-left: 3px solid');
+    expect(panelBlock).not.toContain('border: 1px solid');
+    expect(panelBlock).not.toContain('border-left: 3px solid');
+    expect(panelBlock).not.toContain('background:');
+    expect(panelBlock).not.toContain('border-radius:');
     expect(panelBlock).toContain('grid-template-columns: minmax(0, 1fr) auto;');
     expect(panelBlock).toContain('grid-template-rows: auto auto auto;');
+
+    const npmSectionBlock = stylesCss.match(/\.npm-update-section \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(npmSectionBlock).not.toContain('border: 1px solid');
+    expect(npmSectionBlock).not.toContain('background:');
+    expect(npmSectionBlock).not.toContain('border-radius:');
 
     const versionLineBlock = stylesCss.match(/\.wheelmaker-update-version-line \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(versionLineBlock).toContain('grid-row: 2;');

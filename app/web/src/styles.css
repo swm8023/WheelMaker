@@ -983,11 +983,12 @@ body,
 }
 
 .agent-package-hub-card {
-  gap: 10px;
+  gap: 11px;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 62%, var(--border));
   border-radius: 8px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--panel-2) 98%, var(--accent)) 0%, var(--panel-2) 100%);
-  padding: 12px;
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-2) 97%, var(--accent)) 0%, var(--panel-2) 56%, color-mix(in srgb, var(--panel-2) 94%, var(--panel)) 100%);
+  padding: 12px 13px;
 }
 
 .update-hub-header {
@@ -1008,31 +1009,29 @@ body,
 
 .npm-update-section {
   display: grid;
-  gap: 8px;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
-  padding: 8px;
+  gap: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  padding-top: 8px;
 }
 
 .npm-update-disclosure {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .npm-update-disclosure-btn {
   min-width: 0;
-  min-height: 32px;
+  min-height: 30px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--text);
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 6px;
+  gap: 8px;
+  padding: 0 4px;
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -1045,13 +1044,7 @@ body,
 .npm-update-disclosure-btn .codicon {
   flex: 0 0 auto;
   color: var(--muted);
-  font-size: 14px;
-}
-
-.npm-update-title {
-  flex: 0 0 auto;
-  font-size: 12px;
-  font-weight: 750;
+  font-size: 13px;
 }
 
 .npm-update-count,
@@ -1066,10 +1059,11 @@ body,
 
 .npm-update-count {
   color: color-mix(in srgb, var(--text) 78%, var(--muted));
+  font-weight: 700;
 }
 
 .npm-update-action-btn {
-  min-width: 88px;
+  min-width: 82px;
   min-height: 30px;
   border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
   border-radius: 6px;
@@ -1094,8 +1088,7 @@ body,
 .npm-update-body {
   display: grid;
   gap: 7px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
-  padding-top: 8px;
+  padding: 2px 0 0 20px;
 }
 
 @media (max-width: 560px) {
@@ -1115,11 +1108,7 @@ body,
   align-items: start;
   column-gap: 12px;
   row-gap: 5px;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
-  border-left: 3px solid color-mix(in srgb, var(--accent) 68%, var(--border));
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--panel) 88%, var(--accent));
-  padding: 9px 10px;
+  padding: 1px 0 0;
 }
 
 .wheelmaker-update-title-line {
