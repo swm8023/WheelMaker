@@ -137,6 +137,7 @@ describe('agent package update registry service', () => {
     const repository = new RegistryRepository(client);
 
     await repository.queryWheelMakerUpdate('hub-a');
+    await repository.queryWheelMakerUpdate('hub-a', {force: true});
     await repository.requestWheelMakerUpdatePublish('hub-a');
 
     expect(client.request).toHaveBeenNthCalledWith(1, {
@@ -145,6 +146,11 @@ describe('agent package update registry service', () => {
       timeoutMs: 60000,
     });
     expect(client.request).toHaveBeenNthCalledWith(2, {
+      method: 'cmd.update',
+      payload: {action: 'query', hubId: 'hub-a', force: true},
+      timeoutMs: 60000,
+    });
+    expect(client.request).toHaveBeenNthCalledWith(3, {
       method: 'cmd.update',
       payload: {action: 'update-publish', hubId: 'hub-a'},
     });

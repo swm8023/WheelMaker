@@ -50,6 +50,7 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('refreshWheelMakerUpdates');
     expect(mainTsx).toContain('service.queryWheelMakerUpdate');
     expect(mainTsx).toContain('service.requestWheelMakerUpdatePublish');
+    expect(mainTsx).toContain('refreshWheelMakerUpdates({force: true})');
     expect(mainTsx).toContain("kind: 'wheelMakerUpdate'");
     expect(mainTsx).toContain("kind: 'wheelMakerUpdateAll'");
     expect(mainTsx).toContain('requestWheelMakerUpdatePublish');

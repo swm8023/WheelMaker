@@ -1119,7 +1119,81 @@ func TestUpdateCommandUpdatePublishWritesFullUpdateSignal(t *testing.T) {
 	}
 }
 
-func TestUpdateCommandQueryFetchesRemoteAndCountsBehind(t *testing.T) {
+func TestUpdateCommandQueryUsesCachedRemoteAndCountsBehindByDefault(t *testing.T) {
+	baseDir := t.TempDir()
+	repoDir := filepath.Join(baseDir, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	writeReleaseManifestForTest(t, baseDir, updateReleaseManifest{
+		SchemaVersion: 1,
+		Repo:          repoDir,
+		Branch:        "main",
+		Remote:        "origin",
+		SHA:           "local-sha",
+		PublishedAt:   "2026-05-19T10:00:00Z",
+	})
+	runner := &fakeUpdateRunner{
+		results: map[string]updateCommandResult{
+			"git rev-parse origin/main": {
+				Stdout:   "remote-sha\n",
+				ExitCode: 0,
+			},
+			"git show -s --format=%cI local-sha": {
+				Stdout:   "2026-05-19T08:00:00Z\n",
+				ExitCode: 0,
+			},
+			"git show -s --format=%cI origin/main": {
+				Stdout:   "2026-05-19T09:00:00Z\n",
+				ExitCode: 0,
+			},
+			"git rev-list --count local-sha..origin/main": {
+				Stdout:   "3\n",
+				ExitCode: 0,
+			},
+			"git rev-list --count origin/main..local-sha": {
+				Stdout:   "0\n",
+				ExitCode: 0,
+			},
+			"git status --porcelain": {
+				Stdout:   "",
+				ExitCode: 0,
+			},
+		},
+	}
+	cmd := newUpdateCommandWithRunner(baseDir, runner)
+
+	resp, cmdErr := cmd.Handle(context.Background(), rawUpdateCommandPayload(t, map[string]any{
+		"action": "query",
+		"hubId":  "hub-a",
+	}))
+	if cmdErr != nil {
+		t.Fatalf("Handle query: %v", cmdErr)
+	}
+	out := resp.(updateCommandResponse)
+	if !out.OK || out.Status != "update_available" {
+		t.Fatalf("response=%+v, want update_available", out)
+	}
+	if out.Git == nil || out.Git.LatestSHA != "remote-sha" || out.Git.BehindCount != 3 || out.Git.AheadCount != 0 {
+		t.Fatalf("git=%+v, want remote-sha behind=3 ahead=0", out.Git)
+	}
+	if out.Git.CurrentCommittedAt != "2026-05-19T08:00:00Z" || out.Git.LatestCommittedAt != "2026-05-19T09:00:00Z" {
+		t.Fatalf("git commit times=%+v, want current/latest commit times", out.Git)
+	}
+	wantCalls := []updateCommandCall{
+		{Dir: repoDir, Name: "git", Args: []string{"rev-parse", "origin/main"}},
+		{Dir: repoDir, Name: "git", Args: []string{"show", "-s", "--format=%cI", "local-sha"}},
+		{Dir: repoDir, Name: "git", Args: []string{"show", "-s", "--format=%cI", "origin/main"}},
+		{Dir: repoDir, Name: "git", Args: []string{"rev-list", "--count", "local-sha..origin/main"}},
+		{Dir: repoDir, Name: "git", Args: []string{"rev-list", "--count", "origin/main..local-sha"}},
+		{Dir: repoDir, Name: "git", Args: []string{"status", "--porcelain"}},
+	}
+	if !reflect.DeepEqual(runner.calls, wantCalls) {
+		t.Fatalf("calls mismatch\n got: %#v\nwant: %#v", runner.calls, wantCalls)
+	}
+}
+
+func TestUpdateCommandQueryForceFetchesRemoteAndCountsBehind(t *testing.T) {
 	baseDir := t.TempDir()
 	repoDir := filepath.Join(baseDir, "repo")
 	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
@@ -1169,6 +1243,7 @@ func TestUpdateCommandQueryFetchesRemoteAndCountsBehind(t *testing.T) {
 	resp, cmdErr := cmd.Handle(context.Background(), rawUpdateCommandPayload(t, map[string]any{
 		"action": "query",
 		"hubId":  "hub-a",
+		"force":  true,
 	}))
 	if cmdErr != nil {
 		t.Fatalf("Handle query: %v", cmdErr)
@@ -1179,9 +1254,6 @@ func TestUpdateCommandQueryFetchesRemoteAndCountsBehind(t *testing.T) {
 	}
 	if out.Git == nil || out.Git.LatestSHA != "remote-sha" || out.Git.BehindCount != 3 || out.Git.AheadCount != 0 {
 		t.Fatalf("git=%+v, want remote-sha behind=3 ahead=0", out.Git)
-	}
-	if out.Git.CurrentCommittedAt != "2026-05-19T08:00:00Z" || out.Git.LatestCommittedAt != "2026-05-19T09:00:00Z" {
-		t.Fatalf("git commit times=%+v, want current/latest commit times", out.Git)
 	}
 	wantCalls := []updateCommandCall{
 		{Dir: repoDir, Name: "git", Args: []string{"fetch", "--prune", "origin", "main"}},

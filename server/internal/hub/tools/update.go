@@ -91,6 +91,7 @@ func newUpdateCommandWithRunner(baseDir string, runner updateCommandRunner) *Upd
 type updateCommandPayload struct {
 	Action string `json:"action"`
 	HubID  string `json:"hubId"`
+	Force  bool   `json:"force,omitempty"`
 }
 
 type updateReleaseManifest struct {
@@ -168,7 +169,7 @@ func (c *UpdateCommand) Handle(ctx context.Context, raw json.RawMessage) (any, *
 	}
 	switch payload.Action {
 	case "query":
-		return c.query(ctx, payload.HubID), nil
+		return c.query(ctx, payload.HubID, payload.Force), nil
 	case "update-publish":
 		resp, err := c.requestUpdatePublish(payload.HubID)
 		if err != nil {
@@ -180,7 +181,7 @@ func (c *UpdateCommand) Handle(ctx context.Context, raw json.RawMessage) (any, *
 	}
 }
 
-func (c *UpdateCommand) query(ctx context.Context, hubID string) updateCommandResponse {
+func (c *UpdateCommand) query(ctx context.Context, hubID string, force bool) updateCommandResponse {
 	pendingSignal := fileExists(filepath.Join(c.baseDir, updateSignalFileName))
 	release, err := c.readReleaseManifest()
 	if pendingSignal {
@@ -209,7 +210,7 @@ func (c *UpdateCommand) query(ctx context.Context, hubID string) updateCommandRe
 			Error:            errorString(err),
 		}
 	}
-	resp := c.queryGit(ctx, release)
+	resp := c.queryGit(ctx, release, force)
 	resp.HubID = hubID
 	resp.Release = release
 	resp.PendingSignal = false
@@ -264,15 +265,17 @@ func (c *UpdateCommand) readReleaseManifest() (*updateReleaseManifest, error) {
 	return &manifest, nil
 }
 
-func (c *UpdateCommand) queryGit(ctx context.Context, release *updateReleaseManifest) updateCommandResponse {
+func (c *UpdateCommand) queryGit(ctx context.Context, release *updateReleaseManifest, force bool) updateCommandResponse {
 	ref := release.Remote + "/" + release.Branch
 	git := &updateGitSnapshot{
 		Branch:     release.Branch,
 		Remote:     release.Remote,
 		CurrentSHA: release.SHA,
 	}
-	if result := c.runGit(ctx, release.Repo, "fetch", "--prune", release.Remote, release.Branch); updateCommandFailed(result) {
-		return updateCommandResponse{OK: false, Status: "checking_failed", Git: git, Error: updateResultSummary(result), CanUpdatePublish: true}
+	if force {
+		if result := c.runGit(ctx, release.Repo, "fetch", "--prune", release.Remote, release.Branch); updateCommandFailed(result) {
+			return updateCommandResponse{OK: false, Status: "checking_failed", Git: git, Error: updateResultSummary(result), CanUpdatePublish: true}
+		}
 	}
 	latest, err := c.gitOutput(ctx, release.Repo, "rev-parse", ref)
 	if err != nil {

@@ -9083,7 +9083,7 @@ function App() {
     });
   }, [agentPackageHubs]);
 
-  const refreshWheelMakerUpdateHub = useCallback(async (hubId: string) => {
+  const refreshWheelMakerUpdateHub = useCallback(async (hubId: string, options: {force?: boolean} = {}) => {
     setWheelMakerUpdateHubs(prev => ({
       ...prev,
       [hubId]: {
@@ -9093,7 +9093,7 @@ function App() {
       },
     }));
     try {
-      const result = await service.queryWheelMakerUpdate(hubId);
+      const result = await service.queryWheelMakerUpdate(hubId, options);
       setWheelMakerUpdateHubs(prev => ({
         ...prev,
         [hubId]: {
@@ -9116,7 +9116,7 @@ function App() {
     }
   }, []);
 
-  const refreshWheelMakerUpdates = useCallback(async () => {
+  const refreshWheelMakerUpdates = useCallback(async (options: {force?: boolean} = {}) => {
     setWheelMakerUpdatesLoading(true);
     setWheelMakerUpdatesError('');
     try {
@@ -9140,7 +9140,7 @@ function App() {
       });
       const responses = await Promise.all(hubIds.map(async hubId => {
         try {
-          const result = await service.queryWheelMakerUpdate(hubId);
+          const result = await service.queryWheelMakerUpdate(hubId, options);
           return {hubId, result};
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -11487,7 +11487,7 @@ function App() {
           type="button"
           className="token-stats-refresh-btn token-stats-refresh-inline"
           onClick={() => {
-            refreshWheelMakerUpdates().catch(() => undefined);
+            refreshWheelMakerUpdates({force: true}).catch(() => undefined);
             refreshAgentPackages().catch(() => undefined);
           }}
           disabled={wheelMakerUpdatesLoading || agentPackagesLoading}
@@ -15794,7 +15794,6 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
-
 
 
 

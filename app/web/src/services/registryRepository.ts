@@ -78,6 +78,10 @@ export type LocalReadInitOptions = {
   verifyProof?: LocalReadProofVerifier;
 };
 
+export type QueryWheelMakerUpdateOptions = {
+  force?: boolean;
+};
+
 function normalizeAgentType(agentType: unknown): string | undefined {
   if (typeof agentType !== 'string') {
     return undefined;
@@ -1236,10 +1240,14 @@ export class RegistryRepository {
     return normalizeNpmCommandResponse(resp.payload, hubId);
   }
 
-  async queryWheelMakerUpdate(hubId: string): Promise<RegistryWheelMakerUpdateResponse> {
+  async queryWheelMakerUpdate(hubId: string, options: QueryWheelMakerUpdateOptions = {}): Promise<RegistryWheelMakerUpdateResponse> {
+    const payload: {action: 'query'; hubId: string; force?: boolean} = {action: 'query', hubId};
+    if (options.force === true) {
+      payload.force = true;
+    }
     const resp = await this.client.request({
       method: 'cmd.update',
-      payload: {action: 'query', hubId},
+      payload,
       timeoutMs: 60000,
     });
     return (resp.payload ?? {}) as RegistryWheelMakerUpdateResponse;

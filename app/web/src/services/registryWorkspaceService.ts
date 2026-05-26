@@ -1,4 +1,4 @@
-import {createRegistryRepository, type RegistryRepository} from './registryRepository';
+import {createRegistryRepository, type QueryWheelMakerUpdateOptions, type RegistryRepository} from './registryRepository';
 import {RegistryRequestError} from './registryClient';
 import type {RegistryDebugSink} from './registryClient';
 import type {RegistryDebugConnection} from '../debug/registryDebug';
@@ -654,11 +654,11 @@ export class RegistryWorkspaceService {
     return this.repository.uninstallNpmPackage(hubId, packageName);
   }
 
-  async queryWheelMakerUpdate(hubId: string): Promise<RegistryWheelMakerUpdateResponse> {
+  async queryWheelMakerUpdate(hubId: string, options: QueryWheelMakerUpdateOptions = {}): Promise<RegistryWheelMakerUpdateResponse> {
     if (!this.repository) {
       throw new Error('session is not ready');
     }
-    return this.repository.queryWheelMakerUpdate(hubId);
+    return this.repository.queryWheelMakerUpdate(hubId, options);
   }
 
   async requestWheelMakerUpdatePublish(hubId: string): Promise<RegistryWheelMakerUpdateResponse> {

@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>架构审查 - WheelMaker 废弃飞书与 IM 层</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      body { background: #fafaf9; }
+      .deep { background: linear-gradient(135deg, #0f172a, #334155); color: white; }
+      .module { border: 1px solid #cbd5e1; background: white; border-radius: 0.5rem; padding: 0.65rem; }
+      .shallow { border-color: #f97316; background: #fff7ed; }
+      .leak { color: #b91c1c; }
+      .arrow { color: #64748b; }
+      .mini-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: .08em; color: #64748b; }
+      .mass-row { display:grid; grid-template-columns: 6rem 1fr; gap:.5rem; align-items:center; }
+      .mass-interface { background:#fee2e2; border:1px solid #fca5a5; height:1.8rem; }
+      .mass-implementation { background:#e2e8f0; border:1px solid #94a3b8; height:2.2rem; }
+      .mass-deep-interface { background:#dcfce7; border:1px solid #86efac; height:1.1rem; }
+      .mass-deep-implementation { background:#0f172a; height:4.2rem; }
+    </style>
+  </head>
+  <body class="text-slate-900 font-sans">
+    <main class="max-w-6xl mx-auto px-6 py-10 space-y-10">
+      <header class="space-y-4">
+        <div class="flex items-start justify-between gap-6">
+          <div>
+            <p class="mini-label">WheelMaker - 2026-05-27</p>
+            <h1 class="text-3xl font-semibold tracking-normal">废弃飞书与 IM 抽象层的架构审查</h1>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 max-w-md">
+            ADR 校验：Chat 与 Session 流量继续由 <b>Conversation Registry</b> 拥有。本审查要删除飞书与历史 IM adapter，不把 Chat/Session 改到 Local Hub Read Endpoint。
+          </div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+          <div class="rounded border bg-white p-2"><b>实线框</b><br/>模块（Module）</div>
+          <div class="rounded border bg-white p-2"><b>虚线</b><br/>seam</div>
+          <div class="rounded border bg-white p-2"><b class="leak">红色箭头</b><br/>泄漏</div>
+          <div class="rounded border bg-white p-2"><b>深色框</b><br/>深模块（Deep Module）</div>
+          <div class="rounded border bg-white p-2"><b>橙色框</b><br/>浅模块（Shallow Module）</div>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-8">
+        <article id="app-session-ingress" class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold mr-auto">1. 让 session.* 成为唯一的 App Conversation Module</h2>
+            <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-semibold">Strong</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">in-process</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <p class="mini-label">Before</p>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 h-80">
+                <pre class="mermaid">
+flowchart TD
+  A[Workspace Web UI] -->|session.send| B[registryRepository]
+  B --> C[Registry forward]
+  C --> D[Client.HandleSessionRequest]
+  D --> E[PromptToSession]
+  E -.-> F[im.ChatRef app:sessionId]
+  F -.-> G[im.Router.Bind]
+  G -.-> H[route_bindings]
+  E --> I[Session]
+  I --> J[SessionRecorder]
+  I -.leak.-> G
+  classDef shallow fill:#fff7ed,stroke:#f97316;
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+  class D,E,F,G,H shallow;
+  class I,J deep;
+                </pre>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <p class="mini-label">After</p>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 h-80 flex items-center justify-center">
+                <div class="space-y-3 w-full max-w-sm">
+                  <div class="module text-center">Workspace Web UI</div>
+                  <div class="text-center arrow">session.new / session.send / session.read</div>
+                  <div class="module text-center">Conversation Registry</div>
+                  <div class="text-center arrow">转发请求并广播事件</div>
+                  <div class="deep rounded-lg p-5 text-center">
+                    <div class="font-semibold">Session Conversation Module</div>
+                    <div class="text-xs text-slate-200 mt-2">Session + SessionRecorder + attachment validation</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-4 gap-4 text-sm">
+            <div><p class="mini-label">Files</p><p class="font-mono text-xs">server/internal/hub/client/client.go<br/>server/internal/hub/client/session.go<br/>server/internal/hub/client/session_recorder.go<br/>app/web/src/services/registryRepository.ts</p></div>
+            <div><p class="mini-label">Problem</p><p>App 路径已经使用 session.* 接口（Interface），但实现（Implementation）仍承担旧 IM route 的复杂度。</p></div>
+            <div><p class="mini-label">Solution</p><p>围绕 sessionId 与 SessionRecorder 加深 App Conversation Module；App 发送不再创建 app ChatRef 状态。</p></div>
+            <div><p class="mini-label">Benefits</p><ul class="list-disc pl-4"><li>locality: 一条发送路径</li><li>leverage: sessionId 接口</li><li>测试穿过 SessionRecorder</li><li>route 泄漏收缩</li></ul></div>
+          </div>
+        </article>
+
+        <article id="delete-chat-send" class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold mr-auto">2. 删除 chat.send 与 app IM adapter</h2>
+            <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-semibold">Strong</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">local-substitutable</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <p class="mini-label">Before</p>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 h-80">
+                <div class="mass-row"><div class="text-xs font-mono">chat.send</div><div><div class="mass-interface rounded mb-1"></div><div class="mass-implementation rounded"></div></div></div>
+                <p class="text-xs text-slate-600 mt-2">接口几乎等同于实现：chatId、内存 chatSession、消息镜像、publish hook。</p>
+                <div class="mt-6 grid grid-cols-3 gap-2 text-center text-xs">
+                  <div class="module shallow">Registry ChatHandler</div>
+                  <div class="module shallow">im/app.Channel</div>
+                  <div class="module shallow">chatSession map</div>
+                </div>
+                <div class="text-center leak mt-4">Workspace 已经使用 session.*</div>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <p class="mini-label">After</p>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 h-80">
+                <div class="mass-row"><div class="text-xs font-mono">session.*</div><div><div class="mass-deep-interface rounded mb-1"></div><div class="mass-deep-implementation rounded"></div></div></div>
+                <p class="text-xs text-slate-600 mt-2">小接口；大量行为隐藏在 SessionRecorder 与 Workspace source stores 后面。</p>
+                <div class="mt-6 deep rounded-lg p-6 text-center">只保留 SessionHandler</div>
+                <div class="text-center text-slate-600 mt-4">不再维护 chatId 镜像状态</div>
+              </div>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-4 gap-4 text-sm">
+            <div><p class="mini-label">Files</p><p class="font-mono text-xs">server/internal/im/app/app.go<br/>server/internal/hub/reporter.go<br/>server/internal/registry/server.go<br/>docs/registry-protocol.md</p></div>
+            <div><p class="mini-label">Problem</p><p>chat.send 是 session.* 替代后继续保留的浅模块（Shallow Module）。</p></div>
+            <div><p class="mini-label">Solution</p><p>App 发送直达 session.* 后，删除 ChatHandler、chat.send allowlist 和 app adapter 测试。</p></div>
+            <div><p class="mini-label">Benefits</p><ul class="list-disc pl-4"><li>删除浅模块</li><li>locality: 一个协议</li><li>leverage: 无镜像状态</li><li>事件形状减少</li></ul></div>
+          </div>
+        </article>
+
+        <article id="delete-feishu" class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold mr-auto">3. 删除飞书 adapter 与配置面</h2>
+            <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-semibold">Strong</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">adapter</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <p class="mini-label">Before</p>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 h-80">
+                <pre class="mermaid">
+flowchart LR
+  C[Hub build] --> D{HasFeishu}
+  D -->|yes| F[Feishu adapter]
+  D -->|always| A[App adapter]
+  F --> R[im.Router]
+  A --> R
+  R --> S[Session]
+  F -.leak.-> X[cards / images / blocked updates]
+  classDef shallow fill:#fff7ed,stroke:#f97316;
+  class F,A,R,D shallow;
+                </pre>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <p class="mini-label">After</p>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 h-80 flex items-center justify-center">
+                <div class="deep rounded-lg p-8 text-center max-w-sm">
+                  <div class="font-semibold">App-only Hub runtime</div>
+                  <div class="text-xs text-slate-200 mt-3">没有飞书凭据、飞书卡片、飞书入站图片转换。</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-4 gap-4 text-sm">
+            <div><p class="mini-label">Files</p><p class="font-mono text-xs">server/internal/im/feishu/*<br/>server/internal/shared/config.go<br/>server/internal/hub/hub.go<br/>server/config.example.json<br/>docs/feishu-bot.md</p></div>
+            <div><p class="mini-label">Problem</p><p>飞书已经是死 adapter，却仍然保留配置、文档、图片转换和渲染实现。</p></div>
+            <div><p class="mini-label">Solution</p><p>硬删除飞书运行时代码；根据这次 cut 的迁移策略，拒绝或忽略 projects[].feishu。</p></div>
+            <div><p class="mini-label">Benefits</p><ul class="list-disc pl-4"><li>locality: app-only 配置</li><li>删除渲染 adapter</li><li>附件逻辑变窄</li><li>启动路径收缩</li></ul></div>
+          </div>
+        </article>
+
+        <article id="collapse-route-bindings" class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold mr-auto">4. 把 routeMap / route_bindings 折叠到 sessionId 身份</h2>
+            <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-semibold">Strong</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">in-process</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <p class="mini-label">Before</p>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 h-80">
+                <div class="grid grid-cols-1 gap-3 text-sm">
+                  <div class="module shallow">routeKey = im:&lt;channel&gt;:&lt;chatId&gt;</div>
+                  <div class="text-center arrow">映射到</div>
+                  <div class="module shallow">routeMap[routeKey] = sessionId</div>
+                  <div class="text-center arrow">落盘为</div>
+                  <div class="module shallow">route_bindings(project, route, session)</div>
+                  <div class="text-center leak">App route 只是 im:app:&lt;sessionId&gt;</div>
+                </div>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <p class="mini-label">After</p>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 h-80 flex items-center justify-center">
+                <div class="space-y-4 text-center w-full max-w-sm">
+                  <div class="module">Workspace selected sessionId</div>
+                  <div class="text-center arrow">直接定位</div>
+                  <div class="deep rounded-lg p-6">Session</div>
+                  <div class="text-xs text-slate-600">App-only 运行不需要 route table。</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-4 gap-4 text-sm">
+            <div><p class="mini-label">Files</p><p class="font-mono text-xs">server/internal/hub/client/client.go<br/>server/internal/hub/client/sqlite_store.go<br/>server/internal/hub/client/session_archive.go<br/>server/internal/hub/client/client_test.go<br/>docs/session-management-and-sync.zh-CN.md</p></div>
+            <div><p class="mini-label">Problem</p><p>route seam 对多个 IM chat 曾经是真实的；在 App-only 流量下已经变成假设性 seam。</p></div>
+            <div><p class="mini-label">Solution</p><p>用 sessionId 作为 Conversation identity，从 create、send、archive、delete 流程中移除 route 持久化。</p></div>
+            <div><p class="mini-label">Benefits</p><ul class="list-disc pl-4"><li>locality: session 生命周期</li><li>leverage: 一个身份</li><li>删除 DB 表</li><li>归档/删除更简单</li></ul></div>
+          </div>
+        </article>
+
+        <article id="help-card" class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold mr-auto">5. 把 HelpCard 行为移出 Session Module</h2>
+            <span class="rounded-full bg-amber-100 text-amber-800 px-3 py-1 text-xs font-semibold">Worth exploring</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">adapter</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <p class="mini-label">Before</p>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 h-80">
+                <pre class="mermaid">
+flowchart TD
+  S[Session command handling] --> H[HelpModel]
+  H --> C[Feishu card renderer]
+  H --> N[/new agent picker]
+  H --> L[/load session list]
+  H --> G[/config menus]
+  S -.leak.-> C
+  classDef shallow fill:#fff7ed,stroke:#f97316;
+  class H,C,N,L,G shallow;
+                </pre>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <p class="mini-label">After</p>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 h-80 flex items-center justify-center">
+                <div class="space-y-3 w-full max-w-md">
+                  <div class="deep rounded-lg p-5 text-center">Session Command Module</div>
+                  <div class="grid grid-cols-3 gap-2 text-xs text-center">
+                    <div class="module">session.new</div>
+                    <div class="module">session.setConfig</div>
+                    <div class="module">session.cancel</div>
+                  </div>
+                  <p class="text-center text-xs text-slate-600">Workspace UI 拥有菜单和控件。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-4 gap-4 text-sm">
+            <div><p class="mini-label">Files</p><p class="font-mono text-xs">server/internal/hub/client/commands.go<br/>server/internal/im/channel.go<br/>server/internal/im/feishu/render.go<br/>app/web/src/main.tsx</p></div>
+            <div><p class="mini-label">Problem</p><p>HelpCard 是飞书 UI 状态，却通过 Session command 接口泄漏出来。</p></div>
+            <div><p class="mini-label">Solution</p><p>只保留 App 仍需要的 command 行为，让 Workspace 菜单直接调用 session.* 方法。</p></div>
+            <div><p class="mini-label">Benefits</p><ul class="list-disc pl-4"><li>locality: UI 在 App</li><li>command surface 变小</li><li>删除卡片模型</li><li>测试数量减少</li></ul></div>
+          </div>
+        </article>
+
+        <article id="protocol-docs" class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold mr-auto">6. 从 registry 与文档移除 IM metadata</h2>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs font-semibold">Speculative</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">ports & adapters</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <p class="mini-label">Before</p>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 h-80">
+                <div class="grid grid-cols-2 gap-2 text-sm">
+                  <div class="module shallow">ProjectInfo.imType</div>
+                  <div class="module shallow">ProjectListItem.imType</div>
+                  <div class="module shallow">Monitor imType badge</div>
+                  <div class="module shallow">README Feishu config</div>
+                </div>
+                <p class="text-xs text-slate-600 mt-6">metadata 会继续让使用者和测试误以为 IM adapter seam 仍然存在。</p>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <p class="mini-label">After</p>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 h-80 flex items-center justify-center">
+                <div class="deep rounded-lg p-6 text-center max-w-sm">Project metadata 只描述 Hub、agents、git、local-read state 与 session capability。</div>
+              </div>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-4 gap-4 text-sm">
+            <div><p class="mini-label">Files</p><p class="font-mono text-xs">server/internal/protocol/registry.go<br/>app/web/src/types/registry.ts<br/>server/cmd/wheelmaker-monitor/*<br/>README.md<br/>docs/registry-protocol.md<br/>server/CLAUDE.md</p></div>
+            <div><p class="mini-label">Problem</p><p>协议和文档仍在暴露 IM adapter seam，但产品方向已经变成 App-only。</p></div>
+            <div><p class="mini-label">Solution</p><p>运行时代码删除之后，移除 imType，并统一改成 Conversation Registry 语言。</p></div>
+            <div><p class="mini-label">Benefits</p><ul class="list-disc pl-4"><li>locality: 产品语言统一</li><li>过时示例减少</li><li>测试噪音减少</li><li>报表更清晰</li></ul></div>
+          </div>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="rounded-xl border border-slate-300 bg-slate-900 text-white p-6 space-y-4">
+        <p class="mini-label text-slate-300">Top recommendation</p>
+        <h2 class="text-2xl font-semibold">先做候选 1，再删除 chat.send。</h2>
+        <p class="text-slate-200 max-w-3xl">先让 App session 路径不再依赖 IM seam。这样后续每一步删除都有 locality：飞书可以消失，chat.send 可以消失，route_bindings 也可以在不扰动 Conversation Registry session flow 的情况下移除。</p>
+        <div class="grid md:grid-cols-5 gap-3 text-sm text-slate-900">
+          <div class="rounded bg-white p-3"><b>迭代 1</b><br/>App session.* 直连</div>
+          <div class="rounded bg-white p-3"><b>迭代 2</b><br/>移除 chat.send</div>
+          <div class="rounded bg-white p-3"><b>迭代 3</b><br/>删除飞书</div>
+          <div class="rounded bg-white p-3"><b>迭代 4</b><br/>折叠 routeMap</div>
+          <div class="rounded bg-white p-3"><b>迭代 5</b><br/>文档与 metadata</div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
