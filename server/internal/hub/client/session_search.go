@@ -431,11 +431,7 @@ func sessionSearchTurnVisibleText(content string) string {
 		}
 		return strings.TrimSpace(payload.Text)
 	case acp.IMMethodToolCall:
-		var payload acp.IMToolResult
-		if err := json.Unmarshal(turn.Param, &payload); err != nil {
-			return ""
-		}
-		return strings.Join(nonEmptySessionSearchParts(payload.Cmd, payload.Kind, payload.Status), "\n")
+		return ""
 	case acp.IMMethodAgentPlan:
 		var payload []acp.IMPlanResult
 		if err := json.Unmarshal(turn.Param, &payload); err != nil {

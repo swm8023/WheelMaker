@@ -2762,6 +2762,33 @@ func TestHandleSessionRequestSessionSearchIgnoresProtocolFields(t *testing.T) {
 	}
 }
 
+func TestHandleSessionRequestSessionSearchIgnoresToolCalls(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	c.SetSessionHistoryRoot(t.TempDir())
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-tool", "Plain")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-tool", "visible user text", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewToolUpdatedTextEvent("sess-tool", "deploy-secret-command")); err != nil {
+		t.Fatalf("RecordEvent tool update: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-tool", acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	if _, err := c.HandleSessionRequest(ctx, "session.search", "proj1", json.RawMessage(`{"action":"start","searchId":"search-tools","query":"deploy-secret-command"}`)); err != nil {
+		t.Fatalf("HandleSessionRequest(session.search start): %v", err)
+	}
+	done := waitSessionSearchDoneForTest(t, c, ctx, "search-tools")
+	if len(done.Results) != 0 {
+		t.Fatalf("results = %#v, want no matches for tool calls", done.Results)
+	}
+}
+
 type publishedSessionEvent struct {
 	method  string
 	payload map[string]any

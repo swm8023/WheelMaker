@@ -72,10 +72,24 @@ describe('web session search UI wiring', () => {
     expect(main).toContain('parts.push(`${sessionSearchErrorCount} error${sessionSearchErrorCount === 1 ? \'\' : \'s\'}`);');
     expect(main).toContain('sessionSearchStatusParts.join(\' · \')');
     expect(main).not.toContain('className="chat-hub-summary-count"');
+    expect(main).not.toContain('Prompt · turn');
+    expect(main).toContain('matched prompt text');
+    expect(main).toContain(') : row.result.source === \'prompt\' ? (');
+    expect(main).toContain('Prompt');
 
     const hubButtonBlock = styles.match(/\.chat-hub-summary-button \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(hubButtonBlock).toContain('white-space: nowrap;');
     expect(styles).not.toContain('.chat-hub-summary-label {\n  display: none;');
     expect(styles).not.toContain('.chat-hub-summary-count {');
+  });
+
+  test('keeps the Hub popover inside the left sidebar', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const styles = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    const sidebarPopoverBlock = styles.match(/\.sidebar-title-row \.chat-hub-popover \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(sidebarPopoverBlock).toContain('left: 12px;');
+    expect(sidebarPopoverBlock).toContain('right: 12px;');
+    expect(sidebarPopoverBlock).toContain('max-width: none;');
   });
 });

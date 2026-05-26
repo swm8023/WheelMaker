@@ -2792,6 +2792,14 @@ body,
 
 .sidebar-title-row .chat-hub-summary {
   margin-left: 0;
+  position: static;
+}
+
+.sidebar-title-row .chat-hub-popover {
+  left: 12px;
+  right: 12px;
+  min-width: 0;
+  max-width: none;
 }
 
 .sidebar-title-row.search-open {
