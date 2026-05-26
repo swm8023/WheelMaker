@@ -86,11 +86,10 @@ Responsibilities:
   - `go`
   - `node`
   - `npm`
-  - `npx`
   - `systemctl`
 - Validate Node version is at least the app package engine minimum.
 - Preserve or create `~/.wheelmaker/config.json` from `server/config.example.json`.
-- Pull latest code with `git pull --ff-only` when the worktree is clean, unless update is skipped.
+- Stash local worktree changes, then pull latest code with `git pull --ff-only`, unless update is skipped.
 - Build:
   - `wheelmaker`
   - `wheelmaker-monitor`

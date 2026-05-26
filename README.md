@@ -158,7 +158,7 @@ Requirements:
 - **Go 1.26+**
 - **Node.js 22.11+**
 - `git`
-- `npm` and `npx`
+- `npm`
 - `systemd` with a usable `systemctl --user` session
 - the agent CLIs you plan to use, already installed and logged in for the current user
 

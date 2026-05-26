@@ -334,7 +334,7 @@ func TestRunUpdateRound_ManualSignalCanSkipWebPublish(t *testing.T) {
 	}
 }
 
-func TestConsumeManualSignal(t *testing.T) {
+func TestConsumeManualSignal_PlainSignalUsesFullUpdate(t *testing.T) {
 	dir := t.TempDir()
 	signalPath := filepath.Join(dir, "update-now.signal")
 	if err := os.WriteFile(signalPath, []byte("trigger"), 0o644); err != nil {
@@ -348,8 +348,8 @@ func TestConsumeManualSignal(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected signal consumed")
 	}
-	if reason != triggerReasonManualSignal {
-		t.Fatalf("reason=%q, want=%q", reason, triggerReasonManualSignal)
+	if reason != triggerReasonManualFullUpdate {
+		t.Fatalf("reason=%q, want=%q", reason, triggerReasonManualFullUpdate)
 	}
 	if _, err := os.Stat(signalPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected signal file removed, stat err=%v", err)
@@ -388,9 +388,9 @@ func TestConsumeManualSignal_FullUpdateMode(t *testing.T) {
 	}
 }
 
-func TestParseManualSignalReason_DefaultManualSignal(t *testing.T) {
-	if got := parseManualSignalReason("2026-04-11T03:00:00Z"); got != triggerReasonManualSignal {
-		t.Fatalf("reason=%q, want=%q", got, triggerReasonManualSignal)
+func TestParseManualSignalReason_PlainSignalFallsBackToFullUpdate(t *testing.T) {
+	if got := parseManualSignalReason("2026-04-11T03:00:00Z"); got != triggerReasonManualFullUpdate {
+		t.Fatalf("reason=%q, want=%q", got, triggerReasonManualFullUpdate)
 	}
 }
 

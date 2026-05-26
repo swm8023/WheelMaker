@@ -21,7 +21,6 @@ const updaterRoundTimeout = 20 * time.Minute
 
 const (
 	triggerReasonScheduled                  = "scheduled"
-	triggerReasonManualSignal               = "manual-signal"
 	triggerReasonManualSignalSkipWebPublish = "manual-signal-skip-web-publish"
 	triggerReasonManualFullUpdate           = "manual-full-update"
 	fullUpdateSignalToken                   = "full-update"
@@ -93,7 +92,7 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 		logger.Info("[updater] trigger=%s", triggerReason)
 
 		opts := updateRoundOptions{
-			skipUpdate:     triggerReason == triggerReasonManualSignal || triggerReason == triggerReasonManualSignalSkipWebPublish,
+			skipUpdate:     triggerReason == triggerReasonManualSignalSkipWebPublish,
 			skipWebPublish: triggerReason == triggerReasonManualSignalSkipWebPublish,
 		}
 		roundCtx, cancelRound := context.WithTimeout(ctx, updaterRoundTimeout)
@@ -184,7 +183,7 @@ func parseManualSignalReason(raw string) string {
 	if strings.Contains(strings.ToLower(raw), skipWebPublishSignalToken) {
 		return triggerReasonManualSignalSkipWebPublish
 	}
-	return triggerReasonManualSignal
+	return triggerReasonManualFullUpdate
 }
 
 func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner, skipUpdate bool) error {

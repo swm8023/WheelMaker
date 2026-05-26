@@ -150,6 +150,7 @@ GO_ARCH="$(go env GOARCH 2>/dev/null || uname -m)"
 BUILD_OUTPUT_ROOT="${WHEELMAKER_HOME}/build/linux_${GO_ARCH}"
 CONFIG_PATH="${WHEELMAKER_HOME}/config.json"
 CONFIG_EXAMPLE_PATH="${SERVER_ROOT}/config.example.json"
+RELEASE_PATH="${WHEELMAKER_HOME}/release.json"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 SYSTEMD_ENV_FILE="${WHEELMAKER_HOME}/systemd.env"
 LOG_DIR="${WHEELMAKER_HOME}/log"
@@ -183,7 +184,6 @@ check_dependencies() {
   require_command go "Install Go 1.26+."
   require_command node "Install Node.js 22.11.0+."
   require_command npm "Install Node.js 22.11.0+ with npm."
-  require_command npx "Install npm/npx."
   require_command systemctl "Install systemd."
   check_systemd_user
   node -e "const [maj,min]=process.versions.node.split('.').map(Number); process.exit(maj > 22 || (maj === 22 && min >= 11) ? 0 : 1)" \
@@ -216,24 +216,101 @@ pull_latest() {
   fi
   require_command git "Install Git."
   pushd "$REPO_ROOT" >/dev/null
-  local status
-  status="$(git status --porcelain)"
-  if [[ -n "$status" ]]; then
-    warn "git worktree has local changes; skip git pull and continue"
-    popd >/dev/null
-    return
-  fi
   local branch
   branch="$(git branch --show-current)"
   [[ -n "$branch" ]] || die "repository is in detached HEAD state; cannot pull latest automatically"
+  local status
+  status="$(git status --porcelain)"
+  if [[ -n "$status" ]]; then
+    local stash_message
+    stash_message="wheelmaker deploy auto-stash before pull $(date -u +%Y%m%dT%H%M%SZ)"
+    warn "git worktree has local changes; stashing before pull: ${stash_message}"
+    git stash push -u -m "$stash_message"
+  fi
   step "git pull --ff-only origin ${branch}"
   git pull --ff-only origin "$branch"
   popd >/dev/null
 }
 
+ensure_acp_dependencies() {
+  if [[ "$SKIP_DEPS" -eq 1 ]]; then
+    step "skip ACP dependency install/check"
+    return
+  fi
+  require_command npm "Install Node.js 22.11.0+ with npm."
+
+  local deprecated_claude_pkg="@zed-industries/claude-agent-acp"
+  if npm list -g --depth=0 "$deprecated_claude_pkg" 2>/dev/null | grep -F "$deprecated_claude_pkg" >/dev/null 2>&1; then
+    step "remove deprecated package: ${deprecated_claude_pkg}"
+    npm uninstall -g "$deprecated_claude_pkg"
+  fi
+
+  local missing=()
+  if ! command -v claude-agent-acp >/dev/null 2>&1; then
+    missing+=("@agentclientprotocol/claude-agent-acp")
+  fi
+  if [[ "${#missing[@]}" -eq 0 ]]; then
+    step "ACP dependencies already installed"
+    return
+  fi
+  step "install ACP dependencies: ${missing[*]}"
+  npm install -g "${missing[@]}"
+}
+
+ensure_app_dependencies() {
+  if [[ "$SKIP_DEPS" -eq 1 ]]; then
+    step "skip app dependency sync"
+    return
+  fi
+  [[ -f "${APP_ROOT}/package.json" ]] || die "app package.json not found: ${APP_ROOT}/package.json"
+  [[ -f "${APP_ROOT}/package-lock.json" ]] || die "app package-lock.json not found: ${APP_ROOT}/package-lock.json"
+  require_command npm "Install Node.js 22.11.0+ with npm."
+  step "sync app Web dependencies"
+  pushd "$APP_ROOT" >/dev/null
+  npm ci --include=dev
+  popd >/dev/null
+}
+
+validate_existing_config() {
+  if ! command -v node >/dev/null 2>&1; then
+    warn "skip config validation because node is not in PATH"
+    return
+  fi
+  CONFIG_VALIDATE_PATH="$CONFIG_PATH" node <<'NODE'
+const fs = require('fs');
+const path = process.env.CONFIG_VALIDATE_PATH;
+let config;
+try {
+  config = JSON.parse(fs.readFileSync(path, 'utf8'));
+} catch (err) {
+  console.error(`ERROR: config is not valid JSON: ${path}: ${err.message}`);
+  process.exit(1);
+}
+const projects = Array.isArray(config.projects) ? config.projects : [];
+if (projects.length === 0) {
+  console.warn('WARN: config has no projects configured yet');
+}
+for (const project of projects) {
+  const name = String(project && project.name ? project.name : '');
+  const projectPath = String(project && project.path ? project.path : '');
+  if (name.trim() === '') {
+    console.warn('WARN: config contains a project without a name');
+  }
+  if (projectPath.trim() === '') {
+    console.warn(`WARN: project '${name}' has an empty path`);
+  } else if (projectPath.startsWith('/path/to/') || projectPath.includes('\\/path\\/to\\/')) {
+    console.warn(`WARN: project '${name}' still uses the example path: ${projectPath}`);
+  } else if (!fs.existsSync(projectPath)) {
+    console.warn(`WARN: project '${name}' path does not exist: ${projectPath}`);
+  }
+}
+NODE
+}
+
 ensure_config() {
   if [[ -f "$CONFIG_PATH" ]]; then
     step "config already exists: ${CONFIG_PATH}"
+    validate_existing_config
     return 1
   fi
   [[ -f "$CONFIG_EXAMPLE_PATH" ]] || die "config example missing: ${CONFIG_EXAMPLE_PATH}"
@@ -293,12 +370,49 @@ install_binary() {
 publish_web() {
   if [[ "$SKIP_WEB_PUBLISH" -eq 1 ]]; then
     step "skip web publish"
-    return
+    return 1
+  fi
+  if [[ "$SKIP_BUILD" -eq 1 || "$SKIP_INSTALL" -eq 1 ]]; then
+    step "skip web publish because build or install is skipped"
+    return 1
   fi
   step "publish Web UI"
   pushd "$APP_ROOT" >/dev/null
   npm run build:web:release
   popd >/dev/null
+  return 0
+}
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+write_release_manifest() {
+  if [[ "${1:-0}" != "1" ]]; then
+    step "skip release manifest"
+    return
+  fi
+  if [[ "$SKIP_BUILD" -eq 1 || "$SKIP_INSTALL" -eq 1 || "$SKIP_WEB_PUBLISH" -eq 1 ]]; then
+    step "skip release manifest"
+    return
+  fi
+  require_command git "Install Git."
+  local branch
+  local sha
+  branch="$(git -C "$REPO_ROOT" branch --show-current)"
+  sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  step "write release manifest: ${RELEASE_PATH}"
+  mkdir -p "$WHEELMAKER_HOME"
+  cat > "$RELEASE_PATH" <<EOF
+{
+  "schemaVersion": 1,
+  "repo": "$(json_escape "$REPO_ROOT")",
+  "branch": "$(json_escape "$branch")",
+  "remote": "origin",
+  "sha": "$(json_escape "$sha")",
+  "publishedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
 }
 
 write_systemd_env() {
@@ -486,6 +600,8 @@ refresh() {
   [[ -d "$SERVER_ROOT" ]] || die "server directory not found: ${SERVER_ROOT}"
   check_dependencies
   pull_latest
+  ensure_acp_dependencies
+  ensure_app_dependencies
 
   local output_hub="${BUILD_OUTPUT_ROOT}/wheelmaker"
   local output_monitor="${BUILD_OUTPUT_ROOT}/wheelmaker-monitor"
@@ -517,7 +633,11 @@ refresh() {
   fi
 
   configure_systemd_user_services
-  publish_web
+  local web_published=0
+  if publish_web; then
+    web_published=1
+  fi
+  write_release_manifest "$web_published"
 
   if [[ "$config_created" -eq 0 && "$SKIP_RESTART" -eq 0 ]]; then
     warn "config was created from example at ${CONFIG_PATH}; edit it first, then rerun scripts/refresh_server_linux.sh"

@@ -15,7 +15,7 @@ Extend the existing Settings `Update` page so each online hub can report and tri
 - Keep Registry as a hubId forwarder only; it does not create tasks or store update state.
 - Write and read one release manifest at `~/.wheelmaker/release.json`.
 - Trigger full update publish by writing `~/.wheelmaker/update-now.signal` with `full-update`.
-- Keep `scripts/signal_update_now.ps1` for local AI/dev refresh; it writes a plain signal.
+- Plain manual signals are not a supported update mode; a signal without an explicit marker is treated as a full update.
 
 ## Non-Goals
 
@@ -80,7 +80,8 @@ Success means the signal was written. It does not mean update publish is complet
 The updater consumes `update-now.signal`.
 
 - Signal contains `full-update`: run pull, deps, build, install, Web publish, write release manifest, restart Hub and Monitor.
-- Plain signal: skip pull/deps and refresh the current checkout, including build, install, Web publish, write release manifest, and Hub/Monitor restart.
+- Signal contains `skip-web-publish`: skip pull/deps and Web publish, then refresh binaries and restart Hub and Monitor.
+- Plain signal: treat as `full-update` for backward compatibility with stale local files.
 - Updater-driven refresh passes `SkipUpdaterInstall`, so the updater does not replace or restart itself in that round.
 
 ## UI
