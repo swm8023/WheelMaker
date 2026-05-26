@@ -912,12 +912,18 @@ describe('web chat integration', () => {
 
   test('keeps the mobile three-tab floating nav and drawer button translucent over content', () => {
     const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
+    expect(mainTsx).toContain('data-backdrop-tone={floatingBackdropTone}');
+    expect(mainTsx).toContain('requestFloatingBackdropToneMeasure');
+    expect(mainTsx).toContain('FLOATING_BACKDROP_TONE_THROTTLE_MS');
     expect(stylesCss).toMatch(
       /\.floating-nav-group,\s*\.drawer-toggle-bubble \{[\s\S]*background: color-mix\(in srgb, var\(--panel\) 34%, transparent\);[\s\S]*backdrop-filter: blur\(1px\);[\s\S]*\}/,
     );
-    expect(stylesCss).not.toContain('background: color-mix(in srgb, var(--panel) 78%, transparent);');
+    expect(stylesCss).toMatch(
+      /\.floating-control-stack\[data-backdrop-tone='light'\] \.floating-nav-group,[\s\S]*\.floating-control-stack\[data-backdrop-tone='light'\] \.drawer-toggle-bubble \{[\s\S]*background: color-mix\(in srgb, var\(--panel\) 88%, transparent\);[\s\S]*backdrop-filter: blur\(8px\);[\s\S]*\}/,
+    );
   });
 
   test('mobile chat drawer uses a cross-project project session sheet', () => {

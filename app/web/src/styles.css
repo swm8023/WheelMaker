@@ -2196,6 +2196,19 @@ body,
   background: color-mix(in srgb, var(--panel) 34%, transparent);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(1px);
+  transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, backdrop-filter 180ms ease;
+}
+
+.floating-control-stack[data-backdrop-tone='mixed'] .floating-nav-group,
+.floating-control-stack[data-backdrop-tone='mixed'] .drawer-toggle-bubble {
+  background: color-mix(in srgb, var(--panel) 64%, transparent);
+  backdrop-filter: blur(5px);
+}
+
+.floating-control-stack[data-backdrop-tone='light'] .floating-nav-group,
+.floating-control-stack[data-backdrop-tone='light'] .drawer-toggle-bubble {
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(8px);
 }
 
 .floating-nav-group {
@@ -2283,6 +2296,14 @@ body,
   color: var(--text);
   background: color-mix(in srgb, var(--accent) 34%, transparent);
   border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.floating-control-stack[data-backdrop-tone='mixed'] .drawer-toggle-bubble[data-active='true'] {
+  background: color-mix(in srgb, var(--accent) 40%, var(--panel));
+}
+
+.floating-control-stack[data-backdrop-tone='light'] .drawer-toggle-bubble[data-active='true'] {
+  background: color-mix(in srgb, var(--accent) 48%, var(--panel));
 }
 
 .port-relay-target-switch-menu {
@@ -8144,4 +8165,3 @@ body,
     transform: translateX(0);
   }
 }
-

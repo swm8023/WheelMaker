@@ -142,6 +142,12 @@ import {
 import { installMobileViewportZoomGuard } from './services/mobileViewportZoomGuard';
 import { resolveLayoutMode } from './services/responsiveLayout';
 import {
+  FLOATING_BACKDROP_TONE_THROTTLE_MS,
+  measureFloatingBackdropTone,
+  shouldMeasureFloatingBackdropTone,
+  type FloatingBackdropTone,
+} from './services/floatingBackdropTone';
+import {
   buildTokenStatCards,
   type TokenProviderSectionView,
   type TokenStatCardView,
@@ -2932,6 +2938,11 @@ function App() {
   const floatingClickCooldownUntilRef = useRef(0);
   const floatingIgnoreLostCaptureRef = useRef(false);
   const floatingControlStackRef = useRef<HTMLDivElement | null>(null);
+  const [floatingBackdropTone, setFloatingBackdropTone] = useState<FloatingBackdropTone>('dark');
+  const floatingBackdropToneRef = useRef<FloatingBackdropTone>('dark');
+  const floatingBackdropToneMeasuredAtRef = useRef(0);
+  const floatingBackdropToneRafRef = useRef<number | null>(null);
+  const floatingBackdropToneTimerRef = useRef<number | null>(null);
   const desktopSidebarResizeRef = useRef<DesktopSidebarResizeState | null>(null);
   const projectPinLongPressTimerRef = useRef<number | null>(null);
   const projectPinLongPressTargetRef = useRef('');
@@ -4569,6 +4580,94 @@ function App() {
     gestureNavStateRef.current = gestureNavState;
   }, [gestureNavState]);
   useEffect(() => {
+    floatingBackdropToneRef.current = floatingBackdropTone;
+  }, [floatingBackdropTone]);
+  const clearFloatingBackdropToneTimer = useCallback(() => {
+    if (floatingBackdropToneTimerRef.current !== null) {
+      window.clearTimeout(floatingBackdropToneTimerRef.current);
+      floatingBackdropToneTimerRef.current = null;
+    }
+  }, []);
+  const cancelFloatingBackdropToneRaf = useCallback(() => {
+    if (floatingBackdropToneRafRef.current !== null) {
+      window.cancelAnimationFrame(floatingBackdropToneRafRef.current);
+      floatingBackdropToneRafRef.current = null;
+    }
+  }, []);
+  const runFloatingBackdropToneMeasure = useCallback(() => {
+    if (floatingBackdropToneRafRef.current !== null) {
+      return;
+    }
+    floatingBackdropToneRafRef.current = window.requestAnimationFrame(() => {
+      floatingBackdropToneRafRef.current = null;
+      const stack = floatingControlStackRef.current;
+      if (!stack) {
+        return;
+      }
+      const nextTone = measureFloatingBackdropTone(stack);
+      if (!nextTone || nextTone === floatingBackdropToneRef.current) {
+        return;
+      }
+      floatingBackdropToneRef.current = nextTone;
+      setFloatingBackdropTone(nextTone);
+    });
+  }, []);
+  const requestFloatingBackdropToneMeasure = useCallback(() => {
+    if (isWide) {
+      return;
+    }
+    const now = Date.now();
+    const lastMeasuredAt = floatingBackdropToneMeasuredAtRef.current;
+    if (shouldMeasureFloatingBackdropTone(now, lastMeasuredAt)) {
+      clearFloatingBackdropToneTimer();
+      floatingBackdropToneMeasuredAtRef.current = now;
+      runFloatingBackdropToneMeasure();
+      return;
+    }
+    if (floatingBackdropToneTimerRef.current !== null) {
+      return;
+    }
+    const remaining = Math.max(0, FLOATING_BACKDROP_TONE_THROTTLE_MS - (now - lastMeasuredAt));
+    floatingBackdropToneTimerRef.current = window.setTimeout(() => {
+      floatingBackdropToneTimerRef.current = null;
+      floatingBackdropToneMeasuredAtRef.current = Date.now();
+      runFloatingBackdropToneMeasure();
+    }, remaining);
+  }, [clearFloatingBackdropToneTimer, isWide, runFloatingBackdropToneMeasure]);
+  useEffect(() => {
+    return () => {
+      clearFloatingBackdropToneTimer();
+      cancelFloatingBackdropToneRaf();
+    };
+  }, [cancelFloatingBackdropToneRaf, clearFloatingBackdropToneTimer]);
+  useEffect(() => {
+    if (isWide) {
+      clearFloatingBackdropToneTimer();
+      cancelFloatingBackdropToneRaf();
+      floatingBackdropToneMeasuredAtRef.current = 0;
+      return;
+    }
+    const scheduleMeasure = () => requestFloatingBackdropToneMeasure();
+    scheduleMeasure();
+    window.addEventListener('scroll', scheduleMeasure, true);
+    window.addEventListener('resize', scheduleMeasure);
+    window.addEventListener('orientationchange', scheduleMeasure);
+    window.visualViewport?.addEventListener('scroll', scheduleMeasure);
+    window.visualViewport?.addEventListener('resize', scheduleMeasure);
+    return () => {
+      window.removeEventListener('scroll', scheduleMeasure, true);
+      window.removeEventListener('resize', scheduleMeasure);
+      window.removeEventListener('orientationchange', scheduleMeasure);
+      window.visualViewport?.removeEventListener('scroll', scheduleMeasure);
+      window.visualViewport?.removeEventListener('resize', scheduleMeasure);
+    };
+  }, [
+    cancelFloatingBackdropToneRaf,
+    clearFloatingBackdropToneTimer,
+    isWide,
+    requestFloatingBackdropToneMeasure,
+  ]);
+  useEffect(() => {
     sidebarSettingsOpenRef.current = sidebarSettingsOpen;
   }, [sidebarSettingsOpen]);
   useEffect(() => {
@@ -5372,6 +5471,22 @@ function App() {
         : floatingDragState?.pressing || gestureNavState?.phase === 'pressing'
           ? 'drag-ready'
           : 'idle';
+  useEffect(() => {
+    requestFloatingBackdropToneMeasure();
+  }, [
+    drawerOpen,
+    effectiveFloatingControlTop,
+    floatingControlStackHeight,
+    floatingDragVisualState,
+    gestureNavigation,
+    gestureNavigationExpanded,
+    mobilePortRelayFrameOpen,
+    portRelayFrameOpen,
+    portRelayFrameUrl,
+    portRelayReady,
+    requestFloatingBackdropToneMeasure,
+    tab,
+  ]);
   const clearFloatingLongPressTimer = useCallback(() => {
     if (floatingLongPressTimerRef.current !== null) {
       window.clearTimeout(floatingLongPressTimerRef.current);
@@ -15075,6 +15190,7 @@ function App() {
       <div
         ref={floatingControlStackRef}
         className="floating-control-stack"
+        data-backdrop-tone={floatingBackdropTone}
         data-drag-state={floatingDragVisualState}
         style={effectiveFloatingControlStackStyle}
         onPointerDown={gestureNavigation ? undefined : beginFloatingPress}
@@ -15748,11 +15864,6 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
-
-
-
-
-
 
 
 
