@@ -1,12 +1,13 @@
 import {buildMobileChatQuickSwitchSections} from '../web/src/chat/mobileChatQuickSwitch';
 import type {RegistryChatSession, RegistryProject} from '../web/src/types/registry';
 
-function project(projectId: string, name = projectId): RegistryProject {
+function project(projectId: string, name = projectId, hubId = 'local'): RegistryProject {
   return {
     projectId,
     name,
     online: true,
     path: `/${projectId}`,
+    hubId,
   };
 }
 
@@ -28,7 +29,7 @@ function session(
 describe('mobile chat quick switch', () => {
   test('selects six sessions with unread and running first, then newest updates', () => {
     const sections = buildMobileChatQuickSwitchSections({
-      projects: [project('p1', 'Alpha'), project('p2', 'Beta'), project('p3', 'Gamma')],
+      projects: [project('p1', 'Alpha', 'hub-a'), project('p2', 'Beta', 'hub-b'), project('p3', 'Gamma', '')],
       sessionsByProjectId: {
         p1: [
           session('p1-old-a', '2026-01-01T00:00:00.000Z'),
@@ -60,6 +61,14 @@ describe('mobile chat quick switch', () => {
       'p2:p2-new',
     ]);
     expect(sections.flatMap(section => section.sessions)).toHaveLength(6);
+    expect(sections.map(section => ({
+      projectId: section.projectId,
+      projectName: section.projectName,
+      projectHubLabel: section.projectHubLabel,
+    }))).toEqual([
+      {projectId: 'p3', projectName: 'Gamma', projectHubLabel: 'local'},
+      {projectId: 'p2', projectName: 'Beta', projectHubLabel: 'hub-b'},
+    ]);
   });
 
   test('returns an empty section list when no known sessions exist', () => {

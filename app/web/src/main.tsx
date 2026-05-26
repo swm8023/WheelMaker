@@ -15079,8 +15079,13 @@ function App() {
       ) : (
         mobileChatQuickSwitchSections.map(section => (
           <div key={`chat-quick-switch-project:${section.projectId}`} className="chat-quick-switch-project">
-            <div className="chat-quick-switch-project-name" title={section.projectName}>
-              {section.projectName}
+            <div className="chat-quick-switch-project-heading" title={`${section.projectName} - ${section.projectHubLabel}`}>
+              <span className="chat-quick-switch-project-name">
+                {section.projectName}
+              </span>
+              <span className="chat-quick-switch-project-hub">
+                {section.projectHubLabel}
+              </span>
             </div>
             <div className="chat-quick-switch-session-list">
               {section.sessions.map(session => {
@@ -15104,9 +15109,6 @@ function App() {
                     </span>
                     {unreadCount > 0 ? (
                       <span className="chat-quick-switch-unread">{Math.min(99, unreadCount)}</span>
-                    ) : null}
-                    {selected ? (
-                      <span className="chat-quick-switch-selected codicon codicon-check" aria-label="Current chat" />
                     ) : null}
                   </button>
                 );
@@ -15794,7 +15796,6 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
-
 
 
 

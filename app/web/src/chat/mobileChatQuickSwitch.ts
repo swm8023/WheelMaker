@@ -3,6 +3,7 @@ import type {RegistryChatSession, RegistryProject} from '../types/registry';
 export type MobileChatQuickSwitchSection = {
   projectId: string;
   projectName: string;
+  projectHubLabel: string;
   sessions: RegistryChatSession[];
 };
 
@@ -16,6 +17,7 @@ type MobileChatQuickSwitchCandidate = {
   key: string;
   projectId: string;
   projectName: string;
+  projectHubLabel: string;
   projectIndex: number;
   session: RegistryChatSession;
   sessionIndex: number;
@@ -92,6 +94,7 @@ export function buildMobileChatQuickSwitchSections({
         key,
         projectId,
         projectName: project.name || projectId,
+        projectHubLabel: project.hubId || 'local',
         projectIndex,
         session,
         sessionIndex,
@@ -115,6 +118,7 @@ export function buildMobileChatQuickSwitchSections({
       section = {
         projectId: candidate.projectId,
         projectName: candidate.projectName,
+        projectHubLabel: candidate.projectHubLabel,
         sessions: [],
       };
       sectionsByProjectId.set(candidate.projectId, section);
