@@ -201,6 +201,22 @@ describe('agent package update settings UI source structure', () => {
     expect(actionButtonBlock).toContain('min-width: 74px;');
   });
 
+  test('stacks WheelMaker release SHA metadata inside the mobile settings screen', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    const mobileShaLineBlock = stylesCss.match(/\.mobile-settings-screen \.wheelmaker-update-sha-line \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileShaLineBlock).toContain('grid-template-columns: 52px minmax(0, 1fr);');
+    expect(mobileShaLineBlock).toContain('white-space: normal;');
+
+    const mobileShaValueBlock = stylesCss.match(/\.mobile-settings-screen \.wheelmaker-update-sha-value \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileShaValueBlock).toContain('grid-column: 2;');
+
+    const mobileShaTimeBlock = stylesCss.match(/\.mobile-settings-screen \.wheelmaker-update-sha-time \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileShaTimeBlock).toContain('grid-column: 2;');
+    expect(mobileShaTimeBlock).toContain('grid-row: 2;');
+  });
+
   test('places agent tags beside display names and lets versions span under the action button', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');

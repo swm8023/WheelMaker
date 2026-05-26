@@ -1203,6 +1203,27 @@ body,
   white-space: nowrap;
 }
 
+.mobile-settings-screen .wheelmaker-update-sha-line {
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: start;
+  gap: 2px 8px;
+  white-space: normal;
+}
+
+.mobile-settings-screen .wheelmaker-update-sha-value {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-settings-screen .wheelmaker-update-sha-time {
+  grid-column: 2;
+  grid-row: 2;
+  white-space: nowrap;
+}
+
 .wheelmaker-update-action-btn {
   grid-column: 2;
   grid-row: 1 / 3;
