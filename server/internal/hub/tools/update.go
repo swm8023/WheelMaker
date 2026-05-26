@@ -1,4 +1,4 @@
-package hub
+package tools
 
 import (
 	"bytes"
@@ -140,6 +140,20 @@ func (e *updateCommandError) Error() string {
 		return e.Message
 	}
 	return e.Code + ": " + e.Message
+}
+
+func (e *updateCommandError) commandCode() string {
+	if e == nil {
+		return ""
+	}
+	return e.Code
+}
+
+func (e *updateCommandError) commandMessage() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
 }
 
 func (c *UpdateCommand) Handle(ctx context.Context, raw json.RawMessage) (any, *updateCommandError) {

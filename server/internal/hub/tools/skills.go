@@ -1,4 +1,4 @@
-package hub
+package tools
 
 import (
 	"bytes"
@@ -206,6 +206,20 @@ func (e *skillsCommandError) Error() string {
 		return e.Message
 	}
 	return e.Code + ": " + e.Message
+}
+
+func (e *skillsCommandError) commandCode() string {
+	if e == nil {
+		return ""
+	}
+	return e.Code
+}
+
+func (e *skillsCommandError) commandMessage() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
 }
 
 func (c *SkillsCommand) Handle(ctx context.Context, raw json.RawMessage) (any, *skillsCommandError) {

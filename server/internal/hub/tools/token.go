@@ -1,4 +1,4 @@
-package hub
+package tools
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/hub/client"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
@@ -32,7 +31,21 @@ func (e *tokenCommandError) Error() string {
 	return e.Code + ": " + e.Message
 }
 
-var scanHubTokenStats = client.ScanTokenStats
+func (e *tokenCommandError) commandCode() string {
+	if e == nil {
+		return ""
+	}
+	return e.Code
+}
+
+func (e *tokenCommandError) commandMessage() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
+var scanHubTokenStats = ScanTokenStats
 
 func NewTokenCommand() *TokenCommand {
 	return &TokenCommand{}

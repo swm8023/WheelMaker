@@ -1,4 +1,4 @@
-package client
+package tools
 
 import (
 	"context"
@@ -98,15 +98,28 @@ type tokenScanPayload struct {
 	Providers []tokenProviderScanResult `json:"providers"`
 }
 
+type tokenScanner struct {
+	httpClient      *http.Client
+	deepSeekBaseURL string
+}
+
 func ScanTokenStats(ctx context.Context) (any, error) {
-	scanner := &Client{
+	scanner := &tokenScanner{
 		httpClient:      &http.Client{Timeout: 15 * time.Second},
 		deepSeekBaseURL: "https://api.deepseek.com",
 	}
 	return scanner.scanTokenStats(ctx)
 }
 
-func (c *Client) fetchDeepSeekTokenStats(ctx context.Context, apiKey, rangeType, month string) (deepSeekTokenStatsPayload, error) {
+func FetchDeepSeekTokenStats(ctx context.Context, apiKey, rangeType, month string) (any, error) {
+	scanner := &tokenScanner{
+		httpClient:      &http.Client{Timeout: 15 * time.Second},
+		deepSeekBaseURL: "https://api.deepseek.com",
+	}
+	return scanner.fetchDeepSeekTokenStats(ctx, apiKey, rangeType, month)
+}
+
+func (c *tokenScanner) fetchDeepSeekTokenStats(ctx context.Context, apiKey, rangeType, month string) (deepSeekTokenStatsPayload, error) {
 	key := strings.TrimSpace(apiKey)
 	if key == "" {
 		return deepSeekTokenStatsPayload{}, fmt.Errorf("apiKey is required")
@@ -151,7 +164,7 @@ func (c *Client) fetchDeepSeekTokenStats(ctx context.Context, apiKey, rangeType,
 	}, nil
 }
 
-func (c *Client) fetchDeepSeekBalance(ctx context.Context, apiKey string) (deepSeekBalanceView, error) {
+func (c *tokenScanner) fetchDeepSeekBalance(ctx context.Context, apiKey string) (deepSeekBalanceView, error) {
 	base := strings.TrimRight(strings.TrimSpace(c.deepSeekBaseURL), "/")
 	if base == "" {
 		base = "https://api.deepseek.com"
@@ -199,7 +212,7 @@ func (c *Client) fetchDeepSeekBalance(ctx context.Context, apiKey string) (deepS
 	return deepSeekBalanceView{IsAvailable: parsed.IsAvailable, Items: items}, nil
 }
 
-func (c *Client) fetchDeepSeekUsageRows(ctx context.Context, apiKey, month string, startDate, endDate time.Time) ([]deepSeekUsageRow, bool, string, error) {
+func (c *tokenScanner) fetchDeepSeekUsageRows(ctx context.Context, apiKey, month string, startDate, endDate time.Time) ([]deepSeekUsageRow, bool, string, error) {
 	base := strings.TrimRight(strings.TrimSpace(c.deepSeekBaseURL), "/")
 	if base == "" {
 		base = "https://api.deepseek.com"
@@ -504,7 +517,7 @@ type copilotPremiumUsageSummary struct {
 	HasQuota  bool
 }
 
-func (c *Client) scanTokenStats(ctx context.Context) (tokenScanPayload, error) {
+func (c *tokenScanner) scanTokenStats(ctx context.Context) (tokenScanPayload, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	deepSeek := c.scanDeepSeekProvider(ctx, now)
 	codex := c.scanCodexProvider(ctx, now)
@@ -516,7 +529,7 @@ func (c *Client) scanTokenStats(ctx context.Context) (tokenScanPayload, error) {
 	}, nil
 }
 
-func (c *Client) scanDeepSeekProvider(ctx context.Context, updatedAt string) tokenProviderScanResult {
+func (c *tokenScanner) scanDeepSeekProvider(ctx context.Context, updatedAt string) tokenProviderScanResult {
 	credentials := discoverDeepSeekCredentials()
 	accounts := make([]tokenProviderAccount, 0, len(credentials))
 	for _, credential := range credentials {
@@ -557,7 +570,7 @@ func (c *Client) scanDeepSeekProvider(ctx context.Context, updatedAt string) tok
 	return tokenProviderScanResult{ID: "deepseek", Name: "DeepSeek", Accounts: accounts}
 }
 
-func (c *Client) scanCodexProvider(ctx context.Context, updatedAt string) tokenProviderScanResult {
+func (c *tokenScanner) scanCodexProvider(ctx context.Context, updatedAt string) tokenProviderScanResult {
 	profiles := discoverCodexAuthProfiles()
 	accounts := make([]tokenProviderAccount, 0, len(profiles))
 	for _, profile := range profiles {
@@ -600,7 +613,7 @@ func (c *Client) scanCodexProvider(ctx context.Context, updatedAt string) tokenP
 	return tokenProviderScanResult{ID: "codex", Name: "Codex", Accounts: accounts}
 }
 
-func (c *Client) scanCopilotProvider(ctx context.Context, updatedAt string) tokenProviderScanResult {
+func (c *tokenScanner) scanCopilotProvider(ctx context.Context, updatedAt string) tokenProviderScanResult {
 	profile := discoverCopilotProfile()
 	month := time.Now().UTC().Format("2006-01")
 	account := tokenProviderAccount{
@@ -1017,7 +1030,7 @@ func discoverGitHubTokenByCLI() string {
 	}
 	return ""
 }
-func (c *Client) fetchGitHubLogin(ctx context.Context, token string) (string, error) {
+func (c *tokenScanner) fetchGitHubLogin(ctx context.Context, token string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user", nil)
 	if err != nil {
 		return "", fmt.Errorf("build github user request: %w", err)
@@ -1049,7 +1062,7 @@ func (c *Client) fetchGitHubLogin(ctx context.Context, token string) (string, er
 	return login, nil
 }
 
-func (c *Client) fetchCopilotPremiumUsage(ctx context.Context, token, login string, now time.Time) (copilotPremiumUsageSummary, error) {
+func (c *tokenScanner) fetchCopilotPremiumUsage(ctx context.Context, token, login string, now time.Time) (copilotPremiumUsageSummary, error) {
 	username := strings.TrimSpace(login)
 	if username == "" {
 		return copilotPremiumUsageSummary{}, fmt.Errorf("missing github login for premium usage query")
@@ -1146,7 +1159,7 @@ func (c *Client) fetchCopilotPremiumUsage(ctx context.Context, token, login stri
 	return summary, nil
 }
 
-func (c *Client) fetchCopilotInternalUsage(ctx context.Context, token string, now time.Time) (copilotPremiumUsageSummary, error) {
+func (c *tokenScanner) fetchCopilotInternalUsage(ctx context.Context, token string, now time.Time) (copilotPremiumUsageSummary, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/copilot_internal/user", nil)
 	if err != nil {
 		return copilotPremiumUsageSummary{}, fmt.Errorf("build copilot internal usage request: %w", err)
@@ -1325,7 +1338,7 @@ func decodeJWTPayload(token string) map[string]any {
 	return out
 }
 
-func (c *Client) fetchCodexUsageLimits(ctx context.Context, state codexAuthState) (string, string, string, error) {
+func (c *tokenScanner) fetchCodexUsageLimits(ctx context.Context, state codexAuthState) (string, string, string, error) {
 	access := strings.TrimSpace(state.AccessToken)
 	if access == "" {
 		return "", "", state.Plan, fmt.Errorf("missing access token")
@@ -1358,7 +1371,7 @@ func (c *Client) fetchCodexUsageLimits(ctx context.Context, state codexAuthState
 	return fiveHour, weekly, plan, nil
 }
 
-func (c *Client) fetchCodexUsagePayload(ctx context.Context, accessToken, accountID string) (map[string]any, error) {
+func (c *tokenScanner) fetchCodexUsagePayload(ctx context.Context, accessToken, accountID string) (map[string]any, error) {
 	endpoint := "https://chatgpt.com/backend-api/wham/usage"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -1389,7 +1402,7 @@ func (c *Client) fetchCodexUsagePayload(ctx context.Context, accessToken, accoun
 	return payload, nil
 }
 
-func (c *Client) refreshCodexAccessToken(ctx context.Context, refreshToken string) (string, string, error) {
+func (c *tokenScanner) refreshCodexAccessToken(ctx context.Context, refreshToken string) (string, string, error) {
 	payload := map[string]string{
 		"client_id":     "app_EMoamEEZ73f0CkXaXp7hrann",
 		"grant_type":    "refresh_token",

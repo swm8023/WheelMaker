@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
+	"github.com/swm8023/wheelmaker/internal/hub/tools"
 	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
@@ -82,24 +82,20 @@ type Client struct {
 	sessionSearch   *sessionSearchManager
 	attachments     *attachmentManager
 	viewSink        SessionViewSink
-	httpClient      *http.Client
-	deepSeekBaseURL string
 }
 
 // New creates a Client for the given project.
 func New(store Store, projectName string, cwd string) *Client {
 	c := &Client{
-		projectName:     projectName,
-		cwd:             cwd,
-		registry:        agent.DefaultACPFactory(),
-		store:           store,
-		sessions:        make(map[string]*Session),
-		routeMap:        make(map[string]string),
-		suspendTimeout:  5 * time.Minute,
-		stopPersistCh:   make(chan struct{}),
-		attachments:     newAttachmentManager(),
-		httpClient:      &http.Client{Timeout: 15 * time.Second},
-		deepSeekBaseURL: "https://api.deepseek.com",
+		projectName:    projectName,
+		cwd:            cwd,
+		registry:       agent.DefaultACPFactory(),
+		store:          store,
+		sessions:       make(map[string]*Session),
+		routeMap:       make(map[string]string),
+		suspendTimeout: 5 * time.Minute,
+		stopPersistCh:  make(chan struct{}),
+		attachments:    newAttachmentManager(),
 	}
 	c.sessionRecorder = newSessionRecorder(projectName, store, func(ctx context.Context) ([]SessionRecord, error) {
 		return c.ListSessions(ctx)
@@ -683,7 +679,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			},
 		}, nil
 	case "session.token.scan":
-		stats, err := c.scanTokenStats(ctx)
+		stats, err := tools.ScanTokenStats(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -697,7 +693,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 		if err := decodeSessionRequestPayload(payload, &req); err != nil {
 			return nil, fmt.Errorf("invalid session.token.deepseek.stats payload: %w", err)
 		}
-		stats, err := c.fetchDeepSeekTokenStats(ctx, req.APIKey, req.RangeType, req.Month)
+		stats, err := tools.FetchDeepSeekTokenStats(ctx, req.APIKey, req.RangeType, req.Month)
 		if err != nil {
 			return nil, err
 		}

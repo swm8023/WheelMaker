@@ -1,6 +1,6 @@
 //go:build !windows
 
-package client
+package tools
 
 func discoverGitHubTokenFromSystemCredentialStore(_ copilotProfile) (string, string) {
 	return "", ""

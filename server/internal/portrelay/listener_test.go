@@ -1,15 +1,16 @@
 package portrelay
 
 import (
+	"bytes"
 	"context"
+	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
-
-	rp "github.com/swm8023/wheelmaker/internal/protocol"
+	"time"
 )
 
 func TestRelayListenerBindsLoopbackOnly(t *testing.T) {
@@ -285,4 +286,141 @@ func reserveRelayTestPort(t *testing.T) int {
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func TestFrameCodecRoundTripBinaryPayload(t *testing.T) {
+	frame := Frame{
+		Type:     FrameData,
+		Flags:    FlagWebSocketBinary,
+		StreamID: 42,
+		Meta:     []byte(`{"kind":"websocket"}`),
+		Payload:  []byte{0, 1, 2, 255},
+	}
+
+	encoded, err := EncodeFrame(frame)
+	if err != nil {
+		t.Fatalf("EncodeFrame() err=%v", err)
+	}
+	decoded, err := DecodeFrame(encoded)
+	if err != nil {
+		t.Fatalf("DecodeFrame() err=%v", err)
+	}
+
+	if decoded.Type != frame.Type || decoded.Flags != frame.Flags || decoded.StreamID != frame.StreamID {
+		t.Fatalf("decoded header=%#v, want %#v", decoded, frame)
+	}
+	if !bytes.Equal(decoded.Meta, frame.Meta) {
+		t.Fatalf("decoded meta=%q, want %q", decoded.Meta, frame.Meta)
+	}
+	if !bytes.Equal(decoded.Payload, frame.Payload) {
+		t.Fatalf("decoded payload=%v, want %v", decoded.Payload, frame.Payload)
+	}
+}
+
+func TestFrameCodecRejectsBadMagic(t *testing.T) {
+	encoded, err := EncodeFrame(Frame{Type: FramePing, StreamID: 1})
+	if err != nil {
+		t.Fatalf("EncodeFrame() err=%v", err)
+	}
+	encoded[0] = 'X'
+
+	if _, err := DecodeFrame(encoded); err == nil {
+		t.Fatal("DecodeFrame() err=nil, want bad magic error")
+	}
+}
+
+func TestFrameCodecRejectsOversizedMetadata(t *testing.T) {
+	_, err := EncodeFrame(Frame{
+		Type:     FrameOpen,
+		StreamID: 1,
+		Meta:     bytes.Repeat([]byte{'a'}, maxFrameMetaBytes+1),
+	})
+	if err == nil {
+		t.Fatal("EncodeFrame() err=nil, want metadata size error")
+	}
+}
+
+func TestApplyTargetHeadersDropsExternalBrowserContextHeaders(t *testing.T) {
+	dst := http.Header{}
+	applyTargetHeaders(dst, map[string][]string{
+		"Origin":  {"https://vimernas.myqnapcloud.com:28801"},
+		"Referer": {"https://vimernas.myqnapcloud.com:28801/"},
+		"Accept":  {"text/html"},
+	})
+
+	if got := dst.Get("Origin"); got != "" {
+		t.Fatalf("applyTargetHeaders forwarded Origin=%q", got)
+	}
+	if got := dst.Get("Referer"); got != "" {
+		t.Fatalf("applyTargetHeaders forwarded Referer=%q", got)
+	}
+	if got := dst.Get("Accept"); got != "text/html" {
+		t.Fatalf("applyTargetHeaders Accept=%q, want text/html", got)
+	}
+}
+
+func TestTargetOriginForWebSocketURLUsesHTTPOrigin(t *testing.T) {
+	if got := targetOriginForURL("ws://127.0.0.1:5173/?token=abc"); got != "http://127.0.0.1:5173" {
+		t.Fatalf("targetOriginForURL()=%q", got)
+	}
+}
+
+func TestHubClientOpenAllowsOnlyExactLoopbackTargetHost(t *testing.T) {
+	client := NewHubClient()
+	for _, targetHost := range []string{"localhost", "0.0.0.0", "::1", "127.0.0.2", "127.1.2.3"} {
+		t.Run(targetHost, func(t *testing.T) {
+			err := client.Open(rp.RelayOpenPayload{
+				RelayID:    "relay_test",
+				RelayURL:   "ws://127.0.0.1:9/__wheelmaker/relay/hub",
+				Nonce:      "nonce",
+				TargetHost: targetHost,
+				TargetPort: 80,
+			})
+			if err == nil {
+				t.Fatalf("Open targetHost=%q succeeded, want error", targetHost)
+			}
+		})
+	}
+}
+
+func TestRegistryTunnelRouteBackpressuresInsteadOfDroppingDataFrames(t *testing.T) {
+	tunnel := newRegistryTunnel(nil, nil)
+	stream := &registryStream{
+		id:      1,
+		tunnel:  tunnel,
+		headers: make(chan Frame, 1),
+		frames:  make(chan Frame, 1),
+		closed:  make(chan struct{}),
+	}
+	tunnel.streams[stream.id] = stream
+
+	tunnel.route(Frame{Type: FrameData, StreamID: stream.id, Payload: []byte("first")})
+
+	delivered := make(chan struct{})
+	go func() {
+		tunnel.route(Frame{Type: FrameData, StreamID: stream.id, Payload: []byte("second")})
+		close(delivered)
+	}()
+
+	select {
+	case <-delivered:
+		t.Fatalf("route returned while the stream frame buffer was full; data frames must not be dropped")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	first := <-stream.frames
+	if string(first.Payload) != "first" {
+		t.Fatalf("first payload=%q, want first", string(first.Payload))
+	}
+
+	select {
+	case <-delivered:
+	case <-time.After(time.Second):
+		t.Fatalf("route did not resume after the stream frame buffer had space")
+	}
+
+	second := <-stream.frames
+	if string(second.Payload) != "second" {
+		t.Fatalf("second payload=%q, want second", string(second.Payload))
+	}
 }

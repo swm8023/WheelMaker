@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/swm8023/wheelmaker/internal/hub/tools"
 	"github.com/swm8023/wheelmaker/internal/portrelay"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 )
@@ -52,6 +53,11 @@ type ChatHandler interface {
 
 type SessionHandler interface {
 	HandleSessionRequest(ctx context.Context, method string, projectID string, payload json.RawMessage) (any, error)
+}
+
+type toolCommandHandler interface {
+	Handle(ctx context.Context, method string, payload json.RawMessage) (any, *tools.CommandError)
+	SetProjects(projects []ProjectInfo)
 }
 
 var localReadUpgrader = websocket.Upgrader{
@@ -87,10 +93,7 @@ type Reporter struct {
 
 	connectionEpoch int64
 	monitorCore     *MonitorCore
-	npmCommand      *NPMCommand
-	updateCommand   *UpdateCommand
-	skillsCommand   *SkillsCommand
-	tokenCommand    *TokenCommand
+	toolHandler     toolCommandHandler
 	relayClient     *portrelay.HubClient
 
 	localReadMu         sync.RWMutex
@@ -136,19 +139,21 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 			monitorBase = filepath.Join(home, ".wheelmaker")
 		}
 	}
+	cfg.MonitorBaseDir = monitorBase
 	r := &Reporter{
-		cfg:           cfg,
-		projects:      cp,
-		projectsByID:  byID,
-		chatByID:      make(map[string]ChatHandler),
-		sessionByID:   make(map[string]SessionHandler),
-		pending:       make(map[int64]chan envelope),
-		monitorCore:   NewMonitorCore(monitorBase),
-		npmCommand:    NewNPMCommand(),
-		updateCommand: NewUpdateCommand(monitorBase),
-		skillsCommand: NewSkillsCommand(skillsCommandConfig{HubID: cfg.HubID, Projects: cp}),
-		tokenCommand:  NewTokenCommand(),
-		relayClient:   portrelay.NewHubClient(),
+		cfg:          cfg,
+		projects:     cp,
+		projectsByID: byID,
+		chatByID:     make(map[string]ChatHandler),
+		sessionByID:  make(map[string]SessionHandler),
+		pending:      make(map[int64]chan envelope),
+		monitorCore:  NewMonitorCore(monitorBase),
+		toolHandler: tools.NewManager(tools.ManagerConfig{
+			HubID:          cfg.HubID,
+			Projects:       cp,
+			MonitorBaseDir: monitorBase,
+		}),
+		relayClient: portrelay.NewHubClient(),
 	}
 	r.requestSeq.Store(2)
 	return r
@@ -1117,51 +1122,25 @@ func (r *Reporter) replyMonitorAction(conn *websocket.Conn, req envelope) {
 }
 
 func (r *Reporter) replyCmdNPM(conn *websocket.Conn, req envelope) {
-	handler := r.npmCommand
-	if handler == nil {
-		handler = NewNPMCommand()
-		r.npmCommand = handler
-	}
-	payload, cmdErr := handler.Handle(context.Background(), req.Payload)
-	if cmdErr != nil {
-		_ = r.writeError(conn, req.RequestID, cmdErr.Code, cmdErr.Message)
-		return
-	}
-	_ = r.writeJSON(conn, "->", envelope{
-		RequestID: req.RequestID,
-		Type:      "response",
-		Method:    req.Method,
-		Payload:   rp.MustRaw(payload),
-	})
+	r.replyToolCommand(conn, req)
 }
 
 func (r *Reporter) replyCmdUpdate(conn *websocket.Conn, req envelope) {
-	handler := r.updateCommand
-	if handler == nil {
-		handler = NewUpdateCommand(r.cfg.MonitorBaseDir)
-		r.updateCommand = handler
-	}
-	payload, cmdErr := handler.Handle(context.Background(), req.Payload)
-	if cmdErr != nil {
-		_ = r.writeError(conn, req.RequestID, cmdErr.Code, cmdErr.Message)
-		return
-	}
-	_ = r.writeJSON(conn, "->", envelope{
-		RequestID: req.RequestID,
-		Type:      "response",
-		Method:    req.Method,
-		Payload:   rp.MustRaw(payload),
-	})
+	r.replyToolCommand(conn, req)
 }
 
 func (r *Reporter) replyCmdSkills(conn *websocket.Conn, req envelope) {
-	handler := r.skillsCommand
-	if handler == nil {
-		handler = NewSkillsCommand(skillsCommandConfig{HubID: r.cfg.HubID, Projects: r.projectsSnapshot()})
-		r.skillsCommand = handler
-	}
+	r.replyToolCommand(conn, req)
+}
+
+func (r *Reporter) replyCmdToken(conn *websocket.Conn, req envelope) {
+	r.replyToolCommand(conn, req)
+}
+
+func (r *Reporter) replyToolCommand(conn *websocket.Conn, req envelope) {
+	handler := r.ensureToolHandler()
 	handler.SetProjects(r.projectsSnapshot())
-	payload, cmdErr := handler.Handle(context.Background(), req.Payload)
+	payload, cmdErr := handler.Handle(context.Background(), req.Method, req.Payload)
 	if cmdErr != nil {
 		_ = r.writeError(conn, req.RequestID, cmdErr.Code, cmdErr.Message)
 		return
@@ -1174,23 +1153,16 @@ func (r *Reporter) replyCmdSkills(conn *websocket.Conn, req envelope) {
 	})
 }
 
-func (r *Reporter) replyCmdToken(conn *websocket.Conn, req envelope) {
-	handler := r.tokenCommand
-	if handler == nil {
-		handler = NewTokenCommand()
-		r.tokenCommand = handler
+func (r *Reporter) ensureToolHandler() toolCommandHandler {
+	if r.toolHandler != nil {
+		return r.toolHandler
 	}
-	payload, cmdErr := handler.Handle(context.Background(), req.Payload)
-	if cmdErr != nil {
-		_ = r.writeError(conn, req.RequestID, cmdErr.Code, cmdErr.Message)
-		return
-	}
-	_ = r.writeJSON(conn, "->", envelope{
-		RequestID: req.RequestID,
-		Type:      "response",
-		Method:    req.Method,
-		Payload:   rp.MustRaw(payload),
+	r.toolHandler = tools.NewManager(tools.ManagerConfig{
+		HubID:          r.cfg.HubID,
+		Projects:       r.projectsSnapshot(),
+		MonitorBaseDir: r.cfg.MonitorBaseDir,
 	})
+	return r.toolHandler
 }
 
 func (r *Reporter) replyChat(conn *websocket.Conn, req envelope) {
