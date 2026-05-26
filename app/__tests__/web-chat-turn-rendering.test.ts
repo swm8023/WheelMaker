@@ -115,6 +115,23 @@ describe('web chat turn rendering', () => {
     expect(sendIndex).toBeGreaterThan(pendingIndex);
   });
 
+  test('renders persisted prompt attachments as user-visible chips', () => {
+    const main = readMain();
+    const styles = readStyles();
+
+    expect(main).toContain("import {");
+    expect(main).toContain("} from './chat/chatPromptAttachments';");
+    expect(main).toContain('const attachmentBlocks = groupPromptAttachmentBlocks([message]);');
+    expect(main).toContain('className="chat-prompt-attachment-strip"');
+    expect(main).toContain('className={`chat-prompt-attachment-chip ${block.type === \'image\' ? \'image\' : \'file\'}`}');
+    expect(main).toContain('const label = chatPromptAttachmentLabel(block, index);');
+    expect(main).toContain('const meta = chatPromptAttachmentMeta(block);');
+    expect(main).toContain('groupPromptAttachmentBlocks([message]).length > 0');
+    expect(styles).toContain('.chat-prompt-attachment-strip {');
+    expect(styles).toContain('.chat-prompt-attachment-chip {');
+    expect(styles).toContain('.chat-prompt-attachment-name {');
+  });
+
   test('renders prompt done stop reason labels without disabling copied partial output', () => {
     const main = readMain();
 

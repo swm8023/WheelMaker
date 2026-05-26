@@ -1799,53 +1799,17 @@ func TestCodexAppPromptMapsResourceLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("codexappPromptToInput: %v", err)
 	}
-	if len(input) != 3 {
-		t.Fatalf("input len=%d, want file text + mention + remote text: %#v", len(input), input)
+	if len(input) != 2 {
+		t.Fatalf("input len=%d, want 2: %#v", len(input), input)
 	}
-	if input[0].Type != "text" || !strings.Contains(input[0].Text, "D:/Code/WheelMaker/docs/acp-protocol-full.zh-CN.md") {
-		t.Fatalf("file resource link text=%#v, want visible path", input[0])
+	if input[0].Type != "mention" || input[0].Path != "D:/Code/WheelMaker/docs/acp-protocol-full.zh-CN.md" || input[0].Name != "acp-protocol-full.zh-CN.md" {
+		t.Fatalf("file resource link input=%#v, want mention path", input[0])
 	}
-	if input[1].Type != "mention" || input[1].Path != "D:/Code/WheelMaker/docs/acp-protocol-full.zh-CN.md" || input[1].Name != "acp-protocol-full.zh-CN.md" {
-		t.Fatalf("file resource link input=%#v, want mention path", input[1])
-	}
-	if input[2].Type != "text" || !strings.Contains(input[2].Text, "https://example.com/spec") || !strings.Contains(input[2].Text, "Remote Spec") {
-		t.Fatalf("remote resource link input=%#v, want descriptive text", input[2])
-	}
-	if input[2].TextElements == nil || len(input[2].TextElements) != 0 {
-		t.Fatalf("remote resource link text_elements=%#v, want empty array", input[2].TextElements)
-	}
-}
-
-func TestCodexAppPromptExposesFileResourceLinkPathAsText(t *testing.T) {
-	input, err := codexappPromptToInput([]protocol.ContentBlock{
-		{Type: protocol.ContentBlockTypeText, Text: "Can you read this PDF?"},
-		{
-			Type:     protocol.ContentBlockTypeResourceLink,
-			URI:      "file:///D:/Code/WheelMaker/.wheelmaker/attachments/form.pdf",
-			Name:     "form.pdf",
-			MimeType: "application/pdf",
-			Size:     9927,
-		},
-	})
-	if err != nil {
-		t.Fatalf("codexappPromptToInput: %v", err)
-	}
-	if len(input) != 3 {
-		t.Fatalf("input len=%d, want user text + attachment text + mention: %#v", len(input), input)
-	}
-	if input[1].Type != "text" {
-		t.Fatalf("attachment visible input=%#v, want text", input[1])
-	}
-	if !strings.Contains(input[1].Text, "form.pdf") ||
-		!strings.Contains(input[1].Text, "D:/Code/WheelMaker/.wheelmaker/attachments/form.pdf") ||
-		!strings.Contains(input[1].Text, "application/pdf") {
-		t.Fatalf("attachment text=%q, want name, path, and mime type", input[1].Text)
+	if input[1].Type != "text" || !strings.Contains(input[1].Text, "https://example.com/spec") || !strings.Contains(input[1].Text, "Remote Spec") {
+		t.Fatalf("remote resource link input=%#v, want descriptive text", input[1])
 	}
 	if input[1].TextElements == nil || len(input[1].TextElements) != 0 {
-		t.Fatalf("attachment text_elements=%#v, want empty array", input[1].TextElements)
-	}
-	if input[2].Type != "mention" || input[2].Path != "D:/Code/WheelMaker/.wheelmaker/attachments/form.pdf" || input[2].Name != "form.pdf" {
-		t.Fatalf("attachment mention=%#v, want mention path", input[2])
+		t.Fatalf("remote resource link text_elements=%#v, want empty array", input[1].TextElements)
 	}
 }
 

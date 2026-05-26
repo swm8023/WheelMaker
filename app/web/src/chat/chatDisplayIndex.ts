@@ -4,6 +4,7 @@ import {
   splitChatConfirmationReplyText,
   splitChatOptionReplyText,
 } from './chatOptionReplies';
+import {promptAttachmentBlockCount} from './chatPromptAttachments';
 
 export type ChatDisplayIndexItem = {
   kind: 'turn' | 'pending';
@@ -40,6 +41,7 @@ export type ChatTurnHeightMetrics = {
   confirmationButtonMinHeight: number;
   confirmationButtonMaxWidth: number;
   imageStripHeight: number;
+  attachmentChipHeight: number;
 };
 
 export type ChatTurnHeightContext = {
@@ -79,6 +81,7 @@ export const DEFAULT_CHAT_TURN_HEIGHT_METRICS: ChatTurnHeightMetrics = {
   confirmationButtonMinHeight: 32,
   confirmationButtonMaxWidth: 620,
   imageStripHeight: 232,
+  attachmentChipHeight: 34,
 };
 
 function positiveTurnIndex(message: RegistryChatMessage): number {
@@ -189,7 +192,8 @@ function imageBlockCount(message: RegistryChatMessage): number {
   }
   return blocks.filter(item => {
     if (!item || typeof item !== 'object') return false;
-    return (item as Record<string, unknown>).type === 'image';
+    const block = item as Record<string, unknown>;
+    return block.type === 'image' && typeof block.data === 'string' && block.data.trim();
   }).length;
 }
 
@@ -303,8 +307,15 @@ function estimatePromptStartHeight(
     ? Math.ceil(images / Math.max(1, Math.floor(metrics.contentWidth / 288)))
     : 0;
   const imageHeight = imageRows > 0 ? imageRows * metrics.imageStripHeight : 0;
+  const attachmentBlocks = promptAttachmentBlockCount(message.param?.contentBlocks);
+  const attachmentRows = attachmentBlocks > 0
+    ? Math.ceil(attachmentBlocks / Math.max(1, Math.floor(metrics.contentWidth / 252)))
+    : 0;
+  const attachmentHeight = attachmentRows > 0
+    ? attachmentRows * metrics.attachmentChipHeight
+    : 0;
   const deliveryHeight = context.promptStatus === 'undelivered' ? 22 : 0;
-  const visibleSections = [rowHeight, imageHeight, deliveryHeight].filter(height => height > 0);
+  const visibleSections = [rowHeight, imageHeight, attachmentHeight, deliveryHeight].filter(height => height > 0);
   const gaps = Math.max(0, visibleSections.length - 1) * metrics.promptGroupGap;
   return clampHeight(
     metrics.promptGroupVerticalPadding +

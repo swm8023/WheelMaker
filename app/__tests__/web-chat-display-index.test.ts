@@ -120,6 +120,30 @@ describe('chat display index', () => {
     expect(multiline.items[0].estimatedHeight).toBeGreaterThan(compact.items[0].estimatedHeight);
   });
 
+  test('reserves visible prompt height for attachment-only content blocks', () => {
+    const attachmentOnlyPrompt = message(1, 'prompt_request', '');
+    attachmentOnlyPrompt.param = {
+      contentBlocks: [
+        {
+          type: 'resource_link',
+          uri: 'file:///D:/Code/WheelMaker/docs/spec.pdf',
+          name: 'spec.pdf',
+          mimeType: 'application/pdf',
+          size: 42_000,
+        },
+      ],
+    };
+    const emptyPrompt = message(2, 'prompt_request', '');
+    emptyPrompt.param = {contentBlocks: []};
+
+    const index = buildChatDisplayIndex([attachmentOnlyPrompt, emptyPrompt], {
+      layoutMetrics: {contentWidth: 360},
+      promptStatus: () => null,
+    });
+
+    expect(index.items[0].estimatedHeight).toBeGreaterThan(index.items[1].estimatedHeight);
+  });
+
   test('does not keep a manual virtual range implementation', () => {
     const source = fs.readFileSync(
       path.join(__dirname, '..', 'web', 'src', 'chat', 'chatDisplayIndex.ts'),

@@ -6808,6 +6808,61 @@ body,
   object-fit: cover;
 }
 
+.chat-prompt-attachment-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
+  gap: 8px;
+  max-width: min(920px, 100%);
+  margin-top: 2px;
+}
+
+.chat-prompt-attachment-chip {
+  display: inline-grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  max-width: min(340px, 100%);
+  min-height: 34px;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, var(--accent));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-1) 90%, var(--accent));
+  color: color-mix(in srgb, var(--text) 82%, var(--muted));
+}
+
+.chat-prompt-attachment-icon {
+  font-size: 15px;
+  color: color-mix(in srgb, var(--accent) 74%, var(--text));
+}
+
+.chat-prompt-attachment-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chat-prompt-attachment-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.25;
+  color: color-mix(in srgb, var(--text) 86%, var(--accent));
+}
+
+.chat-prompt-attachment-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--muted);
+}
+
 .chat-prompt-separator {
   display: flex;
   align-items: center;
