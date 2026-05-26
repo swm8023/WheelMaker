@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -231,6 +232,47 @@ func TestFileSessionTurnStoreRejectsMissingTurnContent(t *testing.T) {
 
 	if _, err := store.WriteTurns(ctx, "proj1", "sess-1", 1, []string{""}); err == nil {
 		t.Fatalf("WriteTurns with empty content unexpectedly succeeded")
+	}
+}
+
+func TestFileSessionTurnStoreSearchScansNewestFirstAndStopsOnMatch(t *testing.T) {
+	store := newFileSessionTurnStore(t.TempDir())
+	ctx := context.Background()
+
+	contents := make([]string, 260)
+	for i := range contents {
+		contents[i] = fmt.Sprintf(`{"method":"prompt_request","param":{"contentBlocks":[{"type":"text","text":"turn-%03d"}]}}`, i+1)
+	}
+	contents[129] = `{"method":"prompt_request","param":{"contentBlocks":[{"type":"text","text":"older target"}]}}`
+	contents[258] = `{"method":"prompt_request","param":{"contentBlocks":[{"type":"text","text":"newest target"}]}}`
+	latest, err := store.WriteTurns(ctx, "proj1", "sess-1", 1, contents)
+	if err != nil {
+		t.Fatalf("WriteTurns: %v", err)
+	}
+
+	visited := []int64{}
+	var matchedTurn int64
+	err = store.scanTurnsNewestFirst(ctx, "proj1", "sess-1", latest, func(turn sessionViewTurn) (bool, error) {
+		visited = append(visited, turn.TurnIndex)
+		if strings.Contains(turn.Content, "target") {
+			matchedTurn = turn.TurnIndex
+			return true, nil
+		}
+		return false, nil
+	})
+	if err != nil {
+		t.Fatalf("scanTurnsNewestFirst: %v", err)
+	}
+	if matchedTurn != 259 {
+		t.Fatalf("matchedTurn = %d, want 259", matchedTurn)
+	}
+	if len(visited) == 0 || visited[0] != 260 {
+		t.Fatalf("visited = %v, want newest turn first", visited)
+	}
+	for _, turnIndex := range visited {
+		if turnIndex < 259 {
+			t.Fatalf("visited older turn %d after matching turn 259; visited=%v", turnIndex, visited)
+		}
 	}
 }
 

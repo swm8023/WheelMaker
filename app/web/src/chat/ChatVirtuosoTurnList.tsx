@@ -1,6 +1,7 @@
 import React from 'react';
 import {Virtuoso, type Components, type VirtuosoHandle} from 'react-virtuoso';
 import type {ChatDisplayIndex, ChatDisplayIndexItem} from './chatDisplayIndex';
+import {resolveChatDisplayScrollIndex} from './chatDisplayIndex';
 import {resolveChatScrollBottomTop} from './chatScrollIntent';
 
 const DEFAULT_AT_BOTTOM_THRESHOLD = 80;
@@ -25,6 +26,7 @@ export type ChatVirtuosoItem = {
 export type ChatVirtuosoTurnListHandle = {
   autoscrollToBottom: () => void;
   scrollToBottom: (behavior?: ChatVirtuosoScrollBehavior) => void;
+  scrollToTurnIndex: (turnIndex: number, behavior?: ChatVirtuosoScrollBehavior) => void;
 };
 
 export type ChatVirtuosoTurnListProps = {
@@ -208,6 +210,21 @@ export const ChatVirtuosoTurnList = React.forwardRef<
     [displayIndex.items.length],
   );
 
+  const scrollToTurnIndex = React.useCallback(
+    (turnIndex: number, behavior: ChatVirtuosoScrollBehavior = 'auto') => {
+      const displayIndexPosition = resolveChatDisplayScrollIndex(displayIndex, turnIndex);
+      if (displayIndexPosition === null) {
+        return;
+      }
+      virtuosoRef.current?.scrollToIndex({
+        index: displayIndexPosition,
+        align: 'start',
+        behavior,
+      });
+    },
+    [displayIndex],
+  );
+
   const settleScrollParentToBottom = React.useCallback(
     (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
       if (!scrollParent) {
@@ -280,7 +297,8 @@ export const ChatVirtuosoTurnList = React.forwardRef<
       settleScrollParentToBottom(behavior);
       requestScrollToLastDisplayItem(behavior, {includeIndexScroll: true});
     },
-  }), [requestScrollToLastDisplayItem, scrollToLastDisplayItem, settleScrollParentToBottom]);
+    scrollToTurnIndex,
+  }), [requestScrollToLastDisplayItem, scrollToLastDisplayItem, scrollToTurnIndex, settleScrollParentToBottom]);
 
   if (!scrollParent) {
     return (

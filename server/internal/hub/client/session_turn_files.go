@@ -131,6 +131,72 @@ func (s *fileSessionTurnStore) ReadTurns(ctx context.Context, projectName, sessi
 	return out, nil
 }
 
+func (s *fileSessionTurnStore) scanTurnsNewestFirst(ctx context.Context, projectName, sessionID string, latestTurnIndex int64, visit func(sessionViewTurn) (bool, error)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return fmt.Errorf("session turn store is required")
+	}
+	if latestTurnIndex <= 0 || visit == nil {
+		return nil
+	}
+	latestFileNo := (latestTurnIndex - 1) / sessionTurnsPerFile
+	for fileNo := latestFileNo; fileNo >= 0; fileNo-- {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		path := filepath.Join(s.turnDir(projectName, sessionID), fmt.Sprintf("t%06d.bin", fileNo))
+		raw, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: turn file %d", errSessionTurnMissing, fileNo)
+		}
+		if err != nil {
+			return fmt.Errorf("read turn file: %w", err)
+		}
+		if len(raw) < sessionTurnFileHeadSize {
+			return fmt.Errorf("turn file header too short")
+		}
+		header := raw[:sessionTurnFileHeadSize]
+		if err := validateTurnHeader(header); err != nil {
+			return err
+		}
+		startSlot := sessionTurnsPerFile - 1
+		if fileNo == latestFileNo {
+			startSlot = int((latestTurnIndex - 1) % sessionTurnsPerFile)
+		}
+		for slot := startSlot; slot >= 0; slot-- {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			turnIndex := fileNo*sessionTurnsPerFile + int64(slot) + 1
+			if turnIndex > latestTurnIndex {
+				continue
+			}
+			offset, length := turnSlot(header, slot)
+			if offset == 0 || length == 0 {
+				continue
+			}
+			end := int(offset) + int(length)
+			if int(offset) < sessionTurnFileHeadSize || end > len(raw) {
+				return fmt.Errorf("turn %d slot points outside file", turnIndex)
+			}
+			stop, err := visit(sessionViewTurn{
+				TurnIndex: turnIndex,
+				Content:   string(raw[int(offset):end]),
+				Finished:  true,
+			})
+			if err != nil {
+				return err
+			}
+			if stop {
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
 func (s *fileSessionTurnStore) DeleteTurns(ctx context.Context, projectName, sessionID string) error {
 	if err := ctx.Err(); err != nil {
 		return err

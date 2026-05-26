@@ -20,6 +20,8 @@ import type {
   RegistrySessionConfigOption,
   RegistrySessionMessage,
   RegistrySessionReadResponse,
+  RegistrySessionSearchResponse,
+  RegistrySessionSearchStatusResponse,
   RegistryResumableSession,
   RegistrySessionSummary,
   RegistrySkillCommandResponse,
@@ -361,6 +363,27 @@ export class RegistryWorkspaceService {
       };
     }
     return this.repository.readSession(projectId, sessionId, afterTurnIndex);
+  }
+
+  async startProjectSessionSearch(projectId: string, searchId: string, query: string): Promise<RegistrySessionSearchStatusResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.startSessionSearch(projectId, searchId, query);
+  }
+
+  async queryProjectSessionSearch(projectId: string, searchId: string): Promise<RegistrySessionSearchResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.querySessionSearch(projectId, searchId);
+  }
+
+  async cancelProjectSessionSearch(projectId: string, searchId: string): Promise<RegistrySessionSearchStatusResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.cancelSessionSearch(projectId, searchId);
   }
 
   async markSessionRead(sessionId: string, lastReadTurnIndex: number): Promise<{ok: boolean; session?: RegistrySessionSummary}> {

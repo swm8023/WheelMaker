@@ -90,6 +90,33 @@ export interface RegistrySessionReadResponse {
   latestTurnIndex: number;
 }
 
+export type RegistrySessionSearchAction = 'start' | 'query' | 'cancel';
+
+export interface RegistrySessionSearchResult {
+  projectId: string;
+  sessionId: string;
+  source: 'title' | 'prompt';
+  turnIndex?: number;
+}
+
+export interface RegistrySessionSearchError {
+  projectId: string;
+  sessionId?: string;
+  message: string;
+}
+
+export interface RegistrySessionSearchResponse {
+  searchId: string;
+  done: boolean;
+  results: RegistrySessionSearchResult[];
+  errors: RegistrySessionSearchError[];
+}
+
+export interface RegistrySessionSearchStatusResponse {
+  searchId: string;
+  done: boolean;
+}
+
 export interface RegistryTokenProvider {
   id: string;
   name: string;

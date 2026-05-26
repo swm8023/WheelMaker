@@ -409,3 +409,19 @@ export function buildChatDisplayIndex(
   }
   return {items};
 }
+
+export function resolveChatDisplayScrollIndex(displayIndex: ChatDisplayIndex, turnIndex: number): number | null {
+  const targetTurnIndex = Number.isFinite(turnIndex) ? Math.max(0, Math.trunc(turnIndex)) : 0;
+  if (targetTurnIndex <= 0 || displayIndex.items.length === 0) {
+    return null;
+  }
+  const exactIndex = displayIndex.items.findIndex(item => item.turnIndex === targetTurnIndex);
+  if (exactIndex >= 0) {
+    return exactIndex;
+  }
+  const followingIndex = displayIndex.items.findIndex(item => item.turnIndex > targetTurnIndex);
+  if (followingIndex >= 0) {
+    return followingIndex;
+  }
+  return displayIndex.items.length - 1;
+}

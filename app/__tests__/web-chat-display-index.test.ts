@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import {buildChatDisplayIndex} from '../web/src/chat/chatDisplayIndex';
+import {buildChatDisplayIndex, resolveChatDisplayScrollIndex} from '../web/src/chat/chatDisplayIndex';
 import type {RegistryChatMessage} from '../web/src/types/registry';
 
 function message(
@@ -86,6 +86,20 @@ describe('chat display index', () => {
     expect(visible.items.map(item => item.turnIndex)).toEqual([1, 2, 3]);
     expect(hidden.items.map(item => item.turnIndex)).toEqual([1, 3]);
     expect(visible.items[1].estimatedHeight).toBeLessThan(48);
+  });
+
+  test('resolves turn jump to exact or nearest visible display item', () => {
+    const source = [
+      message(1, 'prompt_request', 'hello'),
+      message(2, 'tool_call', 'hidden tool'),
+      message(3, 'agent_message_chunk', 'answer'),
+    ];
+    const index = buildChatDisplayIndex(source, {hideToolCalls: true});
+
+    expect(resolveChatDisplayScrollIndex(index, 1)).toBe(0);
+    expect(resolveChatDisplayScrollIndex(index, 2)).toBe(1);
+    expect(resolveChatDisplayScrollIndex(index, 4)).toBe(1);
+    expect(resolveChatDisplayScrollIndex({items: []}, 1)).toBe(null);
   });
 
   test('accounts for prompt status and explicit user newlines', () => {

@@ -2586,6 +2586,182 @@ func sessionViewPromptFinishedEvent(sessionID, stopReason string) SessionViewEve
 	}
 }
 
+type testSessionSearchResponse struct {
+	SearchID string                    `json:"searchId"`
+	Done     bool                      `json:"done"`
+	Results  []testSessionSearchResult `json:"results"`
+	Errors   []testSessionSearchError  `json:"errors"`
+}
+
+type testSessionSearchResult struct {
+	ProjectID string `json:"projectId"`
+	SessionID string `json:"sessionId"`
+	Source    string `json:"source"`
+	TurnIndex int64  `json:"turnIndex,omitempty"`
+}
+
+type testSessionSearchError struct {
+	ProjectID string `json:"projectId"`
+	SessionID string `json:"sessionId,omitempty"`
+	Message   string `json:"message"`
+}
+
+func decodeSessionSearchResponseForTest(t *testing.T, resp any) testSessionSearchResponse {
+	t.Helper()
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal session search response: %v", err)
+	}
+	var out testSessionSearchResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal session search response %s: %v", raw, err)
+	}
+	return out
+}
+
+func waitSessionSearchDoneForTest(t *testing.T, c *Client, ctx context.Context, searchID string) testSessionSearchResponse {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	payload := func() json.RawMessage {
+		return json.RawMessage(fmt.Sprintf(`{"action":"query","searchId":%q}`, searchID))
+	}
+	for {
+		resp, err := c.HandleSessionRequest(ctx, "session.search", "proj1", payload())
+		if err != nil {
+			t.Fatalf("HandleSessionRequest(session.search query): %v", err)
+		}
+		decoded := decodeSessionSearchResponseForTest(t, resp)
+		if decoded.Done {
+			return decoded
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("session search %s did not finish; last response=%#v", searchID, decoded)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func resultBySessionIDForTest(results []testSessionSearchResult, sessionID string) (testSessionSearchResult, bool) {
+	for _, result := range results {
+		if result.SessionID == sessionID {
+			return result, true
+		}
+	}
+	return testSessionSearchResult{}, false
+}
+
+func TestHandleSessionRequestSessionSearchFindsTitleAndNewestPrompt(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	c.SetSessionHistoryRoot(t.TempDir())
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-title", "Deploy rollout")); err != nil {
+		t.Fatalf("RecordEvent title session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-title", "deploy should not be scanned because title matches", nil)); err != nil {
+		t.Fatalf("RecordEvent title prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-title", acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent title prompt finished: %v", err)
+	}
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-prompt", "Plain session")); err != nil {
+		t.Fatalf("RecordEvent prompt session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-prompt", "older deploy prompt", nil)); err != nil {
+		t.Fatalf("RecordEvent older prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-prompt", acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent older prompt finished: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-prompt", "newest deploy prompt", nil)); err != nil {
+		t.Fatalf("RecordEvent newest prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-prompt", acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent newest prompt finished: %v", err)
+	}
+
+	resp, err := c.HandleSessionRequest(ctx, "session.search", "proj1", json.RawMessage(`{"action":"start","searchId":"search-1","query":"DEPLOY"}`))
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.search start): %v", err)
+	}
+	started := decodeSessionSearchResponseForTest(t, resp)
+	if started.SearchID != "search-1" || started.Done {
+		t.Fatalf("start response = %#v, want searchId search-1 done=false", started)
+	}
+
+	done := waitSessionSearchDoneForTest(t, c, ctx, "search-1")
+	if len(done.Errors) != 0 {
+		t.Fatalf("search errors = %#v, want none", done.Errors)
+	}
+	titleResult, ok := resultBySessionIDForTest(done.Results, "sess-title")
+	if !ok {
+		t.Fatalf("results = %#v, want sess-title", done.Results)
+	}
+	if titleResult.ProjectID != "proj1" || titleResult.Source != "title" || titleResult.TurnIndex != 0 {
+		t.Fatalf("title result = %#v, want project title hit without turnIndex", titleResult)
+	}
+	promptResult, ok := resultBySessionIDForTest(done.Results, "sess-prompt")
+	if !ok {
+		t.Fatalf("results = %#v, want sess-prompt", done.Results)
+	}
+	if promptResult.ProjectID != "proj1" || promptResult.Source != "prompt" || promptResult.TurnIndex != 3 {
+		t.Fatalf("prompt result = %#v, want newest prompt turn 3", promptResult)
+	}
+}
+
+func TestHandleSessionRequestSessionSearchValidationQueryAndCancel(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if _, err := c.HandleSessionRequest(ctx, "session.search", "proj1", json.RawMessage(`{"action":"start","searchId":"bad-empty","query":"   "}`)); err == nil {
+		t.Fatalf("empty search query unexpectedly succeeded")
+	}
+	tooLong := strings.Repeat("x", 201)
+	payload, err := json.Marshal(map[string]string{"action": "start", "searchId": "bad-long", "query": tooLong})
+	if err != nil {
+		t.Fatalf("marshal long query payload: %v", err)
+	}
+	if _, err := c.HandleSessionRequest(ctx, "session.search", "proj1", payload); err == nil {
+		t.Fatalf("overlong search query unexpectedly succeeded")
+	}
+	if _, err := c.HandleSessionRequest(ctx, "session.search", "proj1", json.RawMessage(`{"action":"query","searchId":"missing"}`)); err == nil {
+		t.Fatalf("query for missing search id unexpectedly succeeded")
+	}
+	resp, err := c.HandleSessionRequest(ctx, "session.search", "proj1", json.RawMessage(`{"action":"cancel","searchId":"missing"}`))
+	if err != nil {
+		t.Fatalf("cancel missing search id: %v", err)
+	}
+	cancelled := decodeSessionSearchResponseForTest(t, resp)
+	if cancelled.SearchID != "missing" || !cancelled.Done {
+		t.Fatalf("cancel response = %#v, want missing done=true", cancelled)
+	}
+}
+
+func TestHandleSessionRequestSessionSearchIgnoresProtocolFields(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	c.SetSessionHistoryRoot(t.TempDir())
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-plain", "Plain")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-plain", "visible user text", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-plain", acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	if _, err := c.HandleSessionRequest(ctx, "session.search", "proj1", json.RawMessage(`{"action":"start","searchId":"search-fields","query":"contentBlocks"}`)); err != nil {
+		t.Fatalf("HandleSessionRequest(session.search start): %v", err)
+	}
+	done := waitSessionSearchDoneForTest(t, c, ctx, "search-fields")
+	if len(done.Results) != 0 {
+		t.Fatalf("results = %#v, want no matches for JSON protocol field", done.Results)
+	}
+}
+
 type publishedSessionEvent struct {
 	method  string
 	payload map[string]any

@@ -64,6 +64,14 @@ import {
 import {createChatDurablePersistQueue} from './chat/chatDurablePersist';
 import {createChatReadRepairQueue} from './chat/chatReadRepair';
 import {buildChatDisplayIndex} from './chat/chatDisplayIndex';
+import {
+  buildSessionSearchSections,
+  mergeSessionSearchResultsByProject,
+  resolveSessionSearchPollDelay,
+  splitSessionSearchTitleHighlight,
+  type SessionSearchResultsByProjectId,
+  type SessionSearchSectionRow,
+} from './chat/sessionSearchState';
 import {useChatLayoutMetrics} from './chat/chatLayoutMetrics';
 import {resolveWideProjectActionPopoverPlacement, type WideProjectActionPopoverPlacement} from './chat/wideProjectActionPopover';
 import {ChatVirtuosoTurnList, type ChatVirtuosoTurnListHandle} from './chat/ChatVirtuosoTurnList';
@@ -188,10 +196,10 @@ import type {
   RegistryChatMessageEventPayload,
   RegistryChatSession,
   RegistryResumableSession,
-  RegistrySessionContentBlock,
-  RegistrySessionConfigOption,
-  RegistrySessionSummary,
-  RegistrySessionTurn,
+      RegistrySessionContentBlock,
+      RegistrySessionConfigOption,
+      RegistrySessionSummary,
+      RegistrySessionTurn,
   RegistryFsEntry,
   RegistryFsInfo,
   RegistryGitCommit,
@@ -3083,6 +3091,24 @@ function App() {
   const chatSessionsRef = useRef<RegistryChatSession[]>([]);
   const [projectSessionsByProjectId, setProjectSessionsByProjectId] = useState<Record<string, RegistryChatSession[]>>({});
   const projectSessionsByProjectIdRef = useRef<Record<string, RegistryChatSession[]>>({});
+  const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
+  const [sessionSearchInput, setSessionSearchInput] = useState('');
+  const [activeSessionSearchId, setActiveSessionSearchId] = useState('');
+  const activeSessionSearchIdRef = useRef('');
+  const [sessionSearchQuery, setSessionSearchQuery] = useState('');
+  const [searchResultsByProjectId, setSearchResultsByProjectId] = useState<SessionSearchResultsByProjectId>({});
+  const [sessionSearchDoneByProjectId, setSessionSearchDoneByProjectId] = useState<Record<string, boolean>>({});
+  const sessionSearchDoneByProjectIdRef = useRef<Record<string, boolean>>({});
+  const [sessionSearchErrorsByProjectId, setSessionSearchErrorsByProjectId] = useState<Record<string, string>>({});
+  const sessionSearchUnchangedPollsRef = useRef(0);
+  const sessionSearchPollTimerRef = useRef<number | null>(null);
+  const sessionSearchIdCounterRef = useRef(0);
+  const [sessionSearchTargetTurn, setSessionSearchTargetTurn] = useState<{
+    runtimeKey: string;
+    turnIndex: number;
+    generation: number;
+  } | null>(null);
+  const sessionSearchHighlightTimerRef = useRef<number | null>(null);
   const registryDebugSessionLabels = useMemo(() => {
     const labels: Record<string, string> = {};
     for (const projectItem of projects) {
@@ -3224,6 +3250,20 @@ function App() {
     selectedFullChatMessages,
     selectedPendingPrompt,
   ]);
+
+  useEffect(() => {
+    if (
+      !sessionSearchTargetTurn ||
+      sessionSearchTargetTurn.runtimeKey !== selectedChatEncodedKey ||
+      chatDisplayIndex.items.length === 0
+    ) {
+      return;
+    }
+    const frameId = window.requestAnimationFrame(() => {
+      chatVirtuosoListRef.current?.scrollToTurnIndex(sessionSearchTargetTurn.turnIndex, 'smooth');
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [chatDisplayIndex, selectedChatEncodedKey, sessionSearchTargetTurn]);
 
   const chatConfigDisplay = useMemo(() => {
     if (selectedChatConfigOptions.length === 0) {
@@ -3820,6 +3860,25 @@ function App() {
     [projects],
   );
   const sortedProjectItems = useMemo(() => sortProjectsByPin(projects, pinnedProjectIds), [projects, pinnedProjectIds]);
+  const sessionSearchSections = useMemo(
+    () => buildSessionSearchSections({
+      projects: sortedProjectItems,
+      sessionsByProjectId: projectSessionsByProjectId,
+      resultsByProjectId: searchResultsByProjectId,
+    }),
+    [projectSessionsByProjectId, searchResultsByProjectId, sortedProjectItems],
+  );
+  const sessionSearchResultCount = useMemo(
+    () => sessionSearchSections.reduce((sum, section) => sum + section.rows.length, 0),
+    [sessionSearchSections],
+  );
+  const sessionSearchActive = !!activeSessionSearchId;
+  const sessionSearchAllDone = useMemo(() => {
+    if (!activeSessionSearchId || sortedProjectItems.length === 0) {
+      return false;
+    }
+    return sortedProjectItems.every(item => sessionSearchDoneByProjectId[item.projectId] === true);
+  }, [activeSessionSearchId, sessionSearchDoneByProjectId, sortedProjectItems]);
   const mobileChatQuickSwitchSections = useMemo(
     () => buildMobileChatQuickSwitchSections({
       projects: sortedProjectItems,
@@ -3904,6 +3963,207 @@ function App() {
   useEffect(() => {
     projectSessionsByProjectIdRef.current = projectSessionsByProjectId;
   }, [projectSessionsByProjectId]);
+  useEffect(() => {
+    activeSessionSearchIdRef.current = activeSessionSearchId;
+  }, [activeSessionSearchId]);
+  useEffect(() => {
+    sessionSearchDoneByProjectIdRef.current = sessionSearchDoneByProjectId;
+  }, [sessionSearchDoneByProjectId]);
+  useEffect(() => {
+    return () => {
+      if (sessionSearchPollTimerRef.current !== null) {
+        window.clearTimeout(sessionSearchPollTimerRef.current);
+        sessionSearchPollTimerRef.current = null;
+      }
+      if (sessionSearchHighlightTimerRef.current !== null) {
+        window.clearTimeout(sessionSearchHighlightTimerRef.current);
+        sessionSearchHighlightTimerRef.current = null;
+      }
+    };
+  }, []);
+  const cancelSessionSearch = useCallback(async (
+    searchId = activeSessionSearchIdRef.current,
+    projectItems = sortedProjectItems,
+  ) => {
+    const normalizedSearchId = searchId.trim();
+    if (!normalizedSearchId) {
+      return;
+    }
+    await Promise.allSettled(
+      projectItems.map(projectItem =>
+        service.cancelProjectSessionSearch(projectItem.projectId, normalizedSearchId),
+      ),
+    );
+  }, [sortedProjectItems]);
+
+  const querySessionSearch = useCallback(async (
+    searchId = activeSessionSearchIdRef.current,
+  ): Promise<boolean> => {
+    const normalizedSearchId = searchId.trim();
+    if (!normalizedSearchId) {
+      return false;
+    }
+    const doneSnapshot = sessionSearchDoneByProjectIdRef.current;
+    const pendingProjects = sortedProjectItems.filter(projectItem =>
+      doneSnapshot[projectItem.projectId] !== true,
+    );
+    if (pendingProjects.length === 0) {
+      return false;
+    }
+    let anyChanged = false;
+    await Promise.all(
+      pendingProjects.map(async projectItem => {
+        try {
+          const response = await service.queryProjectSessionSearch(projectItem.projectId, normalizedSearchId);
+          if (activeSessionSearchIdRef.current !== normalizedSearchId) {
+            return;
+          }
+          setSearchResultsByProjectId(prev => {
+            const merged = mergeSessionSearchResultsByProject(prev, projectItem.projectId, response.results);
+            anyChanged = anyChanged || merged.changed;
+            return merged.resultsByProjectId;
+          });
+          setSessionSearchDoneByProjectId(prev => ({
+            ...prev,
+            [projectItem.projectId]: response.done,
+          }));
+          setSessionSearchErrorsByProjectId(prev => ({
+            ...prev,
+            [projectItem.projectId]: response.errors.map(item => item.message).join('\n'),
+          }));
+        } catch (err) {
+          if (activeSessionSearchIdRef.current !== normalizedSearchId) {
+            return;
+          }
+          anyChanged = true;
+          setSessionSearchDoneByProjectId(prev => ({
+            ...prev,
+            [projectItem.projectId]: true,
+          }));
+          setSessionSearchErrorsByProjectId(prev => ({
+            ...prev,
+            [projectItem.projectId]: err instanceof Error ? err.message : String(err),
+          }));
+        }
+      }),
+    );
+    sessionSearchUnchangedPollsRef.current = anyChanged
+      ? 0
+      : sessionSearchUnchangedPollsRef.current + 1;
+    return anyChanged;
+  }, [sortedProjectItems]);
+
+  const clearSessionSearchState = useCallback(() => {
+    activeSessionSearchIdRef.current = '';
+    setActiveSessionSearchId('');
+    setSessionSearchQuery('');
+    setSearchResultsByProjectId({});
+    setSessionSearchDoneByProjectId({});
+    setSessionSearchErrorsByProjectId({});
+    sessionSearchUnchangedPollsRef.current = 0;
+    if (sessionSearchPollTimerRef.current !== null) {
+      window.clearTimeout(sessionSearchPollTimerRef.current);
+      sessionSearchPollTimerRef.current = null;
+    }
+  }, []);
+
+  const exitSessionSearch = useCallback(async () => {
+    const searchId = activeSessionSearchIdRef.current;
+    const projectItems = sortedProjectItems;
+    clearSessionSearchState();
+    setSessionSearchOpen(false);
+    await cancelSessionSearch(searchId, projectItems);
+  }, [cancelSessionSearch, clearSessionSearchState, sortedProjectItems]);
+
+  const startSessionSearch = useCallback(async () => {
+    const query = sessionSearchInput.trim();
+    if (!query) {
+      await exitSessionSearch();
+      return;
+    }
+    const previousSearchId = activeSessionSearchIdRef.current;
+    const projectItems = sortedProjectItems;
+    if (previousSearchId) {
+      await cancelSessionSearch(previousSearchId, projectItems);
+    }
+    sessionSearchIdCounterRef.current += 1;
+    const searchId = `session-search-${Date.now()}-${sessionSearchIdCounterRef.current}`;
+    activeSessionSearchIdRef.current = searchId;
+    setActiveSessionSearchId(searchId);
+    setSessionSearchQuery(query);
+    setSearchResultsByProjectId({});
+    setSessionSearchErrorsByProjectId({});
+    setSessionSearchDoneByProjectId(
+      Object.fromEntries(projectItems.map(projectItem => [projectItem.projectId, false])),
+    );
+    sessionSearchUnchangedPollsRef.current = 0;
+    setSessionSearchOpen(true);
+
+    await Promise.all(
+      projectItems.map(async projectItem => {
+        try {
+          await service.startProjectSessionSearch(projectItem.projectId, searchId, query);
+        } catch (err) {
+          if (activeSessionSearchIdRef.current !== searchId) {
+            return;
+          }
+          setSessionSearchDoneByProjectId(prev => ({
+            ...prev,
+            [projectItem.projectId]: true,
+          }));
+          setSessionSearchErrorsByProjectId(prev => ({
+            ...prev,
+            [projectItem.projectId]: err instanceof Error ? err.message : String(err),
+          }));
+        }
+      }),
+    );
+    if (activeSessionSearchIdRef.current === searchId) {
+      querySessionSearch(searchId).catch(() => undefined);
+    }
+  }, [cancelSessionSearch, exitSessionSearch, querySessionSearch, sessionSearchInput, sortedProjectItems]);
+
+  useEffect(() => {
+    if (!activeSessionSearchId || tab !== 'chat') {
+      if (sessionSearchPollTimerRef.current !== null) {
+        window.clearTimeout(sessionSearchPollTimerRef.current);
+        sessionSearchPollTimerRef.current = null;
+      }
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      const searchId = activeSessionSearchIdRef.current;
+      if (!searchId) {
+        return;
+      }
+      const changed = await querySessionSearch(searchId);
+      if (cancelled || activeSessionSearchIdRef.current !== searchId) {
+        return;
+      }
+      const doneSnapshot = sessionSearchDoneByProjectIdRef.current;
+      const allDone = sortedProjectItems.length > 0 &&
+        sortedProjectItems.every(projectItem => doneSnapshot[projectItem.projectId] === true);
+      if (allDone) {
+        return;
+      }
+      const delay = resolveSessionSearchPollDelay({
+        changed,
+        unchangedPolls: sessionSearchUnchangedPollsRef.current,
+      });
+      sessionSearchPollTimerRef.current = window.setTimeout(() => {
+        poll().catch(() => undefined);
+      }, delay);
+    };
+    poll().catch(() => undefined);
+    return () => {
+      cancelled = true;
+      if (sessionSearchPollTimerRef.current !== null) {
+        window.clearTimeout(sessionSearchPollTimerRef.current);
+        sessionSearchPollTimerRef.current = null;
+      }
+    };
+  }, [activeSessionSearchId, querySessionSearch, sortedProjectItems, tab]);
   useEffect(() => {
     floatingDragStateRef.current = floatingDragState;
   }, [floatingDragState]);
@@ -9247,6 +9507,233 @@ function App() {
     await selectProjectChatSession(targetProjectId, sessionId);
   };
 
+  const handleSessionSearchResultClick = async (
+    targetProjectId: string,
+    row: SessionSearchSectionRow,
+    options?: {closeMobileDrawer?: boolean},
+  ) => {
+    await selectProjectChatSession(targetProjectId, row.session.sessionId, options);
+    if (row.result.source !== 'prompt' || !row.result.turnIndex) {
+      return;
+    }
+    const runtimeKey = buildChatRuntimeKey(targetProjectId, row.session.sessionId);
+    const generation = Date.now();
+    setSessionSearchTargetTurn({
+      runtimeKey,
+      turnIndex: row.result.turnIndex,
+      generation,
+    });
+    if (sessionSearchHighlightTimerRef.current !== null) {
+      window.clearTimeout(sessionSearchHighlightTimerRef.current);
+    }
+    sessionSearchHighlightTimerRef.current = window.setTimeout(() => {
+      setSessionSearchTargetTurn(current =>
+        current?.generation === generation ? null : current,
+      );
+    }, 2000);
+  };
+
+  const renderSessionSearchHighlightedTitle = (
+    title: string,
+    row: SessionSearchSectionRow,
+  ) => {
+    if (row.result.source !== 'title') {
+      return title;
+    }
+    const segments = splitSessionSearchTitleHighlight(title, sessionSearchQuery);
+    if (segments.length === 0) {
+      return title;
+    }
+    return segments.map((segment, index) => (
+      <span
+        key={`${row.session.sessionId}:title-highlight:${index}`}
+        className={segment.match ? 'session-search-title-highlight' : undefined}
+      >
+        {segment.text}
+      </span>
+    ));
+  };
+
+  const renderSessionSearchControls = () => {
+    const hasActiveSearch = !!activeSessionSearchId;
+    if (!sessionSearchOpen && !hasActiveSearch) {
+      return (
+        <div className="session-search-control compact">
+          <button
+            type="button"
+            className="session-search-icon-btn"
+            onClick={() => setSessionSearchOpen(true)}
+            title="Search sessions"
+            aria-label="Search sessions"
+          >
+            <span className="codicon codicon-search" />
+          </button>
+        </div>
+      );
+    }
+    return (
+      <form
+        className={`session-search-control open${hasActiveSearch ? ' active' : ''}`}
+        onSubmit={event => {
+          event.preventDefault();
+          startSessionSearch().catch(() => undefined);
+        }}
+      >
+        <span className="codicon codicon-search session-search-leading-icon" aria-hidden="true" />
+        <input
+          className="session-search-input"
+          value={sessionSearchInput}
+          onChange={event => setSessionSearchInput(event.target.value)}
+          placeholder="Search sessions"
+          aria-label="Search sessions"
+        />
+        <button
+          type="submit"
+          className="session-search-icon-btn"
+          title="Start search"
+          aria-label="Start search"
+        >
+          <span className="codicon codicon-check" />
+        </button>
+        <button
+          type="button"
+          className="session-search-icon-btn"
+          title="Close search"
+          aria-label="Close search"
+          onClick={() => {
+            if (hasActiveSearch) {
+              exitSessionSearch().catch(() => undefined);
+            } else {
+              setSessionSearchOpen(false);
+              setSessionSearchInput('');
+            }
+          }}
+        >
+          <span className="codicon codicon-close" />
+        </button>
+      </form>
+    );
+  };
+
+  const renderSessionSearchRow = (
+    targetProjectId: string,
+    row: SessionSearchSectionRow,
+    mobile: boolean,
+  ) => {
+    const sessionAgent = (row.session.agentType || '').trim();
+    const displaySessionAgent = normalizeAgentTypeName(sessionAgent);
+    const title = resolveSessionDisplayTitle(row.session) || row.session.sessionId;
+    const selected =
+      selectedChatEncodedKey === buildChatRuntimeKey(targetProjectId, row.session.sessionId);
+    return (
+      <div
+        key={`${targetProjectId}:search:${row.session.sessionId}`}
+        className="project-session-row-wrap session-search-row-wrap"
+      >
+        <button
+          type="button"
+          className={`wide-session-row session-search-row${mobile ? ' mobile-session-row' : ''}${selected ? ' selected' : ''}`}
+          onClick={() => {
+            handleSessionSearchResultClick(targetProjectId, row, {
+              closeMobileDrawer: mobile,
+            }).catch(() => undefined);
+          }}
+        >
+          {renderSessionStateMarker(row.session, targetProjectId)}
+          <span className="wide-session-title session-search-title">
+            {renderSessionSearchHighlightedTitle(title, row)}
+          </span>
+          {row.result.source === 'prompt' ? (
+            <span className="session-search-result-meta">
+              Prompt · turn {row.result.turnIndex}
+            </span>
+          ) : displaySessionAgent ? (
+            <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', sessionAgent)}`}>
+              {displaySessionAgent}
+            </span>
+          ) : null}
+          <span className="wide-session-time" title={row.session.updatedAt || ''}>
+            {formatCompactRelativeAge(row.session.updatedAt)}
+          </span>
+        </button>
+      </div>
+    );
+  };
+
+  const renderSessionSearchResults = (mobile: boolean) => {
+    const errorMessages = Object.entries(sessionSearchErrorsByProjectId)
+      .map(([entryProjectId, message]) => {
+        const text = message.trim();
+        if (!text) {
+          return null;
+        }
+        const projectName = projects.find(item => item.projectId === entryProjectId)?.name || entryProjectId;
+        return `${projectName}: ${text}`;
+      })
+      .filter((item): item is string => item !== null);
+    const body = (
+      <>
+        <div className="session-search-status">
+          {sessionSearchAllDone
+            ? `${sessionSearchResultCount} result${sessionSearchResultCount === 1 ? '' : 's'}`
+            : `Searching... ${sessionSearchResultCount} result${sessionSearchResultCount === 1 ? '' : 's'}`}
+        </div>
+        {sessionSearchSections.map(section => {
+          const projectHub = section.project.hubId || 'local';
+          const projectHubVariant = tagVariantClass('wide-project-hub', section.project.hubId || 'local');
+          return (
+            <div
+              key={`session-search-project:${section.project.projectId}`}
+              className={`wide-project-section session-search-project-section${section.project.projectId === projectId ? ' active' : ''}`}
+            >
+              <div className={`wide-project-row session-search-project-row${mobile ? ' mobile-project-row' : ''}`}>
+                <div className="wide-project-toggle session-search-project-label">
+                  <span className="wide-project-folder-wrap">
+                    <span className={`codicon codicon-search wide-project-folder-icon ${projectHubVariant}`} />
+                  </span>
+                  <span className="wide-project-title-group">
+                    <span className="wide-project-name" title={section.project.name}>
+                      {section.project.name}
+                    </span>
+                    <span className={`wide-project-hub-tag ${projectHubVariant}`}>
+                      <span className="wide-project-hub-dot" aria-hidden="true" />
+                      <span className="wide-project-hub-label">{projectHub}</span>
+                    </span>
+                  </span>
+                </div>
+              </div>
+              <div className={`wide-project-session-list session-search-result-list${mobile ? ' mobile-project-session-list' : ''}`}>
+                {section.rows.map(row => renderSessionSearchRow(section.project.projectId, row, mobile))}
+              </div>
+            </div>
+          );
+        })}
+        {sessionSearchSections.length === 0 ? (
+          <div className="wide-project-empty session-search-empty">
+            {sessionSearchAllDone ? 'No matching sessions' : 'Searching... 0 results'}
+          </div>
+        ) : null}
+        {errorMessages.length > 0 ? (
+          <div className="session-search-error-list">
+            {errorMessages.map(message => (
+              <div key={message} className="session-search-error">
+                {message}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </>
+    );
+    if (mobile) {
+      return (
+        <div className="mobile-project-session-nav session-search-nav">
+          {body}
+        </div>
+      );
+    }
+    return body;
+  };
+
   const handleMobileChatQuickSwitchSelect = useCallback(async (targetProjectId: string, session: RegistryChatSession) => {
     setChatQuickSwitchMenuOpen(false);
     setPortRelayTargetMenuOpen(false);
@@ -11812,8 +12299,10 @@ function App() {
               {mobileProjectSessionsRefreshing ? '...' : refreshButtonContent}
             </button>
           </div>
+          {renderSessionSearchControls()}
           {renderChatHubSummary()}
         </div>
+        {sessionSearchActive ? renderSessionSearchResults(true) : (
         <div className="mobile-project-session-nav">
           {projects.length === 0 ? (
             <div className="chat-empty-hint chat-empty-state">
@@ -11989,6 +12478,7 @@ function App() {
             );
           })}
         </div>
+        )}
         {(() => {
           if (!mobileProjectActionMenu) return null;
           const sheetMenu = mobileProjectActionMenu;
@@ -12127,10 +12617,11 @@ function App() {
   const renderWideProjectSessionNav = () => {
     return (
       <div className="wide-project-session-nav">
+        {renderSessionSearchControls()}
         {projects.length === 0 ? (
           <div className="chat-empty-hint">No projects available.</div>
         ) : null}
-        {sortedProjectItems.map(projectItem => {
+        {sessionSearchActive ? renderSessionSearchResults(false) : sortedProjectItems.map(projectItem => {
           const targetProjectId = projectItem.projectId;
           const projectSessions = projectSessionsByProjectId[targetProjectId] ?? [];
           const visibleCount =
@@ -12965,10 +13456,14 @@ function App() {
     if (!shouldRenderChatTurn(message, hideToolCalls, promptStatus)) {
       return null;
     }
+    const searchHighlighted =
+      sessionSearchTargetTurn?.runtimeKey === selectedChatEncodedKey &&
+      sessionSearchTargetTurn.turnIndex === (message.turnIndex ?? 0);
     return (
       <div
         key={`${selectedChatEncodedKey}:${message.turnIndex}:${message.method}`}
         data-chat-message-key={chatMessageDomKey(message)}
+        className={searchHighlighted ? 'chat-turn-search-highlight' : undefined}
       >
         <ChatTurnView
           message={message}

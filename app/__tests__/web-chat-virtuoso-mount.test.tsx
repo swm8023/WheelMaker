@@ -312,6 +312,48 @@ describe('chat virtuoso mount fallback', () => {
     }
   });
 
+  test('imperative turn scroll jumps to the nearest visible display item', async () => {
+    const scrollParent = createScrollParent({
+      clientHeight: 500,
+      scrollHeight: 1200,
+      scrollTo: jest.fn(),
+    });
+    const listRef = React.createRef<ChatVirtuosoTurnListHandle>();
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    try {
+      await ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(
+          <ChatVirtuosoTurnList
+            ref={listRef}
+            scrollRef={{current: scrollParent}}
+            displayIndex={{items: [turnItem(1), turnItem(3)]}}
+            runtimeKey="project-a/session-a"
+            renderItem={item => (
+              <span>{item.key}</span>
+            )}
+          />,
+        );
+      });
+
+      await ReactTestRenderer.act(() => {
+        listRef.current?.scrollToTurnIndex(2, 'smooth');
+      });
+
+      expect(mockScrollToIndexCalls).toContainEqual({
+        index: 1,
+        align: 'start',
+        behavior: 'smooth',
+      });
+    } finally {
+      if (renderer) {
+        await ReactTestRenderer.act(() => {
+          renderer!.unmount();
+        });
+      }
+    }
+  });
+
   test('tail-locked height changes settle the scroll parent to its physical bottom', async () => {
     const animationFrames = installAnimationFrameQueue();
     const scrollTo = jest.fn();

@@ -30,6 +30,10 @@ import type {
   RegistrySessionMessage,
   RegistrySessionMessageEventPayload,
   RegistrySessionReadResponse,
+  RegistrySessionSearchError,
+  RegistrySessionSearchResponse,
+  RegistrySessionSearchResult,
+  RegistrySessionSearchStatusResponse,
   RegistrySessionSummary,
   RegistrySessionTurn,
   RegistrySkillCommandResponse,
@@ -295,6 +299,92 @@ export class RegistryRepository {
             .map(item => this.normalizeSessionCommand(item))
             .filter((item): item is RegistrySessionCommand => !!item)
         : undefined,
+    };
+  }
+
+  private normalizeSessionSearchResult(raw: unknown, fallbackProjectId: string): RegistrySessionSearchResult | null {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    const input = raw as Record<string, unknown>;
+    const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : '';
+    if (!sessionId) {
+      return null;
+    }
+    const source = input.source === 'title' || input.source === 'prompt' ? input.source : '';
+    if (!source) {
+      return null;
+    }
+    const projectId = typeof input.projectId === 'string'
+      ? input.projectId.trim()
+      : fallbackProjectId;
+    if (!projectId) {
+      return null;
+    }
+    if (source === 'title') {
+      return {projectId, sessionId, source};
+    }
+    const turnIndex = typeof input.turnIndex === 'number' && Number.isFinite(input.turnIndex)
+      ? Math.max(0, Math.trunc(input.turnIndex))
+      : 0;
+    if (turnIndex <= 0) {
+      return null;
+    }
+    return {projectId, sessionId, source, turnIndex};
+  }
+
+  private normalizeSessionSearchError(raw: unknown, fallbackProjectId: string): RegistrySessionSearchError | null {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    const input = raw as Record<string, unknown>;
+    const projectId = typeof input.projectId === 'string'
+      ? input.projectId.trim()
+      : fallbackProjectId;
+    const message = typeof input.message === 'string' ? input.message.trim() : '';
+    if (!projectId || !message) {
+      return null;
+    }
+    const sessionId = typeof input.sessionId === 'string' && input.sessionId.trim()
+      ? input.sessionId.trim()
+      : undefined;
+    return {
+      projectId,
+      ...(sessionId ? {sessionId} : {}),
+      message,
+    };
+  }
+
+  private normalizeSessionSearchResponse(raw: unknown, fallbackProjectId: string, fallbackSearchId: string): RegistrySessionSearchResponse {
+    const input = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+    const searchId = typeof input.searchId === 'string' && input.searchId.trim()
+      ? input.searchId.trim()
+      : fallbackSearchId;
+    const results = Array.isArray(input.results)
+      ? input.results
+          .map(item => this.normalizeSessionSearchResult(item, fallbackProjectId))
+          .filter((item): item is RegistrySessionSearchResult => !!item)
+      : [];
+    const errors = Array.isArray(input.errors)
+      ? input.errors
+          .map(item => this.normalizeSessionSearchError(item, fallbackProjectId))
+          .filter((item): item is RegistrySessionSearchError => !!item)
+      : [];
+    return {
+      searchId,
+      done: input.done === true,
+      results,
+      errors,
+    };
+  }
+
+  private normalizeSessionSearchStatusResponse(raw: unknown, fallbackSearchId: string): RegistrySessionSearchStatusResponse {
+    const input = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+    return {
+      searchId: typeof input.searchId === 'string' && input.searchId.trim()
+        ? input.searchId.trim()
+        : fallbackSearchId,
+      done: input.done === true,
     };
   }
 
@@ -720,6 +810,36 @@ export class RegistryRepository {
 
   async readSession(projectId: string, sessionId: string, afterTurnIndex = 0): Promise<RegistrySessionReadResponse> {
     return this.readSessionByMethod(projectId, sessionId, afterTurnIndex, 'session.read');
+  }
+
+  async startSessionSearch(projectId: string, searchId: string, query: string): Promise<RegistrySessionSearchStatusResponse> {
+    const resp = await this.client.request({
+      method: 'session.search',
+      projectId,
+      payload: {action: 'start', searchId, query},
+      timeoutMs: 15000,
+    });
+    return this.normalizeSessionSearchStatusResponse(resp.payload, searchId);
+  }
+
+  async querySessionSearch(projectId: string, searchId: string): Promise<RegistrySessionSearchResponse> {
+    const resp = await this.client.request({
+      method: 'session.search',
+      projectId,
+      payload: {action: 'query', searchId},
+      timeoutMs: 15000,
+    });
+    return this.normalizeSessionSearchResponse(resp.payload, projectId, searchId);
+  }
+
+  async cancelSessionSearch(projectId: string, searchId: string): Promise<RegistrySessionSearchStatusResponse> {
+    const resp = await this.client.request({
+      method: 'session.search',
+      projectId,
+      payload: {action: 'cancel', searchId},
+      timeoutMs: 15000,
+    });
+    return this.normalizeSessionSearchStatusResponse(resp.payload, searchId);
   }
 
   async markSessionRead(

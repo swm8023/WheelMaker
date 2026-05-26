@@ -79,6 +79,7 @@ type Client struct {
 
 	sessionRecorder *SessionRecorder
 	archiveStore    *sessionArchiveStore
+	sessionSearch   *sessionSearchManager
 	viewSink        SessionViewSink
 	httpClient      *http.Client
 	deepSeekBaseURL string
@@ -101,6 +102,7 @@ func New(store Store, projectName string, cwd string) *Client {
 	c.sessionRecorder = newSessionRecorder(projectName, store, func(ctx context.Context) ([]SessionRecord, error) {
 		return c.ListSessions(ctx)
 	})
+	c.sessionSearch = newSessionSearchManager(c)
 	c.sessionRecorder.modelLookup = func(sessionID string) string {
 		options := c.sessionConfigOptions(context.Background(), sessionID)
 		for _, opt := range options {
@@ -165,6 +167,9 @@ func (c *Client) Close() error {
 	case <-c.stopPersistCh:
 	default:
 		close(c.stopPersistCh)
+	}
+	if c.sessionSearch != nil {
+		c.sessionSearch.Close()
 	}
 
 	c.mu.Lock()
@@ -512,7 +517,7 @@ func (c *Client) RecordEvent(ctx context.Context, event SessionViewEvent) error 
 	return c.sessionRecorder.RecordEvent(ctx, event)
 }
 
-func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ string, payload json.RawMessage) (any, error) {
+func (c *Client) HandleSessionRequest(ctx context.Context, method string, projectID string, payload json.RawMessage) (any, error) {
 	switch strings.TrimSpace(method) {
 	case "session.list":
 		sessions, err := c.sessionRecorder.ListSessionViews(ctx)
@@ -540,6 +545,11 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			return nil, err
 		}
 		return map[string]any{"sessionId": strings.TrimSpace(req.SessionID), "latestTurnIndex": latestTurnIndex, "session": summary, "turns": turns}, nil
+	case "session.search":
+		if c.sessionSearch == nil {
+			c.sessionSearch = newSessionSearchManager(c)
+		}
+		return c.sessionSearch.Handle(ctx, projectID, payload)
 	case "session.markRead":
 		var req struct {
 			SessionID         string `json:"sessionId"`
