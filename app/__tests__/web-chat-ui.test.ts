@@ -207,6 +207,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('if (expectedGeneration !== getChatDraftGeneration(normalizedDraftKey)) {');
     expect(mainTsx).toContain('const removeChatAttachment = useCallback(');
     expect(mainTsx).toContain('const uploadChatAttachmentFile = useCallback(');
+    expect(mainTsx).toContain('const ensureChatAttachmentSession = useCallback(');
     expect(mainTsx).toContain('const enqueueChatAttachmentFiles = useCallback(');
     expect(mainTsx).toContain('const retryChatAttachment = useCallback(');
     expect(mainTsx).toContain('const supportsChatClipboardFiles = useMemo(');
@@ -218,7 +219,10 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('return true;');
     expect(mainTsx).toContain('return false;');
     expect(mainTsx).toContain('const files = chatFilesFromDataTransferItems(');
-    expect(mainTsx).toContain('enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration);');
+    expect(mainTsx).toContain('enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration)');
+    expect(mainTsx).toContain('.catch(err => setError(err instanceof Error ? err.message : String(err)))');
+    expect(mainTsx).toContain("const attachmentSessionKey = await ensureChatAttachmentSession(draftKey);");
+    expect(mainTsx).toContain("service.createProjectSession(targetProjectId, agentType, '')");
     expect(mainTsx).toContain('service.startProjectSessionAttachment(selectedProjectId, {');
     expect(mainTsx).toContain('service.uploadProjectSessionAttachmentChunk(selectedProjectId, {');
     expect(mainTsx).toContain('service.finishProjectSessionAttachment(selectedProjectId, {');
@@ -242,7 +246,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('onDrop={event => {');
     expect(mainTsx).toContain('enqueueChatAttachmentFiles(');
     expect(mainTsx).toContain('attachmentDraftKey,');
-    expect(mainTsx).toContain('attachmentDraftGeneration);');
+    expect(mainTsx).toContain('attachmentDraftGeneration)');
     expect(mainTsx).toContain('if (chatSending || chatAttachmentUploadPending) {');
     expect(mainTsx).not.toContain('respondToChatPermission');
     expect(mainTsx).not.toContain("const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);");

@@ -643,11 +643,11 @@ func codexappPromptToInputWithArtifacts(projectName string, sessionID string, bl
 				out = append(out, appServerUserInput{Type: "text", Text: block.Text, TextElements: []any{}})
 			}
 		case protocol.ContentBlockTypeResourceLink:
-			input, err := codexappResourceLinkToInput(block)
+			inputs, err := codexappResourceLinkToInputs(block)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, input)
+			out = append(out, inputs...)
 		case protocol.ContentBlockTypeImage:
 			input, err := codexappImageToInput(projectName, sessionID, block)
 			if err != nil {
@@ -818,20 +818,42 @@ func codexappSafePathSegment(value string) (string, error) {
 	return segment, nil
 }
 
-func codexappResourceLinkToInput(block protocol.ContentBlock) (appServerUserInput, error) {
+func codexappResourceLinkToInputs(block protocol.ContentBlock) ([]appServerUserInput, error) {
 	uriText := strings.TrimSpace(block.URI)
 	if uriText == "" {
-		return appServerUserInput{}, errors.New("codexapp resource_link requires uri")
+		return nil, errors.New("codexapp resource_link requires uri")
 	}
 	parsed, err := url.Parse(uriText)
 	if err == nil && strings.EqualFold(parsed.Scheme, "file") {
 		path := codexappFileURIPath(parsed)
 		if strings.TrimSpace(path) == "" {
-			return appServerUserInput{}, fmt.Errorf("codexapp resource_link file uri has no path: %q", block.URI)
+			return nil, fmt.Errorf("codexapp resource_link file uri has no path: %q", block.URI)
 		}
-		return appServerUserInput{Type: "mention", Name: firstNonEmptyString(block.Name, block.Title, path), Path: path}, nil
+		name := firstNonEmptyString(block.Name, block.Title, filepath.Base(path), path)
+		return []appServerUserInput{
+			{Type: "text", Text: codexappFileResourceLinkText(block, name, path), TextElements: []any{}},
+			{Type: "mention", Name: name, Path: path},
+		}, nil
 	}
-	return appServerUserInput{Type: "text", Text: codexappResourceLinkText(block), TextElements: []any{}}, nil
+	return []appServerUserInput{{Type: "text", Text: codexappResourceLinkText(block), TextElements: []any{}}}, nil
+}
+
+func codexappFileResourceLinkText(block protocol.ContentBlock, name, path string) string {
+	parts := []string{"Attached file:"}
+	if name != "" {
+		parts = append(parts, name)
+	}
+	if path != "" {
+		parts = append(parts, "local path="+path)
+	}
+	if block.MimeType != "" {
+		parts = append(parts, "mime="+block.MimeType)
+	}
+	if block.Size > 0 {
+		parts = append(parts, fmt.Sprintf("size=%d bytes", block.Size))
+	}
+	parts = append(parts, "Use the local path if you need to inspect the uploaded file.")
+	return strings.Join(parts, "\n")
 }
 
 func codexappFileURIPath(parsed *url.URL) string {

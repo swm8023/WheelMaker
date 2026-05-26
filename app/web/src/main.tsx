@@ -3969,8 +3969,81 @@ function App() {
     [updateChatAttachment],
   );
 
+  const ensureChatAttachmentSession = useCallback(
+    async (draftKey = currentChatDraftKeyRef.current): Promise<ChatSessionKey | null> => {
+      const selectedKey = selectedChatKeyRef.current;
+      if (selectedKey?.sessionId) {
+        return selectedKey;
+      }
+      const targetProjectId = projectIdRef.current || projectId;
+      if (!targetProjectId) {
+        setError('Select a project before attaching files.');
+        return null;
+      }
+      const projectItem = projectsRef.current.find(item => item.projectId === targetProjectId);
+      const seen = new Set<string>();
+      const agents: string[] = [];
+      const appendAgent = (value?: string) => {
+        const normalized = normalizeAgentTypeName(value);
+        if (!normalized) return;
+        const key = normalized.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        agents.push(normalized);
+      };
+      for (const item of projectItem?.agents ?? []) {
+        appendAgent(item);
+      }
+      appendAgent(projectItem?.agent);
+      for (const session of projectSessionsByProjectIdRef.current[targetProjectId] ?? knownChatSessionsForProject(targetProjectId)) {
+        appendAgent(session.agentType);
+      }
+      const agentType = agents[0] ?? '';
+      if (!agentType) {
+        setError('No agent selected for new session');
+        return null;
+      }
+      const draft = chatComposerDraftsRef.current[draftKey] ?? {
+        text: chatComposerTextRef.current,
+        attachments: chatAttachmentsRef.current,
+      };
+      const result = await service.createProjectSession(targetProjectId, agentType, '');
+      if (!result.ok || !result.session.sessionId) {
+        throw new Error('project session.create returned ok=false');
+      }
+      const session = result.session;
+      workspaceStore.rememberChatSession(targetProjectId, session, {turnIndex: 0});
+      setProjectSessionsByProjectId(prev => ({
+        ...prev,
+        [targetProjectId]: mergeChatSession(prev[targetProjectId] ?? [], session),
+      }));
+      const runtimeKey = buildChatRuntimeKey(targetProjectId, session.sessionId);
+      chatMessageStoreRef.current[runtimeKey] = [];
+      chatTurnStoreRef.current[runtimeKey] = createEmptyChatTurnStore();
+      chatFinishedCursorRef.current[runtimeKey] = 0;
+      if (targetProjectId === projectIdRef.current) {
+        setChatSessions(prev => mergeChatSession(prev, session));
+      }
+      const nextSelectedKey = chatSessionKeyFromParts(targetProjectId, session.sessionId);
+      if (!nextSelectedKey) {
+        return null;
+      }
+      workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
+      applySelectedChatKey(nextSelectedKey);
+      const nextDraftKey = buildChatDraftKey(targetProjectId, session.sessionId);
+      currentChatDraftKeyRef.current = nextDraftKey;
+      chatComposerTextRef.current = draft.text;
+      chatAttachmentsRef.current = draft.attachments;
+      setChatComposerText(draft.text);
+      setChatAttachments(draft.attachments);
+      saveChatComposerDraft(nextDraftKey, draft.text, draft.attachments);
+      return nextSelectedKey;
+    },
+    [projectId, saveChatComposerDraft],
+  );
+
   const enqueueChatAttachmentFiles = useCallback(
-    (
+    async (
       files: File[],
       draftKey = currentChatDraftKeyRef.current,
       expectedGeneration = getChatDraftGeneration(draftKey),
@@ -3978,11 +4051,14 @@ function App() {
       if (files.length === 0) {
         return;
       }
-      const selectedKey = selectedChatKeyRef.current;
-      if (!selectedKey?.sessionId) {
-        setError('Select or create a chat session first.');
+      const attachmentSessionKey = await ensureChatAttachmentSession(draftKey);
+      if (!attachmentSessionKey?.sessionId) {
         return;
       }
+      const targetDraftKey = buildChatDraftKey(attachmentSessionKey.projectId, attachmentSessionKey.sessionId);
+      const targetGeneration = targetDraftKey === draftKey
+        ? expectedGeneration
+        : getChatDraftGeneration(targetDraftKey);
       const attachments = files.map((file, index): ChatAttachment => {
         chatAttachmentIdRef.current += 1;
         const name = file.name || chatFallbackAttachmentName(index);
@@ -3997,7 +4073,7 @@ function App() {
           objectUrl: (file.type || '').toLowerCase().startsWith('image/') ? URL.createObjectURL(file) : undefined,
         };
       });
-      appendChatAttachments(attachments, draftKey, expectedGeneration);
+      appendChatAttachments(attachments, targetDraftKey, targetGeneration);
       for (const attachment of attachments) {
         const file = attachment.file;
         if (!file) {
@@ -4008,15 +4084,15 @@ function App() {
           .then(() => uploadChatAttachmentFile(
             file,
             attachment.name,
-            selectedKey.projectId,
-            selectedKey.sessionId,
+            attachmentSessionKey.projectId,
+            attachmentSessionKey.sessionId,
             attachment.id,
-            draftKey,
-            expectedGeneration,
+            targetDraftKey,
+            targetGeneration,
           ));
       }
     },
-    [appendChatAttachments, getChatDraftGeneration, uploadChatAttachmentFile],
+    [appendChatAttachments, ensureChatAttachmentSession, getChatDraftGeneration, uploadChatAttachmentFile],
   );
 
   const retryChatAttachment = useCallback(
@@ -8188,7 +8264,8 @@ function App() {
     }
     const attachmentDraftKey = currentChatDraftKeyRef.current;
     const attachmentDraftGeneration = getChatDraftGeneration(attachmentDraftKey);
-    enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration);
+    enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration)
+      .catch(err => setError(err instanceof Error ? err.message : String(err)));
     event.target.value = '';
   };
 
@@ -14082,7 +14159,8 @@ function App() {
                 setChatComposerDragActive(false);
                 const attachmentDraftKey = currentChatDraftKeyRef.current;
                 const attachmentDraftGeneration = getChatDraftGeneration(attachmentDraftKey);
-                enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration);
+                enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration)
+                  .catch(err => setError(err instanceof Error ? err.message : String(err)));
               }}
             >
               {chatAttachments.length > 0 ? (
@@ -14176,7 +14254,8 @@ function App() {
                         return;
                       }
                       event.preventDefault();
-                      enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration);
+                      enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration)
+                        .catch(err => setError(err instanceof Error ? err.message : String(err)));
                     }}
                     onKeyDown={event => {
                       if (chatSlashMenuVisible) {
