@@ -9898,9 +9898,6 @@ function App() {
     title: string,
     row: SessionSearchSectionRow,
   ) => {
-    if (row.result.source !== 'title') {
-      return title;
-    }
     const segments = splitSessionSearchTitleHighlight(title, sessionSearchQuery);
     if (segments.length === 0) {
       return title;
@@ -10009,7 +10006,7 @@ function App() {
         <button
           type="button"
           className={`wide-session-row session-search-row${mobile ? ' mobile-session-row' : ''}${selected ? ' selected' : ''}`}
-          title={row.result.source === 'prompt' ? `${title} · matched prompt text` : title}
+          title={title}
           onClick={() => {
             handleSessionSearchResultClick(targetProjectId, row, {
               closeMobileDrawer: mobile,
@@ -10023,10 +10020,6 @@ function App() {
           {displaySessionAgent ? (
             <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', sessionAgent)}`}>
               {displaySessionAgent}
-            </span>
-          ) : row.result.source === 'prompt' ? (
-            <span className="session-search-result-meta">
-              Prompt
             </span>
           ) : null}
           <span className="wide-session-time" title={row.session.updatedAt || ''}>

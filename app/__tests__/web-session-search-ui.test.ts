@@ -14,7 +14,6 @@ describe('web session search UI wiring', () => {
     expect(main).toContain('scrollToTurnIndex');
     expect(main).toContain('sessionSearchTargetTurn');
     expect(styles).toContain('.session-search-control');
-    expect(styles).toContain('.session-search-result-meta');
     expect(styles).toContain('.chat-turn-search-highlight');
   });
 
@@ -73,9 +72,11 @@ describe('web session search UI wiring', () => {
     expect(main).toContain('sessionSearchStatusParts.join(\' · \')');
     expect(main).not.toContain('className="chat-hub-summary-count"');
     expect(main).not.toContain('Prompt · turn');
-    expect(main).toContain('matched prompt text');
-    expect(main).toContain(') : row.result.source === \'prompt\' ? (');
-    expect(main).toContain('Prompt');
+    expect(main).not.toContain('matched prompt text');
+    expect(main).not.toContain(') : row.result.source === \'prompt\' ? (');
+    expect(main).not.toContain('session-search-result-meta');
+    expect(main).not.toContain("row.result.source !== 'title'");
+    expect(main).toContain('title={title}');
 
     const hubButtonBlock = styles.match(/\.chat-hub-summary-button \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(hubButtonBlock).toContain('white-space: nowrap;');

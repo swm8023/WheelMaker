@@ -3996,14 +3996,6 @@ body,
   color: color-mix(in srgb, var(--text) 94%, #ffd166);
 }
 
-.session-search-result-meta {
-  min-width: 0;
-  color: var(--muted);
-  font-size: 10.5px;
-  font-weight: 650;
-  white-space: nowrap;
-}
-
 .session-search-empty {
   margin: 4px 0 0 21px;
 }
