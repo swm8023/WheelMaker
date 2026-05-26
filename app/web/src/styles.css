@@ -1204,7 +1204,7 @@ body,
 }
 
 .mobile-settings-screen .wheelmaker-update-sha-line {
-  grid-template-columns: 52px max-content minmax(0, 1fr);
+  grid-template-columns: 52px 7ch max-content;
   column-gap: 10px;
   white-space: nowrap;
 }
@@ -1214,9 +1214,7 @@ body,
 }
 
 .mobile-settings-screen .wheelmaker-update-sha-time {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
   white-space: nowrap;
 }
 

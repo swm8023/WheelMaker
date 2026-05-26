@@ -206,7 +206,7 @@ describe('agent package update settings UI source structure', () => {
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     const mobileShaLineBlock = stylesCss.match(/\.mobile-settings-screen \.wheelmaker-update-sha-line \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(mobileShaLineBlock).toContain('grid-template-columns: 52px max-content minmax(0, 1fr);');
+    expect(mobileShaLineBlock).toContain('grid-template-columns: 52px 7ch max-content;');
     expect(mobileShaLineBlock).toContain('column-gap: 10px;');
     expect(mobileShaLineBlock).toContain('white-space: nowrap;');
 
@@ -215,6 +215,8 @@ describe('agent package update settings UI source structure', () => {
     expect(mobileShaValueBlock).not.toContain('grid-column: 2;');
 
     const mobileShaTimeBlock = stylesCss.match(/\.mobile-settings-screen \.wheelmaker-update-sha-time \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileShaTimeBlock).toContain('overflow: visible;');
+    expect(mobileShaTimeBlock).not.toContain('text-overflow: ellipsis;');
     expect(mobileShaTimeBlock).not.toContain('grid-row: 2;');
   });
 
