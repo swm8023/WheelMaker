@@ -77,12 +77,20 @@ export function resolveChatScrollToBottomVisibility(input: {
 export type ChatSessionReadWindowUpdate = {
   resetToLatest?: true;
   followLatest?: boolean;
+  revealTurnIndex?: number;
 };
 
 export function resolveChatSessionReadWindowUpdate(input: {
   useIncremental: boolean;
   followsLatest: boolean;
+  revealTurnIndex?: number;
 }): ChatSessionReadWindowUpdate {
+  const revealTurnIndex = Number.isFinite(input.revealTurnIndex)
+    ? Math.max(0, Math.trunc(input.revealTurnIndex ?? 0))
+    : 0;
+  if (revealTurnIndex > 0) {
+    return {revealTurnIndex};
+  }
   if (input.useIncremental) {
     return {followLatest: input.followsLatest};
   }

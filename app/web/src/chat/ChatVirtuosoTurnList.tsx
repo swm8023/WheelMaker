@@ -132,6 +132,7 @@ export const ChatVirtuosoTurnList = React.forwardRef<
   const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
   const tailLockSettleFrameRef = React.useRef<number | null>(null);
   const tailLockSettleFollowupFrameRef = React.useRef<number | null>(null);
+  const turnScrollSettleFrameRef = React.useRef<number | null>(null);
   const [scrollParent, setScrollParent] = React.useState<HTMLElement | null>(null);
 
   React.useLayoutEffect(() => {
@@ -189,6 +190,13 @@ export const ChatVirtuosoTurnList = React.forwardRef<
     [shouldAutoscroll],
   );
 
+  const cancelTurnScrollSettle = React.useCallback(() => {
+    if (turnScrollSettleFrameRef.current !== null) {
+      window.cancelAnimationFrame(turnScrollSettleFrameRef.current);
+      turnScrollSettleFrameRef.current = null;
+    }
+  }, []);
+
   const handleAtBottomStateChange = React.useCallback(
     (atBottom: boolean) => {
       onAtBottomChange?.(atBottom);
@@ -216,13 +224,24 @@ export const ChatVirtuosoTurnList = React.forwardRef<
       if (displayIndexPosition === null) {
         return;
       }
-      virtuosoRef.current?.scrollToIndex({
+      cancelTurnScrollSettle();
+      const location = {
         index: displayIndexPosition,
         align: 'start',
+      } as const;
+      virtuosoRef.current?.scrollToIndex({
+        ...location,
         behavior,
       });
+      turnScrollSettleFrameRef.current = window.requestAnimationFrame(() => {
+        turnScrollSettleFrameRef.current = null;
+        virtuosoRef.current?.scrollToIndex({
+          ...location,
+          behavior: 'auto',
+        });
+      });
     },
-    [displayIndex],
+    [cancelTurnScrollSettle, displayIndex],
   );
 
   const settleScrollParentToBottom = React.useCallback(
@@ -252,6 +271,7 @@ export const ChatVirtuosoTurnList = React.forwardRef<
       behavior: ChatVirtuosoScrollBehavior = 'auto',
       options: {includeIndexScroll?: boolean; includeVirtuosoAutoscroll?: boolean} = {},
     ) => {
+      cancelTurnScrollSettle();
       cancelTailLockSettle();
       tailLockSettleFrameRef.current = window.requestAnimationFrame(() => {
         tailLockSettleFrameRef.current = null;
@@ -271,7 +291,7 @@ export const ChatVirtuosoTurnList = React.forwardRef<
         });
       });
     },
-    [cancelTailLockSettle, scrollToLastDisplayItem, settleScrollParentToBottom],
+    [cancelTailLockSettle, cancelTurnScrollSettle, scrollToLastDisplayItem, settleScrollParentToBottom],
   );
 
   const handleTotalListHeightChanged = React.useCallback(() => {
@@ -283,7 +303,10 @@ export const ChatVirtuosoTurnList = React.forwardRef<
     shouldAutoscrollNow,
   ]);
 
-  React.useEffect(() => cancelTailLockSettle, [cancelTailLockSettle]);
+  React.useEffect(() => () => {
+    cancelTailLockSettle();
+    cancelTurnScrollSettle();
+  }, [cancelTailLockSettle, cancelTurnScrollSettle]);
 
   React.useImperativeHandle(ref, () => ({
     autoscrollToBottom: () => {
@@ -293,6 +316,7 @@ export const ChatVirtuosoTurnList = React.forwardRef<
       });
     },
     scrollToBottom: (behavior: ChatVirtuosoScrollBehavior = 'auto') => {
+      cancelTurnScrollSettle();
       scrollToLastDisplayItem(behavior);
       settleScrollParentToBottom(behavior);
       requestScrollToLastDisplayItem(behavior, {includeIndexScroll: true});

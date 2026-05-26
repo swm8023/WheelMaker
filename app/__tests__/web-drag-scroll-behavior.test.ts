@@ -193,6 +193,13 @@ describe('web drag scroll behavior', () => {
         followsLatest: false,
       }),
     ).toEqual({resetToLatest: true});
+    expect(
+      resolveChatSessionReadWindowUpdate({
+        useIncremental: true,
+        followsLatest: true,
+        revealTurnIndex: 42,
+      }),
+    ).toEqual({revealTurnIndex: 42});
   });
 
   test('keeps responding prompt animation from changing chat scroll overflow', () => {

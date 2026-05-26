@@ -17,6 +17,31 @@ describe('web session search UI wiring', () => {
     expect(styles).toContain('.chat-turn-search-highlight');
   });
 
+  test('loads the matched prompt turn before applying search-result navigation', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const main = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const clickStart = main.indexOf('const handleSessionSearchResultClick = async (');
+    const clickEnd = main.indexOf('const renderSessionSearchHighlightedTitle = (', clickStart);
+    expect(clickStart).toBeGreaterThanOrEqual(0);
+    expect(clickEnd).toBeGreaterThan(clickStart);
+    const clickBody = main.slice(clickStart, clickEnd);
+
+    expect(clickBody).toContain("row.result.source === 'prompt'");
+    expect(clickBody).toContain('targetTurnIndex: promptTargetTurnIndex');
+    expect(main).toContain('const searchTargetTurnIsVisible = chatDisplayIndex.items.some(');
+    expect(main).toContain('!searchTargetTurnIsVisible');
+
+    const selectStart = main.indexOf('const selectProjectChatSession = async (');
+    const selectEnd = main.indexOf('const selectWideProjectSession = async', selectStart);
+    expect(selectStart).toBeGreaterThanOrEqual(0);
+    expect(selectEnd).toBeGreaterThan(selectStart);
+    const selectBody = main.slice(selectStart, selectEnd);
+    expect(selectBody).toContain('targetTurnIndex?: number');
+    expect(selectBody).toContain('forceFull: hasTargetTurnIndex');
+    expect(selectBody).toContain('incremental: !hasTargetTurnIndex');
+    expect(selectBody).toContain('revealTurnIndex: targetTurnIndex');
+  });
+
   test('moves session search controls into desktop and mobile chat headers', () => {
     const projectRoot = path.join(__dirname, '..');
     const main = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');

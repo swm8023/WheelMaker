@@ -3427,6 +3427,12 @@ function App() {
     ) {
       return;
     }
+    const searchTargetTurnIsVisible = chatDisplayIndex.items.some(
+      item => item.turnIndex === sessionSearchTargetTurn.turnIndex,
+    );
+    if (!searchTargetTurnIsVisible) {
+      return;
+    }
     const frameId = window.requestAnimationFrame(() => {
       chatVirtuosoListRef.current?.scrollToTurnIndex(sessionSearchTargetTurn.turnIndex, 'smooth');
     });
@@ -3559,7 +3565,7 @@ function App() {
   const setVisibleChatMessagesForRuntimeKey = useCallback((
     runtimeKey: string,
     fullMessages: RegistryChatMessage[],
-    options?: { resetToLatest?: boolean; followLatest?: boolean },
+    options?: { resetToLatest?: boolean; followLatest?: boolean; revealTurnIndex?: number },
   ) => {
     if (!runtimeKey) {
       chatVisibleRuntimeKeyRef.current = '';
@@ -3573,6 +3579,15 @@ function App() {
       chatUserScrollLockUntilRef.current = 0;
       chatPointerScrollingRef.current = false;
       setChatShowScrollToBottom(false);
+    }
+    const revealingTurn = Number.isFinite(options?.revealTurnIndex)
+      ? Math.max(0, Math.trunc(options?.revealTurnIndex ?? 0))
+      : 0;
+    if (revealingTurn > 0 && encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
+      chatAutoScrollFollowRef.current = false;
+      chatUserScrollLockUntilRef.current = 0;
+      chatPointerScrollingRef.current = false;
+      setChatShowScrollToBottom(true);
     }
     if (encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
       chatVisibleRuntimeKeyRef.current = runtimeKey;
@@ -7304,6 +7319,7 @@ function App() {
       preserveUserSelection?: boolean;
       selectionSnapshot?: string;
       forceFull?: boolean;
+      revealTurnIndex?: number;
     },
   ) => {
     if (!activeProjectId || !sessionId) return false;
@@ -7313,6 +7329,9 @@ function App() {
       const requestedIncremental = options?.forceFull
         ? false
         : (options?.incremental ?? true);
+      const revealTurnIndex = Number.isFinite(options?.revealTurnIndex)
+        ? Math.max(0, Math.trunc(options?.revealTurnIndex ?? 0))
+        : 0;
       // Snapshot existing messages BEFORE the await so the base is
       // consistent with the cursor. Live session.message events may
       // mutate chatMessageStoreRef during the network round-trip.
@@ -7378,6 +7397,7 @@ function App() {
           resolveChatSessionReadWindowUpdate({
             useIncremental: appliedAfterTurnIndex > 0,
             followsLatest: chatAutoScrollFollowRef.current,
+            revealTurnIndex,
           }),
         );
       }
@@ -9883,11 +9903,15 @@ function App() {
   const selectProjectChatSession = async (
     targetProjectId: string,
     sessionId: string,
-    options?: {closeMobileDrawer?: boolean},
+    options?: {closeMobileDrawer?: boolean; targetTurnIndex?: number},
   ) => {
     if (!targetProjectId || !sessionId) return;
     const nextSelectedKey = chatSessionKeyFromParts(targetProjectId, sessionId);
     if (!nextSelectedKey) return;
+    const targetTurnIndex = Number.isFinite(options?.targetTurnIndex)
+      ? Math.max(0, Math.trunc(options?.targetTurnIndex ?? 0))
+      : 0;
+    const hasTargetTurnIndex = targetTurnIndex > 0;
     workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
     syncWorkspaceProject(targetProjectId, {reason: 'chat'}).catch(() => undefined);
     setWideProjectActionMenu(null);
@@ -9902,12 +9926,14 @@ function App() {
     setVisibleChatMessagesForRuntimeKey(
       runtimeKey,
       hydrateChatSessionContentFromCache(sessionId, targetProjectId),
-      {resetToLatest: true},
+      hasTargetTurnIndex ? {revealTurnIndex: targetTurnIndex} : {resetToLatest: true},
     );
     await loadChatSession(sessionId, targetProjectId, {
-      incremental: true,
+      incremental: !hasTargetTurnIndex,
+      forceFull: hasTargetTurnIndex,
       preserveUserSelection: true,
       selectionSnapshot: runtimeKey,
+      revealTurnIndex: targetTurnIndex,
     });
   };
 
@@ -9920,7 +9946,13 @@ function App() {
     row: SessionSearchSectionRow,
     options?: {closeMobileDrawer?: boolean},
   ) => {
-    await selectProjectChatSession(targetProjectId, row.session.sessionId, options);
+    const promptTargetTurnIndex = row.result.source === 'prompt'
+      ? row.result.turnIndex
+      : undefined;
+    await selectProjectChatSession(targetProjectId, row.session.sessionId, {
+      ...options,
+      targetTurnIndex: promptTargetTurnIndex,
+    });
     if (row.result.source !== 'prompt' || !row.result.turnIndex) {
       return;
     }

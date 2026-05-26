@@ -313,6 +313,7 @@ describe('chat virtuoso mount fallback', () => {
   });
 
   test('imperative turn scroll jumps to the nearest visible display item', async () => {
+    const animationFrames = installAnimationFrameQueue();
     const scrollParent = createScrollParent({
       clientHeight: 500,
       scrollHeight: 1200,
@@ -340,17 +341,33 @@ describe('chat virtuoso mount fallback', () => {
         listRef.current?.scrollToTurnIndex(2, 'smooth');
       });
 
-      expect(mockScrollToIndexCalls).toContainEqual({
+      expect(mockScrollToIndexCalls).toEqual([{
         index: 1,
         align: 'start',
         behavior: 'smooth',
-      });
+      }]);
+
+      await flushAnimationFrames(animationFrames.frameCallbacks);
+
+      expect(mockScrollToIndexCalls).toEqual([
+        {
+          index: 1,
+          align: 'start',
+          behavior: 'smooth',
+        },
+        {
+          index: 1,
+          align: 'start',
+          behavior: 'auto',
+        },
+      ]);
     } finally {
       if (renderer) {
         await ReactTestRenderer.act(() => {
           renderer!.unmount();
         });
       }
+      animationFrames.restore();
     }
   });
 
