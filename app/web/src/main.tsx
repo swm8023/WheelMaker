@@ -4281,7 +4281,7 @@ function App() {
     () => buildMobileChatQuickSwitchSections({
       projects: sortedProjectItems,
       sessionsByProjectId: projectSessionsByProjectId,
-      limit: 8,
+      limit: 6,
     }),
     [projectSessionsByProjectId, sortedProjectItems],
   );

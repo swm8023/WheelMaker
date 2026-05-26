@@ -66,7 +66,7 @@ function compareQuickSwitchCandidates(
 export function buildMobileChatQuickSwitchSections({
   projects,
   sessionsByProjectId,
-  limit = 8,
+  limit = 6,
 }: BuildMobileChatQuickSwitchSectionsInput): MobileChatQuickSwitchSection[] {
   const candidates: MobileChatQuickSwitchCandidate[] = [];
   const seen = new Set<string>();

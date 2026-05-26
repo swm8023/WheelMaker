@@ -26,7 +26,7 @@ function session(
 }
 
 describe('mobile chat quick switch', () => {
-  test('selects eight sessions with unread and running first, then newest updates', () => {
+  test('selects six sessions with unread and running first, then newest updates', () => {
     const sections = buildMobileChatQuickSwitchSections({
       projects: [project('p1', 'Alpha'), project('p2', 'Beta'), project('p3', 'Gamma')],
       sessionsByProjectId: {
@@ -55,13 +55,11 @@ describe('mobile chat quick switch', () => {
       'p3:p3-unread-old',
       'p3:p3-newer',
       'p3:p3-recent',
-      'p3:p3-old',
       'p2:p2-running-old',
       'p2:p2-newest',
       'p2:p2-new',
-      'p1:p1-mid',
     ]);
-    expect(sections.flatMap(section => section.sessions)).toHaveLength(8);
+    expect(sections.flatMap(section => section.sessions)).toHaveLength(6);
   });
 
   test('returns an empty section list when no known sessions exist', () => {
