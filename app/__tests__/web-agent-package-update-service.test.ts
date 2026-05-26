@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import {RegistryRepository} from '../web/src/services/registryRepository';
 import type {RegistryClient} from '../web/src/services/registryClient';
 
@@ -154,6 +156,12 @@ describe('agent package update registry service', () => {
       method: 'cmd.update',
       payload: {action: 'update-publish', hubId: 'hub-a'},
     });
+  });
+
+  test('defines WheelMaker update remote refresh metadata in the registry type', () => {
+    const registryTypes = fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'types', 'registry.ts'), 'utf8');
+
+    expect(registryTypes).toContain('remoteRefreshRunning?: boolean;');
   });
 
   test('sends token stats scans as hub-level commands', async () => {

@@ -371,6 +371,7 @@ export interface RegistryWheelMakerUpdateResponse {
   release?: RegistryWheelMakerRelease;
   git?: RegistryWheelMakerGitSnapshot;
   pendingSignal: boolean;
+  remoteRefreshRunning?: boolean;
   canUpdatePublish: boolean;
   error?: string;
 }

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
@@ -20,6 +21,11 @@ const (
 	updateSignalFileName  = "update-now.signal"
 	releaseManifestName   = "release.json"
 	fullUpdateSignalToken = "full-update"
+)
+
+const (
+	updateBackgroundFetchTTL     = time.Minute
+	updateBackgroundFetchTimeout = 2 * time.Minute
 )
 
 type updateCommandCall struct {
@@ -66,9 +72,11 @@ func (execUpdateCommandRunner) Run(ctx context.Context, dir string, name string,
 }
 
 type UpdateCommand struct {
-	baseDir string
-	runner  updateCommandRunner
-	now     func() time.Time
+	baseDir           string
+	runner            updateCommandRunner
+	now               func() time.Time
+	mu                sync.Mutex
+	backgroundFetches map[string]updateRemoteFetchState
 }
 
 func NewUpdateCommand(baseDir string) *UpdateCommand {
@@ -80,12 +88,18 @@ func newUpdateCommandWithRunner(baseDir string, runner updateCommandRunner) *Upd
 		runner = execUpdateCommandRunner{}
 	}
 	return &UpdateCommand{
-		baseDir: strings.TrimSpace(baseDir),
-		runner:  runner,
+		baseDir:           strings.TrimSpace(baseDir),
+		runner:            runner,
+		backgroundFetches: map[string]updateRemoteFetchState{},
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
 	}
+}
+
+type updateRemoteFetchState struct {
+	Running      bool
+	LastFinished time.Time
 }
 
 type updateCommandPayload struct {
@@ -116,16 +130,17 @@ type updateGitSnapshot struct {
 }
 
 type updateCommandResponse struct {
-	OK               bool                   `json:"ok"`
-	Accepted         bool                   `json:"accepted,omitempty"`
-	RequestedAt      string                 `json:"requestedAt,omitempty"`
-	Status           string                 `json:"status"`
-	HubID            string                 `json:"hubId"`
-	Release          *updateReleaseManifest `json:"release,omitempty"`
-	Git              *updateGitSnapshot     `json:"git,omitempty"`
-	PendingSignal    bool                   `json:"pendingSignal"`
-	CanUpdatePublish bool                   `json:"canUpdatePublish"`
-	Error            string                 `json:"error,omitempty"`
+	OK                   bool                   `json:"ok"`
+	Accepted             bool                   `json:"accepted,omitempty"`
+	RequestedAt          string                 `json:"requestedAt,omitempty"`
+	Status               string                 `json:"status"`
+	HubID                string                 `json:"hubId"`
+	Release              *updateReleaseManifest `json:"release,omitempty"`
+	Git                  *updateGitSnapshot     `json:"git,omitempty"`
+	PendingSignal        bool                   `json:"pendingSignal"`
+	RemoteRefreshRunning bool                   `json:"remoteRefreshRunning,omitempty"`
+	CanUpdatePublish     bool                   `json:"canUpdatePublish"`
+	Error                string                 `json:"error,omitempty"`
 }
 
 type updateCommandError struct {
@@ -215,6 +230,9 @@ func (c *UpdateCommand) query(ctx context.Context, hubID string, force bool) upd
 	resp.Release = release
 	resp.PendingSignal = false
 	resp.CanUpdatePublish = true
+	if !force {
+		resp.RemoteRefreshRunning = c.startBackgroundFetchIfNeeded(release)
+	}
 	return resp
 }
 
@@ -276,6 +294,7 @@ func (c *UpdateCommand) queryGit(ctx context.Context, release *updateReleaseMani
 		if result := c.runGit(ctx, release.Repo, "fetch", "--prune", release.Remote, release.Branch); updateCommandFailed(result) {
 			return updateCommandResponse{OK: false, Status: "checking_failed", Git: git, Error: updateResultSummary(result), CanUpdatePublish: true}
 		}
+		c.recordBackgroundFetchFinished(release)
 	}
 	latest, err := c.gitOutput(ctx, release.Repo, "rev-parse", ref)
 	if err != nil {
@@ -307,6 +326,60 @@ func (c *UpdateCommand) queryGit(ctx context.Context, release *updateReleaseMani
 		Git:              git,
 		CanUpdatePublish: true,
 	}
+}
+
+func (c *UpdateCommand) startBackgroundFetchIfNeeded(release *updateReleaseManifest) bool {
+	if release == nil {
+		return false
+	}
+	key := updateRemoteFetchKey(release)
+	now := c.now()
+	c.mu.Lock()
+	state := c.backgroundFetches[key]
+	if state.Running {
+		c.mu.Unlock()
+		return true
+	}
+	if !state.LastFinished.IsZero() && now.Sub(state.LastFinished) < updateBackgroundFetchTTL {
+		c.mu.Unlock()
+		return false
+	}
+	state.Running = true
+	c.backgroundFetches[key] = state
+	releaseCopy := *release
+	c.mu.Unlock()
+
+	go c.runBackgroundFetch(key, &releaseCopy)
+	return true
+}
+
+func (c *UpdateCommand) runBackgroundFetch(key string, release *updateReleaseManifest) {
+	ctx, cancel := context.WithTimeout(context.Background(), updateBackgroundFetchTimeout)
+	defer cancel()
+	_ = c.runGit(ctx, release.Repo, "fetch", "--prune", release.Remote, release.Branch)
+	c.mu.Lock()
+	state := c.backgroundFetches[key]
+	state.Running = false
+	state.LastFinished = c.now()
+	c.backgroundFetches[key] = state
+	c.mu.Unlock()
+}
+
+func (c *UpdateCommand) recordBackgroundFetchFinished(release *updateReleaseManifest) {
+	if release == nil {
+		return
+	}
+	key := updateRemoteFetchKey(release)
+	c.mu.Lock()
+	state := c.backgroundFetches[key]
+	state.Running = false
+	state.LastFinished = c.now()
+	c.backgroundFetches[key] = state
+	c.mu.Unlock()
+}
+
+func updateRemoteFetchKey(release *updateReleaseManifest) string {
+	return release.Repo + "\x00" + release.Remote + "\x00" + release.Branch
 }
 
 func (c *UpdateCommand) runGit(ctx context.Context, repo string, args ...string) updateCommandResult {

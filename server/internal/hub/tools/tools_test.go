@@ -1133,8 +1133,14 @@ func TestUpdateCommandQueryUsesCachedRemoteAndCountsBehindByDefault(t *testing.T
 		SHA:           "local-sha",
 		PublishedAt:   "2026-05-19T10:00:00Z",
 	})
+	fetchKey := updateCallKey("git", "fetch", "--prune", "origin", "main")
+	fetchBlock := make(chan struct{})
+	fetchStarted := make(chan struct{}, 1)
 	runner := &fakeUpdateRunner{
 		results: map[string]updateCommandResult{
+			fetchKey: {
+				ExitCode: 0,
+			},
 			"git rev-parse origin/main": {
 				Stdout:   "remote-sha\n",
 				ExitCode: 0,
@@ -1160,6 +1166,8 @@ func TestUpdateCommandQueryUsesCachedRemoteAndCountsBehindByDefault(t *testing.T
 				ExitCode: 0,
 			},
 		},
+		blockKeys:   map[string]chan struct{}{fetchKey: fetchBlock},
+		callSignals: map[string]chan struct{}{fetchKey: fetchStarted},
 	}
 	cmd := newUpdateCommandWithRunner(baseDir, runner)
 
@@ -1180,16 +1188,102 @@ func TestUpdateCommandQueryUsesCachedRemoteAndCountsBehindByDefault(t *testing.T
 	if out.Git.CurrentCommittedAt != "2026-05-19T08:00:00Z" || out.Git.LatestCommittedAt != "2026-05-19T09:00:00Z" {
 		t.Fatalf("git commit times=%+v, want current/latest commit times", out.Git)
 	}
-	wantCalls := []updateCommandCall{
+	if !out.RemoteRefreshRunning {
+		t.Fatalf("remoteRefreshRunning=false, want true while background fetch is running")
+	}
+	waitForUpdateCall(t, fetchStarted)
+	close(fetchBlock)
+	calls := runner.Calls()
+	for _, want := range []updateCommandCall{
 		{Dir: repoDir, Name: "git", Args: []string{"rev-parse", "origin/main"}},
 		{Dir: repoDir, Name: "git", Args: []string{"show", "-s", "--format=%cI", "local-sha"}},
 		{Dir: repoDir, Name: "git", Args: []string{"show", "-s", "--format=%cI", "origin/main"}},
 		{Dir: repoDir, Name: "git", Args: []string{"rev-list", "--count", "local-sha..origin/main"}},
 		{Dir: repoDir, Name: "git", Args: []string{"rev-list", "--count", "origin/main..local-sha"}},
 		{Dir: repoDir, Name: "git", Args: []string{"status", "--porcelain"}},
+		{Dir: repoDir, Name: "git", Args: []string{"fetch", "--prune", "origin", "main"}},
+	} {
+		if !updateCallsContain(calls, want) {
+			t.Fatalf("call %#v not found in %#v", want, calls)
+		}
 	}
-	if !reflect.DeepEqual(runner.calls, wantCalls) {
-		t.Fatalf("calls mismatch\n got: %#v\nwant: %#v", runner.calls, wantCalls)
+}
+
+func TestUpdateCommandQueryDoesNotStartDuplicateBackgroundFetch(t *testing.T) {
+	baseDir := t.TempDir()
+	repoDir := filepath.Join(baseDir, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	writeReleaseManifestForTest(t, baseDir, updateReleaseManifest{
+		SchemaVersion: 1,
+		Repo:          repoDir,
+		Branch:        "main",
+		Remote:        "origin",
+		SHA:           "local-sha",
+		PublishedAt:   "2026-05-19T10:00:00Z",
+	})
+	fetchKey := updateCallKey("git", "fetch", "--prune", "origin", "main")
+	fetchBlock := make(chan struct{})
+	fetchStarted := make(chan struct{}, 2)
+	runner := &fakeUpdateRunner{
+		results: map[string]updateCommandResult{
+			fetchKey: {"", "", 0, nil},
+			"git rev-parse origin/main": {
+				Stdout:   "remote-sha\n",
+				ExitCode: 0,
+			},
+			"git show -s --format=%cI local-sha": {
+				Stdout:   "2026-05-19T08:00:00Z\n",
+				ExitCode: 0,
+			},
+			"git show -s --format=%cI origin/main": {
+				Stdout:   "2026-05-19T09:00:00Z\n",
+				ExitCode: 0,
+			},
+			"git rev-list --count local-sha..origin/main": {
+				Stdout:   "3\n",
+				ExitCode: 0,
+			},
+			"git rev-list --count origin/main..local-sha": {
+				Stdout:   "0\n",
+				ExitCode: 0,
+			},
+			"git status --porcelain": {
+				Stdout:   "",
+				ExitCode: 0,
+			},
+		},
+		blockKeys:   map[string]chan struct{}{fetchKey: fetchBlock},
+		callSignals: map[string]chan struct{}{fetchKey: fetchStarted},
+	}
+	cmd := newUpdateCommandWithRunner(baseDir, runner)
+
+	resp, cmdErr := cmd.Handle(context.Background(), rawUpdateCommandPayload(t, map[string]any{
+		"action": "query",
+		"hubId":  "hub-a",
+	}))
+	if cmdErr != nil {
+		t.Fatalf("Handle first query: %v", cmdErr)
+	}
+	if out := resp.(updateCommandResponse); !out.RemoteRefreshRunning {
+		t.Fatalf("first query remoteRefreshRunning=false, want true")
+	}
+	waitForUpdateCall(t, fetchStarted)
+	resp, cmdErr = cmd.Handle(context.Background(), rawUpdateCommandPayload(t, map[string]any{
+		"action": "query",
+		"hubId":  "hub-a",
+	}))
+	if cmdErr != nil {
+		t.Fatalf("Handle second query: %v", cmdErr)
+	}
+	if out := resp.(updateCommandResponse); !out.RemoteRefreshRunning {
+		t.Fatalf("second query remoteRefreshRunning=false, want true")
+	}
+	close(fetchBlock)
+	time.Sleep(25 * time.Millisecond)
+	if got := countUpdateCall(runner.Calls(), updateCommandCall{Dir: repoDir, Name: "git", Args: []string{"fetch", "--prune", "origin", "main"}}); got != 1 {
+		t.Fatalf("background fetch calls=%d, want 1", got)
 	}
 }
 
@@ -1358,18 +1452,73 @@ func writeReleaseManifestForTest(t *testing.T, baseDir string, manifest updateRe
 }
 
 type fakeUpdateRunner struct {
-	calls   []updateCommandCall
-	results map[string]updateCommandResult
+	mu          sync.Mutex
+	calls       []updateCommandCall
+	results     map[string]updateCommandResult
+	blockKeys   map[string]chan struct{}
+	callSignals map[string]chan struct{}
 }
 
-func (f *fakeUpdateRunner) Run(_ context.Context, dir string, name string, args ...string) updateCommandResult {
+func (f *fakeUpdateRunner) Run(ctx context.Context, dir string, name string, args ...string) updateCommandResult {
+	key := updateCallKey(name, args...)
+	f.mu.Lock()
 	f.calls = append(f.calls, updateCommandCall{Dir: dir, Name: name, Args: append([]string(nil), args...)})
+	result, ok := f.results[key]
+	block := f.blockKeys[key]
+	signal := f.callSignals[key]
+	f.mu.Unlock()
+
+	if signal != nil {
+		select {
+		case signal <- struct{}{}:
+		default:
+		}
+	}
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return updateCommandResult{ExitCode: -1, Err: ctx.Err(), Stderr: ctx.Err().Error()}
+		}
+	}
 	if f.results == nil {
 		return updateCommandResult{ExitCode: 0}
 	}
-	key := name + " " + strings.Join(args, " ")
-	if result, ok := f.results[key]; ok {
+	if ok {
 		return result
 	}
 	return updateCommandResult{ExitCode: 1, Stderr: "unexpected command: " + key}
+}
+
+func (f *fakeUpdateRunner) Calls() []updateCommandCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]updateCommandCall(nil), f.calls...)
+}
+
+func updateCallKey(name string, args ...string) string {
+	return name + " " + strings.Join(args, " ")
+}
+
+func waitForUpdateCall(t *testing.T, signal <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for update command call")
+	}
+}
+
+func updateCallsContain(calls []updateCommandCall, want updateCommandCall) bool {
+	return countUpdateCall(calls, want) > 0
+}
+
+func countUpdateCall(calls []updateCommandCall, want updateCommandCall) int {
+	count := 0
+	for _, call := range calls {
+		if call.Dir == want.Dir && call.Name == want.Name && reflect.DeepEqual(call.Args, want.Args) {
+			count++
+		}
+	}
+	return count
 }

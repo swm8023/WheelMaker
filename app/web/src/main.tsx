@@ -335,6 +335,7 @@ type SettingsDetailShellOptions = {
   hideDetailHeader?: boolean;
 };
 const SKILLS_MARKETPLACE_URL = 'https://www.skills.sh/';
+const WHEELMAKER_UPDATE_REMOTE_POLL_DELAY_MS = 1500;
 type WheelMakerUpdateHubView = {
   hubId: string;
   loading: boolean;
@@ -3004,6 +3005,9 @@ function App() {
   const [wheelMakerUpdatesError, setWheelMakerUpdatesError] = useState('');
   const [wheelMakerUpdatePendingHubId, setWheelMakerUpdatePendingHubId] = useState('');
   const [wheelMakerUpdateAllPending, setWheelMakerUpdateAllPending] = useState(false);
+  const wheelMakerUpdatePollTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const wheelMakerUpdatePollHubIdsRef = useRef<Set<string>>(new Set());
+  const refreshWheelMakerUpdateHubRef = useRef<((hubId: string) => Promise<void>) | null>(null);
   const [agentPackageHubs, setAgentPackageHubs] = useState<Record<string, AgentPackageHubView>>({});
   const [agentPackagesLoading, setAgentPackagesLoading] = useState(false);
   const [agentPackagesError, setAgentPackagesError] = useState('');
@@ -9083,6 +9087,34 @@ function App() {
     });
   }, [agentPackageHubs]);
 
+  const clearWheelMakerUpdatePollTimer = useCallback(() => {
+    if (wheelMakerUpdatePollTimerRef.current) {
+      window.clearTimeout(wheelMakerUpdatePollTimerRef.current);
+      wheelMakerUpdatePollTimerRef.current = null;
+    }
+    wheelMakerUpdatePollHubIdsRef.current.clear();
+  }, []);
+
+  const scheduleWheelMakerUpdatePoll = useCallback((hubIds: string | string[]) => {
+    const ids = Array.isArray(hubIds) ? hubIds : [hubIds];
+    ids
+      .map(hubId => hubId.trim())
+      .filter(Boolean)
+      .forEach(hubId => wheelMakerUpdatePollHubIdsRef.current.add(hubId));
+    if (wheelMakerUpdatePollTimerRef.current) {
+      return;
+    }
+    wheelMakerUpdatePollTimerRef.current = window.setTimeout(() => {
+      wheelMakerUpdatePollTimerRef.current = null;
+      const pendingHubIds = Array.from(wheelMakerUpdatePollHubIdsRef.current);
+      wheelMakerUpdatePollHubIdsRef.current.clear();
+      if (settingsDetailViewRef.current !== 'update') {
+        return;
+      }
+      Promise.all(pendingHubIds.map(hubId => refreshWheelMakerUpdateHubRef.current?.(hubId))).catch(() => undefined);
+    }, WHEELMAKER_UPDATE_REMOTE_POLL_DELAY_MS);
+  }, []);
+
   const refreshWheelMakerUpdateHub = useCallback(async (hubId: string, options: {force?: boolean} = {}) => {
     setWheelMakerUpdateHubs(prev => ({
       ...prev,
@@ -9103,6 +9135,9 @@ function App() {
           data: result,
         },
       }));
+      if (!options.force && result.remoteRefreshRunning) {
+        scheduleWheelMakerUpdatePoll(hubId);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setWheelMakerUpdateHubs(prev => ({
@@ -9114,9 +9149,12 @@ function App() {
         },
       }));
     }
-  }, []);
+  }, [scheduleWheelMakerUpdatePoll]);
 
   const refreshWheelMakerUpdates = useCallback(async (options: {force?: boolean} = {}) => {
+    if (options.force) {
+      clearWheelMakerUpdatePollTimer();
+    }
     setWheelMakerUpdatesLoading(true);
     setWheelMakerUpdatesError('');
     try {
@@ -9168,13 +9206,25 @@ function App() {
         });
         return next;
       });
+      if (!options.force) {
+        const remoteRefreshingHubIds = responses
+          .filter((entry): entry is {hubId: string; result: RegistryWheelMakerUpdateResponse} => !('error' in entry) && entry.result.remoteRefreshRunning === true)
+          .map(entry => entry.hubId);
+        if (remoteRefreshingHubIds.length > 0) {
+          scheduleWheelMakerUpdatePoll(remoteRefreshingHubIds);
+        }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setWheelMakerUpdatesError(message);
     } finally {
       setWheelMakerUpdatesLoading(false);
     }
-  }, [refreshProjectHubSnapshot]);
+  }, [clearWheelMakerUpdatePollTimer, refreshProjectHubSnapshot, scheduleWheelMakerUpdatePoll]);
+
+  useEffect(() => {
+    refreshWheelMakerUpdateHubRef.current = refreshWheelMakerUpdateHub;
+  }, [refreshWheelMakerUpdateHub]);
 
   const refreshAgentPackages = useCallback(async () => {
     if (agentPackageScanPollTimerRef.current) {
@@ -9267,11 +9317,12 @@ function App() {
 
   useEffect(() => {
     if (settingsDetailView !== 'update') {
+      clearWheelMakerUpdatePollTimer();
       return;
     }
     refreshWheelMakerUpdates().catch(() => undefined);
     refreshAgentPackages().catch(() => undefined);
-  }, [settingsDetailView, refreshAgentPackages, refreshWheelMakerUpdates]);
+  }, [clearWheelMakerUpdatePollTimer, settingsDetailView, refreshAgentPackages, refreshWheelMakerUpdates]);
 
   const clearSkillOperationPollTimer = useCallback(() => {
     if (skillOperationPollTimerRef.current) {
@@ -15796,7 +15847,6 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
-
 
 
 

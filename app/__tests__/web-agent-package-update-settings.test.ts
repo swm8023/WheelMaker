@@ -51,6 +51,11 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('service.queryWheelMakerUpdate');
     expect(mainTsx).toContain('service.requestWheelMakerUpdatePublish');
     expect(mainTsx).toContain('refreshWheelMakerUpdates({force: true})');
+    expect(mainTsx).toContain('const wheelMakerUpdatePollTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);');
+    expect(mainTsx).toContain('const scheduleWheelMakerUpdatePoll = useCallback((hubIds: string | string[]) =>');
+    expect(mainTsx).toContain('result.remoteRefreshRunning');
+    expect(mainTsx).toContain('scheduleWheelMakerUpdatePoll(hubId)');
+    expect(mainTsx).toContain('refreshWheelMakerUpdateHubRef.current?.(hubId)');
     expect(mainTsx).toContain("kind: 'wheelMakerUpdate'");
     expect(mainTsx).toContain("kind: 'wheelMakerUpdateAll'");
     expect(mainTsx).toContain('requestWheelMakerUpdatePublish');
