@@ -569,7 +569,7 @@ function isRegistryChatContentBlock(block: RegistryChatContentBlock | undefined)
 }
 
 function isChatAttachmentUploadPending(attachment: ChatAttachment): boolean {
-  return attachment.status === 'queued' || attachment.status === 'uploading';
+  return attachment.status === 'uploading';
 }
 
 function chatAttachmentPreviewSrc(attachment: ChatAttachment): string {
@@ -3327,7 +3327,6 @@ function App() {
   const chatDraftGenerationRef = useRef<Record<string, number>>({});
   const currentChatDraftKeyRef = useRef('');
   const chatAttachmentIdRef = useRef(0);
-  const chatAttachmentUploadQueueRef = useRef(Promise.resolve());
   const chatAttachmentCancelIdsRef = useRef<Set<string>>(new Set());
   const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);
   const [chatFileMentionMenuOpen, setChatFileMentionMenuOpen] = useState(false);
@@ -3921,13 +3920,13 @@ function App() {
       attachmentId: string,
       draftKey: string,
       expectedGeneration: number,
-    ) => {
+    ): Promise<ChatAttachment> => {
       const attachmentName = file.name || fallbackName;
       let uploadId = '';
       try {
         updateChatAttachment(
           attachmentId,
-          attachment => ({...attachment, status: 'uploading', progress: Math.max(1, attachment.progress)}),
+          attachment => ({...attachment, status: 'uploading', progress: 1, error: '', uploadId: undefined}),
           draftKey,
           expectedGeneration,
         );
@@ -3982,19 +3981,35 @@ function App() {
         if (!finished.ok || !finished.block) {
           throw new Error('session.attachment.finish returned ok=false');
         }
+        const completedPatch = {
+          status: 'completed' as const,
+          progress: 100,
+          block: finished.block,
+          attachmentId: finished.attachment?.id || attachmentIdFromBlock(finished.block),
+          error: '',
+        };
+        let uploadedAttachment: ChatAttachment = {
+          id: attachmentId,
+          name: attachmentName,
+          mimeType: file.type || '',
+          size: file.size,
+          status: completedPatch.status,
+          progress: completedPatch.progress,
+          file,
+          block: completedPatch.block,
+          attachmentId: completedPatch.attachmentId,
+          error: completedPatch.error,
+        };
         updateChatAttachment(
           attachmentId,
-          attachment => ({
-            ...attachment,
-            status: 'completed',
-            progress: 100,
-            block: finished.block,
-            attachmentId: finished.attachment?.id || attachmentIdFromBlock(finished.block),
-            error: '',
-          }),
+          attachment => {
+            uploadedAttachment = {...attachment, ...completedPatch};
+            return uploadedAttachment;
+          },
           draftKey,
           expectedGeneration,
         );
+        return uploadedAttachment;
       } catch (err) {
         if (uploadId && !chatAttachmentCancelIdsRef.current.has(attachmentId)) {
           service.cancelProjectSessionAttachment(selectedProjectId, {sessionId, uploadId}).catch(() => undefined);
@@ -4009,11 +4024,44 @@ function App() {
           );
           setError(message);
         }
+        throw err;
       } finally {
         chatAttachmentCancelIdsRef.current.delete(attachmentId);
       }
     },
     [updateChatAttachment],
+  );
+
+  const uploadChatAttachmentsForSend = useCallback(
+    async (
+      attachments: ChatAttachment[],
+      selectedProjectId: string,
+      sessionId: string,
+      draftKey: string,
+      expectedGeneration: number,
+    ): Promise<ChatAttachment[]> => {
+      const uploadedAttachments: ChatAttachment[] = [];
+      for (const attachment of attachments) {
+        if (attachment.status === 'completed' && attachment.block) {
+          uploadedAttachments.push(attachment);
+          continue;
+        }
+        if (!attachment.file) {
+          throw new Error('Attachment can only be uploaded before the page is refreshed.');
+        }
+        uploadedAttachments.push(await uploadChatAttachmentFile(
+          attachment.file,
+          attachment.name,
+          selectedProjectId,
+          sessionId,
+          attachment.id,
+          draftKey,
+          expectedGeneration,
+        ));
+      }
+      return uploadedAttachments;
+    },
+    [uploadChatAttachmentFile],
   );
 
   const enqueueChatAttachmentFiles = useCallback(
@@ -4023,11 +4071,6 @@ function App() {
       expectedGeneration = getChatDraftGeneration(draftKey),
     ) => {
       if (files.length === 0) {
-        return;
-      }
-      const selectedKey = selectedChatKeyRef.current;
-      if (!selectedKey?.sessionId) {
-        setError('Select or create a chat session first.');
         return;
       }
       const attachments = files.map((file, index): ChatAttachment => {
@@ -4045,32 +4088,14 @@ function App() {
         };
       });
       appendChatAttachments(attachments, draftKey, expectedGeneration);
-      for (const attachment of attachments) {
-        const file = attachment.file;
-        if (!file) {
-          continue;
-        }
-        chatAttachmentUploadQueueRef.current = chatAttachmentUploadQueueRef.current
-          .catch(() => undefined)
-          .then(() => uploadChatAttachmentFile(
-            file,
-            attachment.name,
-            selectedKey.projectId,
-            selectedKey.sessionId,
-            attachment.id,
-            draftKey,
-            expectedGeneration,
-          ));
-      }
     },
-    [appendChatAttachments, getChatDraftGeneration, uploadChatAttachmentFile],
+    [appendChatAttachments, getChatDraftGeneration],
   );
 
   const retryChatAttachment = useCallback(
     (attachmentId: string) => {
       const attachment = chatAttachmentsRef.current.find(item => item.id === attachmentId);
-      const selectedKey = selectedChatKeyRef.current;
-      if (!attachment?.file || !selectedKey?.sessionId) {
+      if (!attachment?.file) {
         setError('Attachment can only be retried before the page is refreshed.');
         return;
       }
@@ -4078,19 +4103,8 @@ function App() {
         attachmentId,
         current => ({...current, status: 'queued', progress: 0, error: '', uploadId: undefined, block: undefined, attachmentId: undefined}),
       );
-      chatAttachmentUploadQueueRef.current = chatAttachmentUploadQueueRef.current
-        .catch(() => undefined)
-        .then(() => uploadChatAttachmentFile(
-          attachment.file as File,
-          attachment.name,
-          selectedKey.projectId,
-          selectedKey.sessionId,
-          attachment.id,
-          currentChatDraftKeyRef.current,
-          getChatDraftGeneration(currentChatDraftKeyRef.current),
-        ));
     },
-    [getChatDraftGeneration, updateChatAttachment, uploadChatAttachmentFile],
+    [updateChatAttachment],
   );
 
   useEffect(() => {
@@ -7614,6 +7628,21 @@ function App() {
     }
   };
 
+  const resetChatComposerDraft = (draftKey: string) => {
+    const normalizedDraftKey = draftKey.trim();
+    if (!normalizedDraftKey) {
+      return;
+    }
+    if (normalizedDraftKey === currentChatDraftKeyRef.current) {
+      resetChatComposer();
+      return;
+    }
+    const draft = chatComposerDraftsRef.current[normalizedDraftKey];
+    draft?.attachments.forEach(revokeChatAttachmentObjectUrl);
+    bumpChatDraftGeneration(normalizedDraftKey);
+    saveChatComposerDraft(normalizedDraftKey, '', []);
+  };
+
   const clearPendingChatPromptTimer = (runtimeKey: string) => {
     const timerId = chatPendingPromptTimersRef.current[runtimeKey];
     if (timerId !== undefined) {
@@ -7997,27 +8026,17 @@ function App() {
       return;
     }
     const sourceAttachments = options.attachmentsOverride ?? chatAttachments;
-    if (!options.blocksOverride && sourceAttachments.some(attachment => attachment.status !== 'completed' || !attachment.block)) {
-      setError('Wait for attachments to finish uploading.');
-      return;
-    }
     const trimmedText = (options.textOverride ?? chatComposerText).trim();
     if (trimmedText === '/cancel' && sourceAttachments.length === 0 && !options.blocksOverride) {
       setError('Use the stop button to cancel in app.');
       return;
     }
-    const blocks: RegistryChatContentBlock[] = [];
-    if (options.blocksOverride) {
-      blocks.push(...options.blocksOverride.map(block => ({...block})));
-    } else {
-      if (trimmedText) {
-        blocks.push({ type: 'text', text: trimmedText });
-      }
-      blocks.push(...sourceAttachments.map(attachment => attachment.block).filter(isRegistryChatContentBlock));
+    if (!options.blocksOverride && !trimmedText && sourceAttachments.length === 0) {
+      return;
     }
-    if (blocks.length === 0) return;
-    const firstAttachmentName = sourceAttachments[0]?.name || '';
-    const previewText = trimmedText || firstAttachmentName || msgText('prompt_request', {contentBlocks: blocks}).trim();
+    if (options.blocksOverride && options.blocksOverride.length === 0) {
+      return;
+    }
     const selectedKey = selectedChatKeyRef.current;
     if (!selectedKey) {
       setError('Select or create a chat session first.');
@@ -8030,22 +8049,44 @@ function App() {
       return;
     }
     const runtimeKey = buildChatRuntimeKey(selectedProjectId, sessionId);
-    const createdAt = new Date().toISOString();
-    rememberPendingChatPrompt(runtimeKey, {
-      sessionId,
-      blocks: blocks.map(block => ({...block})),
-      createdAt,
-      turnIndex: nextPromptTurnIndex(chatMessageStoreRef.current[runtimeKey] ?? []),
-      status: 'confirming',
-    });
-
-    if (!options.preserveComposer) {
-      // Clear UI immediately after capturing text before any async work.
-      resetChatComposer();
-    }
-    forceChatScrollToBottom();
+    const draftKey = currentChatDraftKeyRef.current;
+    const draftGeneration = getChatDraftGeneration(draftKey);
+    let pendingRemembered = false;
     setChatSending(true);
     try {
+      const uploadedAttachments = options.blocksOverride ? sourceAttachments : await uploadChatAttachmentsForSend(
+        sourceAttachments,
+        selectedProjectId,
+        sessionId,
+        draftKey,
+        draftGeneration,
+      );
+      const blocks: RegistryChatContentBlock[] = [];
+      if (options.blocksOverride) {
+        blocks.push(...options.blocksOverride.map(block => ({...block})));
+      } else {
+        if (trimmedText) {
+          blocks.push({ type: 'text', text: trimmedText });
+        }
+        blocks.push(...uploadedAttachments.map(attachment => attachment.block).filter(isRegistryChatContentBlock));
+      }
+      if (blocks.length === 0) return;
+      const firstAttachmentName = uploadedAttachments[0]?.name || '';
+      const previewText = trimmedText || firstAttachmentName || msgText('prompt_request', {contentBlocks: blocks}).trim();
+      const createdAt = new Date().toISOString();
+      rememberPendingChatPrompt(runtimeKey, {
+        sessionId,
+        blocks: blocks.map(block => ({...block})),
+        createdAt,
+        turnIndex: nextPromptTurnIndex(chatMessageStoreRef.current[runtimeKey] ?? []),
+        status: 'confirming',
+      });
+      pendingRemembered = true;
+
+      if (!options.preserveComposer) {
+        resetChatComposerDraft(draftKey);
+      }
+      forceChatScrollToBottom();
       const result = await service.sendProjectSessionMessage(selectedProjectId, {
         sessionId,
         text: trimmedText || previewText,
@@ -8065,7 +8106,9 @@ function App() {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      markPendingChatPromptUndelivered(runtimeKey, message);
+      if (pendingRemembered) {
+        markPendingChatPromptUndelivered(runtimeKey, message);
+      }
       setError(message);
     } finally {
       setChatSending(false);
@@ -8229,6 +8272,10 @@ function App() {
   const handleChatFileChange = (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
+    if (chatSending) {
+      event.target.value = '';
+      return;
+    }
     const files = chatFilesFromFileList(event.target.files);
     if (files.length === 0) {
       return;
@@ -14114,6 +14161,9 @@ function App() {
             <div
               className={`chat-composer-frame${chatComposerDragActive ? ' drag-over' : ''}`}
               onDragOver={event => {
+                if (chatSending) {
+                  return;
+                }
                 if (event.dataTransfer.types.includes('Files')) {
                   event.preventDefault();
                   setChatComposerDragActive(true);
@@ -14125,6 +14175,10 @@ function App() {
                 }
               }}
               onDrop={event => {
+                if (chatSending) {
+                  setChatComposerDragActive(false);
+                  return;
+                }
                 const files = chatFilesFromFileList(event.dataTransfer.files);
                 if (files.length === 0) {
                   setChatComposerDragActive(false);
@@ -14162,7 +14216,9 @@ function App() {
                               ? (attachment.error || 'Upload failed')
                               : attachment.status === 'completed'
                                 ? formatChatAttachmentSize(attachment.size)
-                                : `${attachment.progress}%`}
+                                : attachment.status === 'queued'
+                                  ? 'Ready'
+                                  : `${attachment.progress}%`}
                           </div>
                           {pending ? (
                             <div className="chat-attachment-progress" aria-hidden="true">
@@ -14175,8 +14231,8 @@ function App() {
                             type="button"
                             className="chat-attachment-retry"
                             onClick={() => retryChatAttachment(attachment.id)}
-                            title="Retry upload"
-                            aria-label="Retry upload"
+                            title="Queue retry"
+                            aria-label="Queue retry"
                           >
                             <span className="codicon codicon-refresh" />
                           </button>
@@ -14185,8 +14241,9 @@ function App() {
                           type="button"
                           className="chat-attachment-remove"
                           onClick={() => removeChatAttachment(attachment.id)}
-                          title={pending ? 'Cancel upload' : 'Remove attachment'}
-                          aria-label={pending ? 'Cancel upload' : 'Remove attachment'}
+                          disabled={pending}
+                          title={pending ? 'Uploading' : 'Remove attachment'}
+                          aria-label={pending ? 'Uploading' : 'Remove attachment'}
                         >
                           <span className="codicon codicon-close" />
                         </button>
@@ -14216,8 +14273,12 @@ function App() {
                     rows={1}
                     className="chat-composer-input"
                     value={chatComposerText}
+                    readOnly={chatSending}
                     onChange={event => updateChatComposerText(event.target.value)}
                     onPaste={event => {
+                      if (chatSending) {
+                        return;
+                      }
                       if (!supportsChatClipboardFiles) {
                         return;
                       }
@@ -14356,6 +14417,7 @@ function App() {
                       setChatConfigOverflowOpen(false);
                       chatFileInputRef.current?.click();
                     }}
+                    disabled={chatSending}
                     title="Attach file"
                     aria-label="Attach file"
                   >
