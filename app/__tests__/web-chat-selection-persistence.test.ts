@@ -46,6 +46,20 @@ function createFakeChatPersistence() {
 }
 
 describe('global selected chat session persistence', () => {
+  test('clears the saved registry token without clearing the address', () => {
+    const persistence = createFakePersistence({
+      address: 'ws://registry.example/ws',
+      token: 'secret-token',
+    });
+    const store = new WorkspaceStore(persistence as any);
+
+    store.clearLocalToken();
+
+    expect(persistence.patchGlobalState).toHaveBeenCalledWith({token: ''});
+    expect(persistence.globalState.address).toBe('ws://registry.example/ws');
+    expect(persistence.globalState.token).toBe('');
+  });
+
   test('remembers and restores one global project-scoped chat key', () => {
     const persistence = createFakePersistence();
     const store = new WorkspaceStore(persistence as any);

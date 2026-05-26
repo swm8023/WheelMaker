@@ -8318,6 +8318,22 @@ function App() {
     service.close();
   };
 
+  const handleRegistryDebugLogout = () => {
+    supervisorManagedCloseRef.current = true;
+    clearReconnectTimer();
+    reconnectStartedAtRef.current = null;
+    workspaceStore.clearLocalToken();
+    tokenRef.current = '';
+    setToken('');
+    setError('');
+    setAutoConnecting(false);
+    setReconnecting(false);
+    setRegistryDebugPanelOpen(false);
+    setConnected(false);
+    clearChatRuntimeState();
+    service.close();
+  };
+
   const maybeNotifyChatMessage = (
     message: RegistryChatMessage,
     session?: RegistryChatSession,
@@ -15493,6 +15509,7 @@ function App() {
       includeMultiSessionRecords={registryDebugIncludeMultiSessionRecords}
       onIncludeMultiSessionRecordsChange={setRegistryDebugIncludeMultiSessionRecords}
       onClear={() => registryDebugStore.clear()}
+      onLogout={handleRegistryDebugLogout}
       onClose={() => setRegistryDebugPanelOpen(false)}
     />
   ) : null;

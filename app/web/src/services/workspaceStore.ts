@@ -374,6 +374,10 @@ export class WorkspaceStore {
     this.persistence.clearCachePreservingToken();
   }
 
+  clearLocalToken(): void {
+    this.persistence.patchGlobalState({token: ''});
+  }
+
   dumpDatabase(): Promise<WorkspaceDatabaseDump> {
     return this.persistence.dumpDatabase();
   }

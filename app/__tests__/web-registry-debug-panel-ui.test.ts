@@ -20,6 +20,8 @@ describe('web registry debug panel ui', () => {
     expect(panelTsx).toContain('Include multi-session records');
     expect(panelTsx).toContain('Jump to latest');
     expect(panelTsx).toContain('Clear');
+    expect(panelTsx).toContain('Logout');
+    expect(panelTsx).toContain('onLogout');
     expect(panelTsx).toContain('Copy');
     expect(panelTsx).toContain('JSON.stringify(selectedEnvelopeOrLifecycle, null, 2)');
     expect(panelTsx).toContain('selectedScope');
@@ -45,6 +47,10 @@ describe('web registry debug panel ui', () => {
     expect(mainTsx).toContain('selectedScope={selectedRegistryDebugScope}');
     expect(mainTsx).toContain('sessionLabels={registryDebugSessionLabels}');
     expect(mainTsx).toContain('onClear={() => registryDebugStore.clear()}');
+    expect(mainTsx).toContain('onLogout={handleRegistryDebugLogout}');
+    expect(mainTsx).toContain('workspaceStore.clearLocalToken();');
+    expect(mainTsx).toContain("setToken('');");
+    expect(mainTsx).toContain('supervisorManagedCloseRef.current = true;');
   });
 
   test('styles include floating panel, list, and detail panes', () => {
