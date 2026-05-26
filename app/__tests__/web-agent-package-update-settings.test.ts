@@ -201,20 +201,21 @@ describe('agent package update settings UI source structure', () => {
     expect(actionButtonBlock).toContain('min-width: 74px;');
   });
 
-  test('stacks WheelMaker release SHA metadata inside the mobile settings screen', () => {
+  test('keeps WheelMaker release SHA metadata on one line inside the mobile settings screen', () => {
     const projectRoot = path.join(__dirname, '..');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     const mobileShaLineBlock = stylesCss.match(/\.mobile-settings-screen \.wheelmaker-update-sha-line \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(mobileShaLineBlock).toContain('grid-template-columns: 52px minmax(0, 1fr);');
-    expect(mobileShaLineBlock).toContain('white-space: normal;');
+    expect(mobileShaLineBlock).toContain('grid-template-columns: 52px max-content minmax(0, 1fr);');
+    expect(mobileShaLineBlock).toContain('column-gap: 10px;');
+    expect(mobileShaLineBlock).toContain('white-space: nowrap;');
 
     const mobileShaValueBlock = stylesCss.match(/\.mobile-settings-screen \.wheelmaker-update-sha-value \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(mobileShaValueBlock).toContain('grid-column: 2;');
+    expect(mobileShaValueBlock).toContain('min-width: 7ch;');
+    expect(mobileShaValueBlock).not.toContain('grid-column: 2;');
 
     const mobileShaTimeBlock = stylesCss.match(/\.mobile-settings-screen \.wheelmaker-update-sha-time \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(mobileShaTimeBlock).toContain('grid-column: 2;');
-    expect(mobileShaTimeBlock).toContain('grid-row: 2;');
+    expect(mobileShaTimeBlock).not.toContain('grid-row: 2;');
   });
 
   test('places agent tags beside display names and lets versions span under the action button', () => {
