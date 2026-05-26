@@ -25,11 +25,22 @@ describe('web markdown preview mode', () => {
     expect(mainTsx).toContain('const selectedFileIsMarkdown = isMarkdownPath(selectedFile);');
     expect(mainTsx).toContain('const [markdownPreviewEnabled, setMarkdownPreviewEnabled] = useState(false);');
     expect(mainTsx).toContain('setMarkdownPreviewEnabled(isMarkdownPath(selectedFile));');
+    expect(mainTsx).toContain('function isHtmlPath(path: string): boolean {');
+    expect(mainTsx).toContain("return ext === 'html' || ext === 'htm';");
+    expect(mainTsx).toContain('const selectedFileIsHtml = isHtmlPath(selectedFile);');
+    expect(mainTsx).toContain('const [htmlPreviewEnabled, setHtmlPreviewEnabled] = useState(false);');
+    expect(mainTsx).toContain('const [htmlPreviewScriptsEnabled, setHtmlPreviewScriptsEnabled] = useState(false);');
+    expect(mainTsx).toContain('setHtmlPreviewEnabled(isHtmlPath(selectedFile));');
+    expect(mainTsx).toContain('setHtmlPreviewScriptsEnabled(false);');
 
     expect(mainTsx).toContain('aria-label="Toggle markdown preview"');
     expect(mainTsx).toContain('className={`view-tool markdown-preview-toggle ${');
     expect(mainTsx).toContain('<span className="markdown-preview-toggle-text">MD</span>');
     expect(mainTsx).toContain('{selectedFileIsMarkdown ? (');
+    expect(mainTsx).toContain('aria-label="Toggle HTML preview"');
+    expect(mainTsx).toContain('className={`view-tool html-preview-toggle ${');
+    expect(mainTsx).toContain('<span className="html-preview-toggle-text">HTML</span>');
+    expect(mainTsx).toContain('aria-label="Toggle HTML scripts"');
 
     const previewIndex = mainTsx.indexOf('aria-label="Toggle markdown preview"');
     const wrapIndex = mainTsx.indexOf('aria-label="Toggle wrap line"');
@@ -42,9 +53,16 @@ describe('web markdown preview mode', () => {
     expect(mainTsx).toContain("data-markdown-export-pending={markdownCapabilities.pending ? 'true' : undefined}");
     expect(mainTsx).toContain('if (language === "mermaid") {');
     expect(mainTsx).toContain('<MermaidBlock content={codeText} themeMode={themeMode} />');
+    expect(mainTsx).toContain('<HtmlPreview');
+    expect(mainTsx).toContain("sandbox={scriptsEnabled ? 'allow-scripts' : ''}");
+    expect(mainTsx).toContain('srcDoc={content}');
 
     expect(stylesCss).toContain('.markdown-preview {');
     expect(stylesCss).toContain('.markdown-preview-toggle {');
+    expect(stylesCss).toContain('.html-preview {');
+    expect(stylesCss).toContain('.html-preview-frame {');
+    expect(stylesCss).toContain('.html-preview-toggle {');
+    expect(stylesCss).toContain('.html-script-toggle {');
     expect(stylesCss).toContain('.mermaid-block {');
     expect(stylesCss).toContain('.mermaid-error {');
   });

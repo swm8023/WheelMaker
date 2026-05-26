@@ -5854,6 +5854,20 @@ body,
   line-height: 1;
 }
 
+.html-preview-toggle {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.html-script-toggle {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.html-preview-toggle-text {
+  line-height: 1;
+}
+
 .markdown-preview {
   padding: 12px 14px 18px;
   line-height: 1.6;
@@ -5923,6 +5937,20 @@ body,
   max-width: 100%;
   height: auto;
   border-radius: 6px;
+}
+
+.html-preview {
+  width: 100%;
+  min-height: 100%;
+  background: #fff;
+}
+
+.html-preview-frame {
+  display: block;
+  width: 100%;
+  min-height: calc(100vh - 170px);
+  border: 0;
+  background: #fff;
 }
 
 .markdown-image-export-host {

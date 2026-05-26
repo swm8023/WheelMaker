@@ -1735,6 +1735,11 @@ function isMarkdownPath(path: string): boolean {
   return ext === 'md' || ext === 'markdown';
 }
 
+function isHtmlPath(path: string): boolean {
+  const ext = getFileExtension(path);
+  return ext === 'html' || ext === 'htm';
+}
+
 function detectCodeLanguage(path: string): string {
   const ext = getFileExtension(path);
   switch (ext) {
@@ -2390,6 +2395,11 @@ type MarkdownPreviewProps = {
   lineNumbers: boolean;
 };
 
+type HtmlPreviewProps = {
+  content: string;
+  scriptsEnabled: boolean;
+};
+
 type MarkdownImageExportRequest = {
   id: number;
   content: string;
@@ -2529,6 +2539,22 @@ const MarkdownPreview = React.memo(function MarkdownPreview({
     </div>
   );
 }, markdownPreviewPropsEqual);
+
+const HtmlPreview = React.memo(function HtmlPreview({
+  content,
+  scriptsEnabled,
+}: HtmlPreviewProps) {
+  return (
+    <div className="html-preview">
+      <iframe
+        className="html-preview-frame"
+        title="HTML preview"
+        sandbox={scriptsEnabled ? 'allow-scripts' : ''}
+        srcDoc={content}
+      />
+    </div>
+  );
+});
 
 const MarkdownImageExportSurface = React.memo(function MarkdownImageExportSurface({
   request,
@@ -3124,6 +3150,8 @@ function App() {
   const [searchToolsOpen, setSearchToolsOpen] = useState(false);
   const [gotoToolsOpen, setGotoToolsOpen] = useState(false);
   const [markdownPreviewEnabled, setMarkdownPreviewEnabled] = useState(false);
+  const [htmlPreviewEnabled, setHtmlPreviewEnabled] = useState(false);
+  const [htmlPreviewScriptsEnabled, setHtmlPreviewScriptsEnabled] = useState(false);
   const fileScrollRef = useRef<HTMLDivElement | null>(null);
   const liveRefreshTimerRef = useRef<number | null>(null);
   const refreshInFlightRef = useRef(false);
@@ -4577,6 +4605,8 @@ function App() {
 
   useEffect(() => {
     setMarkdownPreviewEnabled(isMarkdownPath(selectedFile));
+    setHtmlPreviewEnabled(isHtmlPath(selectedFile));
+    setHtmlPreviewScriptsEnabled(false);
   }, [selectedFile]);
   useEffect(() => {
     setAllowHeavyDiffLoad(false);
@@ -6290,6 +6320,7 @@ function App() {
 
   const isExpanded = (path: string) => expandedDirs.includes(path);
   const selectedFileIsMarkdown = isMarkdownPath(selectedFile);
+  const selectedFileIsHtml = isHtmlPath(selectedFile);
   const isSelectedFilePinned = selectedFile
     ? pinnedFiles.includes(selectedFile)
     : false;
@@ -13246,6 +13277,40 @@ function App() {
           <span className="markdown-preview-toggle-text">MD</span>
         </button>
       ) : null}
+      {selectedFileIsHtml ? (
+        <button
+          type="button"
+          className={`view-tool html-preview-toggle ${
+            htmlPreviewEnabled ? 'active' : ''
+          }`}
+          onClick={() => setHtmlPreviewEnabled(value => !value)}
+          title={
+            htmlPreviewEnabled
+              ? 'Switch to source mode'
+              : 'Switch to HTML preview'
+          }
+          aria-label="Toggle HTML preview"
+        >
+          <span className="html-preview-toggle-text">HTML</span>
+        </button>
+      ) : null}
+      {selectedFileIsHtml && htmlPreviewEnabled ? (
+        <button
+          type="button"
+          className={`view-tool html-script-toggle ${
+            htmlPreviewScriptsEnabled ? 'active' : ''
+          }`}
+          onClick={() => setHtmlPreviewScriptsEnabled(value => !value)}
+          title={
+            htmlPreviewScriptsEnabled
+              ? 'Disable HTML scripts'
+              : 'Enable HTML scripts'
+          }
+          aria-label="Toggle HTML scripts"
+        >
+          <span className="codicon codicon-run-all view-tool-icon" />
+        </button>
+      ) : null}
       <button
         type="button"
         className={`view-tool ${wrapLines ? 'active' : ''}`}
@@ -14446,6 +14511,14 @@ function App() {
                       codeTabSize={codeTabSize}
                       wrap={wrapLines}
                       lineNumbers={showLineNumbers}
+                    />
+                  ) : selectedFileIsHtml && htmlPreviewEnabled ? (
+                    <HtmlPreview
+                      key={`${selectedFile}:${
+                        htmlPreviewScriptsEnabled ? 'scripts' : 'static'
+                      }`}
+                      content={fileContent}
+                      scriptsEnabled={htmlPreviewScriptsEnabled}
                     />
                   ) : (
                     renderCodePane(
