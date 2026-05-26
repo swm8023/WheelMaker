@@ -331,7 +331,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('setSidebarSettingsOpen(true);');
     expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
     expect(mainTsx).toContain("tab === 'chat' ? renderWideProjectSessionNav() : renderSidebarMain(false)");
-    expect(mainTsx).toContain('className="sidebar-title-row"');
+    expect(mainTsx).toContain('className={`sidebar-title-row${chatSidebarTitleSearchOpen ? \' search-open\' : \'\'}`}');
     expect(mainTsx).toContain('className="desktop-activity-bar"');
     expect(mainTsx).toContain('const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (');
     expect(mainTsx).toContain('className="mobile-settings-screen"');
@@ -549,8 +549,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('chatHubMenuRef.current?.contains(target)');
     expect(mainTsx).toContain('aria-label="Show connected hubs"');
     expect(mainTsx).toContain('aria-expanded={chatHubMenuOpen}');
-    expect(mainTsx).toContain('<span className="chat-hub-summary-label">Hubs</span>');
-    expect(mainTsx).toContain('<span className="chat-hub-summary-count">{hubCount}</span>');
+    expect(mainTsx).toContain("const chatHubSummaryLabel = `${hubCount} ${hubCount === 1 ? 'Hub' : 'Hubs'}`;");
+    expect(mainTsx).toContain('<span className="chat-hub-summary-label">{chatHubSummaryLabel}</span>');
+    expect(mainTsx).not.toContain('<span className="chat-hub-summary-count">{hubCount}</span>');
     expect(mainTsx).toContain('{registryHubs.length > 0 ? (');
     expect(mainTsx).toContain('registryHubs.map(hub => {');
     expect(mainTsx).toContain('<span className="chat-hub-row-name">{hub.hubId}</span>');
@@ -562,10 +563,10 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("openSettingsDetail('portRelay')");
     expect(mainTsx).toContain('renderChatHubSummary()');
     expect(mainTsx).toMatch(
-      /<div className="mobile-chat-toolbar" aria-label="Chat tools">[\s\S]*?title="Open settings"[\s\S]*?openSettingsDetail\('portRelay'\)[\s\S]*?title="Port Relay"[\s\S]*?refreshMobileChatProjectSessions\(\)[\s\S]*?<\/div>[\s\S]*?\{renderChatHubSummary\(\)\}/,
+      /<div className="mobile-chat-toolbar" aria-label="Chat tools">[\s\S]*?title="Open settings"[\s\S]*?openSettingsDetail\('portRelay'\)[\s\S]*?title="Port Relay"[\s\S]*?refreshMobileChatProjectSessions\(\)[\s\S]*?<\/div>[\s\S]*?\{renderChatHeaderSearchControls\(true\)\}[\s\S]*?\{renderChatHubSummary\(\)\}/,
     );
     expect(mainTsx).toMatch(
-      /<div className="sidebar-title-row">[\s\S]*?<span className="sidebar-title-text">\{wideSidebarTitle\}<\/span>[\s\S]*?\{tab === 'chat' && !sidebarSettingsOpen \? renderChatHubSummary\(\) : null\}/,
+      /<div className=\{`sidebar-title-row\$\{chatSidebarTitleSearchOpen \? ' search-open' : ''\}`\}>[\s\S]*?<span className="sidebar-title-text">\{wideSidebarTitle\}<\/span>[\s\S]*?\{renderChatHubSummary\(\)\}[\s\S]*?\{renderChatHeaderSearchControls\(false\)\}/,
     );
     const renderMainStart = mainTsx.indexOf('const renderMain = () => {');
     const chatMainStart = mainTsx.indexOf("if (tab === 'chat') {", renderMainStart);
@@ -587,7 +588,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.sidebar-title-row .chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary-button {');
-    expect(stylesCss).toContain('.chat-hub-summary-count {');
+    expect(stylesCss).not.toContain('.chat-hub-summary-count {');
     expect(stylesCss).toContain('.chat-hub-popover {');
     expect(stylesCss).toMatch(
       /\.chat-hub-summary-button \{[\s\S]*letter-spacing: 0;[\s\S]*text-transform: none;[\s\S]*\}/,
@@ -926,7 +927,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('latestProjects.map(projectItem =>');
     expect(mainTsx).toContain('refreshChatProjectSessions(projectItem.projectId)');
     expect(mainTsx).toContain('const renderMobileChatSessionSheet = () => {');
-    expect(mainTsx).toContain('className="mobile-chat-drawer-header"');
+    expect(mainTsx).toContain('className={`mobile-chat-drawer-header${sessionSearchHeaderExpanded ? \' search-open\' : \'\'}`}');
     expect(mainTsx).toContain('<div className="mobile-chat-toolbar" aria-label="Chat tools">');
     expect(mainTsx).toContain("openSettingsDetail('portRelay')");
     expect(mainTsx).not.toContain('<span className="mobile-chat-drawer-title">Chats</span>');
@@ -1094,7 +1095,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const wideSidebarMain = sidebarSettingsOpen');
     expect(mainTsx).toContain('? renderSettingsContent(false)');
     expect(mainTsx).toContain('const wideSidebarTitle = sidebarSettingsOpen');
-    expect(mainTsx).toContain('className="sidebar-title-row"');
+    expect(mainTsx).toContain('className={`sidebar-title-row${chatSidebarTitleSearchOpen ? \' search-open\' : \'\'}`}');
     expect(mainTsx).toContain('const handleDesktopActivitySelect = useCallback((nextTab: Tab) => {');
     expect(mainTsx).toContain('const handleDesktopSettingsSelect = useCallback(() => {');
     expect(mainTsx).toContain('const beginDesktopSidebarResize = useCallback(');

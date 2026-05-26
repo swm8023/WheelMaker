@@ -3212,6 +3212,7 @@ function App() {
   const projectSessionsByProjectIdRef = useRef<Record<string, RegistryChatSession[]>>({});
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const [sessionSearchInput, setSessionSearchInput] = useState('');
+  const sessionSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [activeSessionSearchId, setActiveSessionSearchId] = useState('');
   const activeSessionSearchIdRef = useRef('');
   const [sessionSearchQuery, setSessionSearchQuery] = useState('');
@@ -4145,12 +4146,61 @@ function App() {
     [sessionSearchSections],
   );
   const sessionSearchActive = !!activeSessionSearchId;
+  const sessionSearchHeaderExpanded = sessionSearchOpen || sessionSearchActive;
+  const sessionSearchProjectDoneCount = useMemo(() => {
+    if (!activeSessionSearchId) {
+      return 0;
+    }
+    return sortedProjectItems.reduce(
+      (sum, item) => sum + (sessionSearchDoneByProjectId[item.projectId] === true ? 1 : 0),
+      0,
+    );
+  }, [activeSessionSearchId, sessionSearchDoneByProjectId, sortedProjectItems]);
+  const sessionSearchErrorCount = useMemo(
+    () => Object.values(sessionSearchErrorsByProjectId).filter(message => message.trim()).length,
+    [sessionSearchErrorsByProjectId],
+  );
   const sessionSearchAllDone = useMemo(() => {
     if (!activeSessionSearchId || sortedProjectItems.length === 0) {
       return false;
     }
     return sortedProjectItems.every(item => sessionSearchDoneByProjectId[item.projectId] === true);
   }, [activeSessionSearchId, sessionSearchDoneByProjectId, sortedProjectItems]);
+  const sessionSearchStatusParts = useMemo(() => {
+    if (!sessionSearchActive) {
+      return [];
+    }
+    const resultLabel = `${sessionSearchResultCount} result${sessionSearchResultCount === 1 ? '' : 's'}`;
+    const parts = sessionSearchAllDone
+      ? [resultLabel]
+      : [
+          `Searching ${sessionSearchProjectDoneCount}/${sortedProjectItems.length} projects`,
+          resultLabel,
+        ];
+    if (sessionSearchErrorCount > 0) {
+      parts.push(`${sessionSearchErrorCount} error${sessionSearchErrorCount === 1 ? '' : 's'}`);
+    }
+    return parts;
+  }, [
+    sessionSearchActive,
+    sessionSearchAllDone,
+    sessionSearchErrorCount,
+    sessionSearchProjectDoneCount,
+    sessionSearchResultCount,
+    sortedProjectItems.length,
+  ]);
+  useEffect(() => {
+    if (!sessionSearchHeaderExpanded) {
+      return;
+    }
+    const input = sessionSearchInputRef.current;
+    if (!input) {
+      return;
+    }
+    input.focus();
+    const cursor = input.value.length;
+    input.setSelectionRange(cursor, cursor);
+  }, [sessionSearchHeaderExpanded]);
   const mobileChatQuickSwitchSections = useMemo(
     () => buildMobileChatQuickSwitchSections({
       projects: sortedProjectItems,
@@ -5100,6 +5150,7 @@ function App() {
   );
   const renderChatHubSummary = useCallback(() => {
     const hubCount = registryHubs.length;
+    const chatHubSummaryLabel = `${hubCount} ${hubCount === 1 ? 'Hub' : 'Hubs'}`;
     return (
       <div ref={chatHubMenuRef} className="chat-hub-summary">
         <button
@@ -5116,8 +5167,7 @@ function App() {
             setChatHubMenuOpen(open => !open);
           }}
         >
-          <span className="chat-hub-summary-label">Hubs</span>
-          <span className="chat-hub-summary-count">{hubCount}</span>
+          <span className="chat-hub-summary-label">{chatHubSummaryLabel}</span>
           <span className="codicon codicon-chevron-down" aria-hidden="true" />
         </button>
         {chatHubMenuOpen ? (
@@ -9802,11 +9852,22 @@ function App() {
     ));
   };
 
-  const renderSessionSearchControls = () => {
+  const renderSessionSearchStatusLine = () => {
+    if (!sessionSearchActive || sessionSearchStatusParts.length === 0) {
+      return null;
+    }
+    return (
+      <div className="chat-header-search-status">
+        {sessionSearchStatusParts.join(' · ')}
+      </div>
+    );
+  };
+
+  const renderChatHeaderSearchControls = (mobile: boolean) => {
     const hasActiveSearch = !!activeSessionSearchId;
     if (!sessionSearchOpen && !hasActiveSearch) {
       return (
-        <div className="session-search-control compact">
+        <div className={`chat-header-search-control compact${mobile ? ' mobile' : ''}`}>
           <button
             type="button"
             className="session-search-icon-btn"
@@ -9820,46 +9881,50 @@ function App() {
       );
     }
     return (
-      <form
-        className={`session-search-control open${hasActiveSearch ? ' active' : ''}`}
-        onSubmit={event => {
-          event.preventDefault();
-          startSessionSearch().catch(() => undefined);
-        }}
-      >
-        <span className="codicon codicon-search session-search-leading-icon" aria-hidden="true" />
-        <input
-          className="session-search-input"
-          value={sessionSearchInput}
-          onChange={event => setSessionSearchInput(event.target.value)}
-          placeholder="Search sessions"
-          aria-label="Search sessions"
-        />
-        <button
-          type="submit"
-          className="session-search-icon-btn"
-          title="Start search"
-          aria-label="Start search"
-        >
-          <span className="codicon codicon-check" />
-        </button>
-        <button
-          type="button"
-          className="session-search-icon-btn"
-          title="Close search"
-          aria-label="Close search"
-          onClick={() => {
-            if (hasActiveSearch) {
-              exitSessionSearch().catch(() => undefined);
-            } else {
-              setSessionSearchOpen(false);
-              setSessionSearchInput('');
-            }
+      <div className={`chat-header-search-wrap${mobile ? ' mobile' : ''}`}>
+        <form
+          className={`chat-header-search-control open${hasActiveSearch ? ' active' : ''}${mobile ? ' mobile' : ''}`}
+          onSubmit={event => {
+            event.preventDefault();
+            startSessionSearch().catch(() => undefined);
           }}
         >
-          <span className="codicon codicon-close" />
-        </button>
-      </form>
+          <span className="codicon codicon-search session-search-leading-icon" aria-hidden="true" />
+          <input
+            ref={sessionSearchInputRef}
+            className="session-search-input"
+            value={sessionSearchInput}
+            onChange={event => setSessionSearchInput(event.target.value)}
+            placeholder="Search sessions"
+            aria-label="Search sessions"
+          />
+          <button
+            type="submit"
+            className="session-search-icon-btn"
+            title="Start search"
+            aria-label="Start search"
+          >
+            <span className="codicon codicon-check" />
+          </button>
+          <button
+            type="button"
+            className="session-search-icon-btn"
+            title="Close search"
+            aria-label="Close search"
+            onClick={() => {
+              if (hasActiveSearch) {
+                exitSessionSearch().catch(() => undefined);
+              } else {
+                setSessionSearchOpen(false);
+                setSessionSearchInput('');
+              }
+            }}
+          >
+            <span className="codicon codicon-close" />
+          </button>
+        </form>
+        {renderSessionSearchStatusLine()}
+      </div>
     );
   };
 
@@ -9921,11 +9986,6 @@ function App() {
       .filter((item): item is string => item !== null);
     const body = (
       <>
-        <div className="session-search-status">
-          {sessionSearchAllDone
-            ? `${sessionSearchResultCount} result${sessionSearchResultCount === 1 ? '' : 's'}`
-            : `Searching... ${sessionSearchResultCount} result${sessionSearchResultCount === 1 ? '' : 's'}`}
-        </div>
         {sessionSearchSections.map(section => {
           const projectHub = section.project.hubId || 'local';
           const projectHubVariant = tagVariantClass('wide-project-hub', section.project.hubId || 'local');
@@ -12498,57 +12558,61 @@ function App() {
   const renderMobileChatSessionSheet = () => {
     return (
       <>
-        <div className="mobile-chat-drawer-header">
-          <div className="mobile-chat-toolbar" aria-label="Chat tools">
-            <button
-              type="button"
-              className={`mobile-chat-toolbar-icon drawer-settings-icon-btn${sidebarSettingsOpen && !settingsDetailView ? ' active' : ''}`}
-              onClick={() => {
-                setProjectMenuOpen(false);
-                setSettingsDetailView(null);
-                setSidebarSettingsOpen(true);
-              }}
-              title="Open settings"
-              aria-label="Open settings"
-            >
-              <span className="codicon codicon-settings-gear" />
-            </button>
-            <button
-              type="button"
-              className={`mobile-chat-toolbar-icon drawer-settings-icon-btn${sidebarSettingsOpen && settingsDetailView === 'update' ? ' active' : ''}`}
-              onClick={() => {
-                setProjectMenuOpen(false);
-                openSettingsDetail('update');
-              }}
-              title="Update"
-              aria-label="Update"
-            >
-              <span className="codicon codicon-cloud-download" />
-            </button>
-            <button
-              type="button"
-              className={`mobile-chat-toolbar-icon drawer-settings-icon-btn${sidebarSettingsOpen && settingsDetailView === 'portRelay' ? ' active' : ''}`}
-              onClick={() => {
-                setProjectMenuOpen(false);
-                openSettingsDetail('portRelay');
-              }}
-              title="Port Relay"
-              aria-label="Port Relay"
-            >
-              <span className="codicon codicon-radio-tower" />
-            </button>
-            <button
-              type="button"
-              className={`mobile-chat-toolbar-icon header-btn refresh-btn drawer-project-refresh${hasPendingProjectUpdates && !mobileProjectSessionsRefreshing && !reconnecting ? ' has-update-badge' : ''}`}
-              onClick={() => refreshMobileChatProjectSessions().catch(() => undefined)}
-              title={reconnecting ? 'Reconnecting...' : 'Refresh chats'}
-              disabled={mobileProjectSessionsRefreshing || reconnecting}
-            >
-              {mobileProjectSessionsRefreshing ? '...' : refreshButtonContent}
-            </button>
-          </div>
-          {renderSessionSearchControls()}
-          {renderChatHubSummary()}
+        <div className={`mobile-chat-drawer-header${sessionSearchHeaderExpanded ? ' search-open' : ''}`}>
+          {sessionSearchHeaderExpanded ? renderChatHeaderSearchControls(true) : (
+            <>
+              <div className="mobile-chat-toolbar" aria-label="Chat tools">
+                <button
+                  type="button"
+                  className={`mobile-chat-toolbar-icon drawer-settings-icon-btn${sidebarSettingsOpen && !settingsDetailView ? ' active' : ''}`}
+                  onClick={() => {
+                    setProjectMenuOpen(false);
+                    setSettingsDetailView(null);
+                    setSidebarSettingsOpen(true);
+                  }}
+                  title="Open settings"
+                  aria-label="Open settings"
+                >
+                  <span className="codicon codicon-settings-gear" />
+                </button>
+                <button
+                  type="button"
+                  className={`mobile-chat-toolbar-icon drawer-settings-icon-btn${sidebarSettingsOpen && settingsDetailView === 'update' ? ' active' : ''}`}
+                  onClick={() => {
+                    setProjectMenuOpen(false);
+                    openSettingsDetail('update');
+                  }}
+                  title="Update"
+                  aria-label="Update"
+                >
+                  <span className="codicon codicon-cloud-download" />
+                </button>
+                <button
+                  type="button"
+                  className={`mobile-chat-toolbar-icon drawer-settings-icon-btn${sidebarSettingsOpen && settingsDetailView === 'portRelay' ? ' active' : ''}`}
+                  onClick={() => {
+                    setProjectMenuOpen(false);
+                    openSettingsDetail('portRelay');
+                  }}
+                  title="Port Relay"
+                  aria-label="Port Relay"
+                >
+                  <span className="codicon codicon-radio-tower" />
+                </button>
+                <button
+                  type="button"
+                  className={`mobile-chat-toolbar-icon header-btn refresh-btn drawer-project-refresh${hasPendingProjectUpdates && !mobileProjectSessionsRefreshing && !reconnecting ? ' has-update-badge' : ''}`}
+                  onClick={() => refreshMobileChatProjectSessions().catch(() => undefined)}
+                  title={reconnecting ? 'Reconnecting...' : 'Refresh chats'}
+                  disabled={mobileProjectSessionsRefreshing || reconnecting}
+                >
+                  {mobileProjectSessionsRefreshing ? '...' : refreshButtonContent}
+                </button>
+              </div>
+              {renderChatHeaderSearchControls(true)}
+              {renderChatHubSummary()}
+            </>
+          )}
         </div>
         {sessionSearchActive ? renderSessionSearchResults(true) : (
         <div className="mobile-project-session-nav">
@@ -12865,7 +12929,6 @@ function App() {
   const renderWideProjectSessionNav = () => {
     return (
       <div className="wide-project-session-nav">
-        {renderSessionSearchControls()}
         {projects.length === 0 ? (
           <div className="chat-empty-hint">No projects available.</div>
         ) : null}
@@ -13158,6 +13221,7 @@ function App() {
       : tab === 'file'
       ? 'EXPLORER'
       : 'SOURCE CONTROL';
+    const chatSidebarTitleSearchOpen = tab === 'chat' && !sidebarSettingsOpen && sessionSearchHeaderExpanded;
     const wideSidebarMain = sidebarSettingsOpen
       ? renderSettingsContent(false)
       : tab === 'chat' ? renderWideProjectSessionNav() : renderSidebarMain(false);
@@ -13210,9 +13274,18 @@ function App() {
           </div>
         ) : null}
         {isWide ? (
-          <div className="sidebar-title-row">
-            <span className="sidebar-title-text">{wideSidebarTitle}</span>
-            {tab === 'chat' && !sidebarSettingsOpen ? renderChatHubSummary() : null}
+          <div className={`sidebar-title-row${chatSidebarTitleSearchOpen ? ' search-open' : ''}`}>
+            {chatSidebarTitleSearchOpen ? renderChatHeaderSearchControls(false) : (
+              <>
+                <span className="sidebar-title-text">{wideSidebarTitle}</span>
+                {tab === 'chat' && !sidebarSettingsOpen ? (
+                  <>
+                    {renderChatHubSummary()}
+                    {renderChatHeaderSearchControls(false)}
+                  </>
+                ) : null}
+              </>
+            )}
           </div>
         ) : null}
         <div className="sidebar-scroll">
