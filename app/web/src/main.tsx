@@ -12611,6 +12611,17 @@ function App() {
           </span>
           <span className="codicon codicon-chevron-right" />
         </button>
+        <button
+          type="button"
+          className="settings-row settings-danger-row"
+          onClick={handleRegistryDebugLogout}
+        >
+          <span>
+            <span className="codicon codicon-sign-out settings-row-icon" aria-hidden="true" />
+            Logout
+          </span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
         </>
         ), 'bug')}
       </div>
@@ -15556,7 +15567,6 @@ function App() {
       includeMultiSessionRecords={registryDebugIncludeMultiSessionRecords}
       onIncludeMultiSessionRecordsChange={setRegistryDebugIncludeMultiSessionRecords}
       onClear={() => registryDebugStore.clear()}
-      onLogout={handleRegistryDebugLogout}
       onClose={() => setRegistryDebugPanelOpen(false)}
     />
   ) : null;

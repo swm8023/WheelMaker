@@ -48,7 +48,6 @@ export type RegistryDebugPanelProps = {
   includeMultiSessionRecords: boolean;
   onIncludeMultiSessionRecordsChange: (include: boolean) => void;
   onClear: () => void;
-  onLogout: () => void;
   onClose: () => void;
 };
 
@@ -156,7 +155,6 @@ export function RegistryDebugPanel({
   includeMultiSessionRecords,
   onIncludeMultiSessionRecordsChange,
   onClear,
-  onLogout,
   onClose,
 }: RegistryDebugPanelProps) {
   const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
@@ -386,9 +384,6 @@ export function RegistryDebugPanel({
           </button>
           <button type="button" className="registry-debug-action" onClick={onClear}>
             Clear
-          </button>
-          <button type="button" className="registry-debug-action danger" onClick={onLogout}>
-            Logout
           </button>
           <button type="button" className="registry-debug-icon-action" onClick={onClose} aria-label="Close debug panel" title="Close">
             <span className="codicon codicon-close" />

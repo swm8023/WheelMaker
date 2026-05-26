@@ -36,6 +36,15 @@ describe('web registry debug settings', () => {
     expect(mainTsx).toContain('onChange={event => setRegistryDebug(event.target.checked)}');
     expect(mainTsx).toContain('disabled={!registryDebug}');
     expect(mainTsx).toContain('setRegistryDebugPanelOpen(true)');
+    const debugSectionStart = mainTsx.indexOf("renderSettingsSection('Debug'");
+    const debugSectionEnd = mainTsx.indexOf("), 'bug')", debugSectionStart);
+    const debugSection = mainTsx.slice(debugSectionStart, debugSectionEnd);
+    expect(debugSection).toContain('Logout');
+    expect(debugSection).toContain('handleRegistryDebugLogout');
+    expect(debugSection).toContain('settings-danger-row');
+    expect(mainTsx).toContain('workspaceStore.clearLocalToken();');
+    expect(mainTsx).toContain("setToken('');");
+    expect(mainTsx).toContain('supervisorManagedCloseRef.current = true;');
     expect(mainTsx).not.toContain('registryDebugRecordsJson');
   });
 

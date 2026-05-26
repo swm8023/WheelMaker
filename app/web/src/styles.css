@@ -3105,15 +3105,6 @@ body,
   background: var(--hover);
 }
 
-.registry-debug-action.danger {
-  color: var(--danger);
-}
-
-.registry-debug-action.danger:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-  background: color-mix(in srgb, var(--danger) 14%, var(--panel-3));
-}
-
 .registry-debug-action:disabled,
 .registry-debug-icon-action:disabled {
   opacity: 0.52;
