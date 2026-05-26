@@ -574,17 +574,13 @@ func attachmentView(sidecar attachmentSidecar) map[string]any {
 }
 
 func attachmentContentBlock(sidecar attachmentSidecar) acp.ContentBlock {
-	block := acp.ContentBlock{
+	return acp.ContentBlock{
 		Type:     acp.ContentBlockTypeResourceLink,
 		URI:      sidecar.URI,
 		Name:     sidecar.Name,
 		MimeType: sidecar.MimeType,
 		Size:     int(sidecar.Size),
 	}
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(sidecar.MimeType)), "image/") {
-		block.Type = acp.ContentBlockTypeImage
-	}
-	return block
 }
 
 func attachmentDisplayName(name string) string {

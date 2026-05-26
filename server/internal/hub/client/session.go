@@ -1079,7 +1079,13 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 		return
 	}
 
-	updates, err := s.promptStream(ctx, blocks)
+	promptBlocks, err := s.promptBlocksForAgent(blocks)
+	if err != nil {
+		s.recordPromptFailed(fmt.Sprintf("Prompt error: %v", err))
+		return
+	}
+
+	updates, err := s.promptStream(ctx, promptBlocks)
 	if err != nil {
 		if isAgentExitError(err) && !s.agentProcessAlive() {
 			_ = s.resetDeadConnection(err)

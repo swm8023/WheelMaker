@@ -635,6 +635,14 @@ func codexappPromptToInputWithArtifacts(projectName string, sessionID string, bl
 	if len(blocks) == 0 {
 		return nil, errors.New("codexapp prompt is empty")
 	}
+	fileMentions, err := codexappPromptFileMentions(blocks)
+	if err != nil {
+		return nil, err
+	}
+	if len(fileMentions) > 0 {
+		return codexappPromptToInputWithFileMentions(projectName, sessionID, blocks, fileMentions)
+	}
+
 	out := make([]appServerUserInput, 0, len(blocks))
 	for _, block := range blocks {
 		switch block.Type {
@@ -662,6 +670,94 @@ func codexappPromptToInputWithArtifacts(projectName string, sessionID string, bl
 		return nil, errors.New("codexapp prompt contains no text")
 	}
 	return out, nil
+}
+
+type codexappFileMention struct {
+	Name string
+	Path string
+}
+
+func codexappPromptFileMentions(blocks []protocol.ContentBlock) ([]codexappFileMention, error) {
+	var mentions []codexappFileMention
+	for _, block := range blocks {
+		if block.Type != protocol.ContentBlockTypeResourceLink {
+			continue
+		}
+		path, ok, err := codexappResourceLinkFilePath(block)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || codexappResourceLinkIsImage(block, path) {
+			continue
+		}
+		mentions = append(mentions, codexappFileMention{
+			Name: firstNonEmptyString(block.Name, block.Title, filepath.Base(path), path),
+			Path: path,
+		})
+	}
+	return mentions, nil
+}
+
+func codexappPromptToInputWithFileMentions(projectName string, sessionID string, blocks []protocol.ContentBlock, mentions []codexappFileMention) ([]appServerUserInput, error) {
+	var requestParts []string
+	mediaInputs := make([]appServerUserInput, 0, len(blocks))
+	for _, block := range blocks {
+		switch block.Type {
+		case protocol.ContentBlockTypeText:
+			if block.Text != "" {
+				requestParts = append(requestParts, block.Text)
+			}
+		case protocol.ContentBlockTypeResourceLink:
+			path, isFile, err := codexappResourceLinkFilePath(block)
+			if err != nil {
+				return nil, err
+			}
+			if isFile {
+				if codexappResourceLinkIsImage(block, path) {
+					mediaInputs = append(mediaInputs, appServerUserInput{Type: "localImage", Path: path})
+				}
+				continue
+			}
+			requestParts = append(requestParts, codexappResourceLinkText(block))
+		case protocol.ContentBlockTypeImage:
+			input, err := codexappImageToInput(projectName, sessionID, block)
+			if err != nil {
+				return nil, err
+			}
+			mediaInputs = append(mediaInputs, input)
+		default:
+			return nil, fmt.Errorf("codexapp phase 1 does not support prompt content type %q", block.Type)
+		}
+	}
+
+	out := []appServerUserInput{{
+		Type:         "text",
+		Text:         codexappFileMentionPromptText(mentions, strings.Join(requestParts, "\n")),
+		TextElements: []any{},
+	}}
+	out = append(out, mediaInputs...)
+	return out, nil
+}
+
+func codexappFileMentionPromptText(mentions []codexappFileMention, request string) string {
+	var b strings.Builder
+	b.WriteString("# Files mentioned by the user:\n\n")
+	for i, mention := range mentions {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString("## ")
+		b.WriteString(mention.Name)
+		b.WriteString(": ")
+		b.WriteString(mention.Path)
+		b.WriteByte('\n')
+	}
+	b.WriteString("\n## My request for Codex:")
+	if request != "" {
+		b.WriteByte('\n')
+		b.WriteString(request)
+	}
+	return b.String()
 }
 
 func codexappImageToInput(projectName string, sessionID string, block protocol.ContentBlock) (appServerUserInput, error) {
@@ -823,15 +919,50 @@ func codexappResourceLinkToInput(block protocol.ContentBlock) (appServerUserInpu
 	if uriText == "" {
 		return appServerUserInput{}, errors.New("codexapp resource_link requires uri")
 	}
-	parsed, err := url.Parse(uriText)
-	if err == nil && strings.EqualFold(parsed.Scheme, "file") {
-		path := codexappFileURIPath(parsed)
-		if strings.TrimSpace(path) == "" {
-			return appServerUserInput{}, fmt.Errorf("codexapp resource_link file uri has no path: %q", block.URI)
+	path, isFile, err := codexappResourceLinkFilePath(block)
+	if err != nil {
+		return appServerUserInput{}, err
+	}
+	if isFile {
+		if codexappResourceLinkIsImage(block, path) {
+			return appServerUserInput{Type: "localImage", Path: path}, nil
 		}
-		return appServerUserInput{Type: "mention", Name: firstNonEmptyString(block.Name, block.Title, path), Path: path}, nil
+		mention := codexappFileMention{Name: firstNonEmptyString(block.Name, block.Title, filepath.Base(path), path), Path: path}
+		return appServerUserInput{Type: "text", Text: codexappFileMentionPromptText([]codexappFileMention{mention}, ""), TextElements: []any{}}, nil
 	}
 	return appServerUserInput{Type: "text", Text: codexappResourceLinkText(block), TextElements: []any{}}, nil
+}
+
+func codexappResourceLinkFilePath(block protocol.ContentBlock) (string, bool, error) {
+	uriText := strings.TrimSpace(block.URI)
+	if uriText == "" {
+		return "", false, nil
+	}
+	parsed, err := url.Parse(uriText)
+	if err != nil {
+		return "", false, fmt.Errorf("codexapp resource_link uri is invalid: %q", block.URI)
+	}
+	if !strings.EqualFold(parsed.Scheme, "file") {
+		return "", false, nil
+	}
+	path := codexappFileURIPath(parsed)
+	if strings.TrimSpace(path) == "" {
+		return "", false, fmt.Errorf("codexapp resource_link file uri has no path: %q", block.URI)
+	}
+	return path, true, nil
+}
+
+func codexappResourceLinkIsImage(block protocol.ContentBlock, path string) bool {
+	if block.MimeType != "" {
+		_, ok := codexappImageExtension(block.MimeType)
+		return ok
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png", ".jpg", ".jpeg", ".webp", ".gif":
+		return true
+	default:
+		return false
+	}
 }
 
 func codexappFileURIPath(parsed *url.URL) string {

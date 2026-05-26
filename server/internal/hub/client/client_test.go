@@ -7321,18 +7321,61 @@ func TestSessionAttachmentUploadCompletesResourceLinkBlock(t *testing.T) {
 	}
 }
 
-func TestSessionAttachmentUploadCompletesImageBlock(t *testing.T) {
+func TestSessionAttachmentUploadCompletesImageAsResourceLinkBlock(t *testing.T) {
 	c := newAttachmentTestClient(t, "sess-attach-image")
 	block := uploadSessionAttachmentForTest(t, c, "sess-attach-image", "pixel.png", "image/png", []byte("hello"))
 
-	if block.Type != acp.ContentBlockTypeImage {
-		t.Fatalf("block.Type=%q, want image", block.Type)
+	if block.Type != acp.ContentBlockTypeResourceLink {
+		t.Fatalf("block.Type=%q, want resource_link", block.Type)
 	}
 	if block.Data != "" {
 		t.Fatalf("block.Data=%q, want uploaded image to use file uri", block.Data)
 	}
 	if block.URI == "" || block.MimeType != "image/png" || block.Name != "pixel.png" {
 		t.Fatalf("block=%#v, want image uri metadata", block)
+	}
+}
+
+func TestSessionSendConvertsUploadedImageResourceLinkForImageCapableACPAgent(t *testing.T) {
+	mock := &mockSession{agentName: "claude", sessionID: "sess-send-image"}
+	c := newAttachmentTestClientWithMock(t, mock)
+	imageBytes := []byte("hello")
+	block := uploadSessionAttachmentForTest(t, c, "sess-send-image", "pixel.png", "image/png", imageBytes)
+
+	sess, err := c.resolveSession(testRouteKey)
+	if err != nil {
+		t.Fatalf("resolveSession: %v", err)
+	}
+	sess.mu.Lock()
+	sess.agentState.AgentCapabilities.PromptCapabilities = &acp.PromptCapabilities{Image: true}
+	sess.mu.Unlock()
+
+	payload := mustJSON(map[string]any{
+		"sessionId": "sess-send-image",
+		"blocks": []acp.ContentBlock{
+			{Type: acp.ContentBlockTypeText, Text: "describe"},
+			block,
+		},
+	})
+	resp, err := c.HandleSessionRequest(context.Background(), "session.send", "proj1", payload)
+	if err != nil {
+		t.Fatalf("session.send: %v", err)
+	}
+	body := responseMapForTest(t, resp)
+	if body["ok"] != true {
+		t.Fatalf("send response=%#v, want ok", body)
+	}
+
+	inst := sess.instance.(*testInjectedInstance)
+	if len(inst.lastPrompt) != 2 {
+		t.Fatalf("lastPrompt len=%d, want 2: %#v", len(inst.lastPrompt), inst.lastPrompt)
+	}
+	got := inst.lastPrompt[1]
+	if got.Type != acp.ContentBlockTypeImage || got.MimeType != "image/png" || got.Data != base64ForTest(imageBytes) {
+		t.Fatalf("lastPrompt image block=%#v, want base64 image data", got)
+	}
+	if got.URI != "" || got.Name != "" {
+		t.Fatalf("lastPrompt image block=%#v, want no resource_link metadata in ACP image block", got)
 	}
 }
 

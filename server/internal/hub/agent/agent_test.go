@@ -1782,6 +1782,7 @@ func TestCodexAppLegacyAskPresetNormalizesToAuto(t *testing.T) {
 
 func TestCodexAppPromptMapsResourceLinks(t *testing.T) {
 	input, err := codexappPromptToInput([]protocol.ContentBlock{
+		{Type: protocol.ContentBlockTypeText, Text: "what is this file for"},
 		{
 			Type:     protocol.ContentBlockTypeResourceLink,
 			URI:      "file:///D:/Code/WheelMaker/docs/acp-protocol-full.zh-CN.md",
@@ -1795,6 +1796,12 @@ func TestCodexAppPromptMapsResourceLinks(t *testing.T) {
 			Title:       "Remote Spec",
 			Description: "External reference",
 		},
+		{
+			Type:     protocol.ContentBlockTypeResourceLink,
+			URI:      "file:///D:/tmp/pixel.png",
+			Name:     "pixel.png",
+			MimeType: "image/png",
+		},
 	})
 	if err != nil {
 		t.Fatalf("codexappPromptToInput: %v", err)
@@ -1802,14 +1809,49 @@ func TestCodexAppPromptMapsResourceLinks(t *testing.T) {
 	if len(input) != 2 {
 		t.Fatalf("input len=%d, want 2: %#v", len(input), input)
 	}
-	if input[0].Type != "mention" || input[0].Path != "D:/Code/WheelMaker/docs/acp-protocol-full.zh-CN.md" || input[0].Name != "acp-protocol-full.zh-CN.md" {
-		t.Fatalf("file resource link input=%#v, want mention path", input[0])
+	if input[0].Type != "text" {
+		t.Fatalf("file resource link input=%#v, want text wrapper", input[0])
 	}
-	if input[1].Type != "text" || !strings.Contains(input[1].Text, "https://example.com/spec") || !strings.Contains(input[1].Text, "Remote Spec") {
-		t.Fatalf("remote resource link input=%#v, want descriptive text", input[1])
+	if input[0].Path != "" || input[0].Name != "" {
+		t.Fatalf("file resource link input=%#v, want no mention fields", input[0])
 	}
-	if input[1].TextElements == nil || len(input[1].TextElements) != 0 {
-		t.Fatalf("remote resource link text_elements=%#v, want empty array", input[1].TextElements)
+	for _, want := range []string{
+		"# Files mentioned by the user:",
+		"## acp-protocol-full.zh-CN.md: D:/Code/WheelMaker/docs/acp-protocol-full.zh-CN.md",
+		"## My request for Codex:",
+		"what is this file for",
+		"https://example.com/spec",
+		"Remote Spec",
+	} {
+		if !strings.Contains(input[0].Text, want) {
+			t.Fatalf("file resource link text=%q, missing %q", input[0].Text, want)
+		}
+	}
+	if input[0].TextElements == nil || len(input[0].TextElements) != 0 {
+		t.Fatalf("file resource link text_elements=%#v, want empty array", input[0].TextElements)
+	}
+	if input[1].Type != "localImage" || filepath.ToSlash(input[1].Path) != "D:/tmp/pixel.png" {
+		t.Fatalf("image resource link input=%#v, want localImage", input[1])
+	}
+}
+
+func TestCodexAppPromptMapsImageResourceLinkToLocalImage(t *testing.T) {
+	input, err := codexappPromptToInput([]protocol.ContentBlock{
+		{
+			Type:     protocol.ContentBlockTypeResourceLink,
+			URI:      "file:///D:/tmp/pixel.png",
+			Name:     "pixel.png",
+			MimeType: "image/png",
+		},
+	})
+	if err != nil {
+		t.Fatalf("codexappPromptToInput: %v", err)
+	}
+	if len(input) != 1 {
+		t.Fatalf("input len=%d, want 1: %#v", len(input), input)
+	}
+	if input[0].Type != "localImage" || filepath.ToSlash(input[0].Path) != "D:/tmp/pixel.png" {
+		t.Fatalf("image resource link input=%#v, want localImage", input[0])
 	}
 }
 
