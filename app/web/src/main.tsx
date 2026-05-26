@@ -134,6 +134,7 @@ import {
   resolveMobileSettingsPopAction,
   type MobileSettingsHistoryDetail,
 } from './services/mobileSettingsHistory';
+import { installMobileViewportZoomGuard } from './services/mobileViewportZoomGuard';
 import { resolveLayoutMode } from './services/responsiveLayout';
 import {
   buildTokenStatCards,
@@ -15497,6 +15498,8 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
       .catch(() => undefined);
   });
 }
+
+installMobileViewportZoomGuard(document);
 
 workspaceStore.ready().then(() => {
   createRoot(document.getElementById('root')!).render(<App />);
