@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review - WheelMaker operation protocols</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      body { background: #f8fafc; }
+      .seam { border-style: dashed; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1f2937); color: white; }
+      .leak { color: #dc2626; }
+      .code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+      .mass { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; align-items: end; min-height: 170px; }
+      .mass-col { display: grid; gap: .35rem; }
+      .mass-iface { background: #fee2e2; border: 1px solid #fecaca; }
+      .mass-impl { background: #dbeafe; border: 1px solid #bfdbfe; }
+    </style>
+  </head>
+  <body class="text-slate-900 font-sans">
+    <main class="max-w-6xl mx-auto px-6 py-10 space-y-10">
+      <header class="space-y-5">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500">WheelMaker - 2026-05-26</p>
+            <h1 class="text-3xl font-semibold tracking-normal">Operation protocol architecture review</h1>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            <span class="rounded border bg-white px-3 py-2">solid box = module</span>
+            <span class="rounded border seam bg-white px-3 py-2">dashed line = seam</span>
+            <span class="rounded border border-red-200 bg-red-50 px-3 py-2 text-red-700">red = leakage</span>
+            <span class="rounded deep px-3 py-2">dark = deep module</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="rounded-lg border border-slate-200 bg-white p-6 space-y-5">
+        <h2 class="text-xl font-semibold">Feature Inventory</h2>
+        <div class="grid md:grid-cols-2 gap-4 text-sm">
+          <div class="rounded border border-slate-200 p-4">
+            <h3 class="font-semibold">Project-scoped operations</h3>
+            <ul class="mt-2 space-y-1 list-disc pl-5">
+              <li><span class="code">session.search</span>: start / query / cancel, project fan-out, poll with backoff.</li>
+              <li><span class="code">session.attachment.*</span>: start / chunk / finish / cancel / delete, chunk ordering, upload expiry.</li>
+              <li><span class="code">session.read</span> read repair: one in-flight repair plus pending follow-up.</li>
+              <li><span class="code">fs.search</span> / <span class="code">fs.grep</span>: synchronous search path today.</li>
+            </ul>
+          </div>
+          <div class="rounded border border-slate-200 p-4">
+            <h3 class="font-semibold">Hub-scoped operations</h3>
+            <ul class="mt-2 space-y-1 list-disc pl-5">
+              <li><span class="code">cmd.npm</span>: scan, accepted install/uninstall, scan polling, one running operation.</li>
+              <li><span class="code">cmd.skills</span>: scan/list plus accepted install/uninstall/update, scan polling, one running operation.</li>
+              <li><span class="code">cmd.update</span>: query / update-publish signal, accepted without operation snapshot.</li>
+              <li><span class="code">cmd.token</span>: synchronous scan, no operation snapshot.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="grid md:grid-cols-5 gap-3 text-xs">
+          <div class="rounded bg-slate-50 border p-3"><b>scope key</b><br/>projectId, hubId, sessionId</div>
+          <div class="rounded bg-slate-50 border p-3"><b>lifecycle</b><br/>start, poll, cancel, finish</div>
+          <div class="rounded bg-slate-50 border p-3"><b>timeouts</b><br/>15s, 30s, 60s, TTL</div>
+          <div class="rounded bg-slate-50 border p-3"><b>serial policy</b><br/>one hub op, one upload chain</div>
+          <div class="rounded bg-slate-50 border p-3"><b>errors</b><br/>protocol error vs ok:false</div>
+        </div>
+      </section>
+
+      <section id="candidates" class="space-y-8">
+        <article id="candidate-method-registry" class="rounded-lg border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold mr-auto">1. Deepen the Registry Method Registry</h2>
+            <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-semibold">Strong</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">in-process</span>
+          </div>
+          <div class="text-sm code text-slate-700 grid md:grid-cols-2 gap-1">
+            <span>server/internal/registry/server.go:296</span>
+            <span>server/internal/hub/reporter.go:431</span>
+            <span>server/internal/hub/client/client.go:550</span>
+            <span>docs/registry-protocol.md:1506</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before</p>
+              <pre class="mermaid">
+flowchart TD
+  A[Registry allowlist] --> B[Registry route switch]
+  B --> C[Reporter method switch]
+  C --> D[Client session switch]
+  E[docs/registry-protocol.md] -. stale .-> C
+  C -. session.search missing .-> F[unsupported method]
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class E,F leak;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">After</p>
+              <pre class="mermaid">
+flowchart TD
+  M[Deep method registry module] --> A[role allowlist]
+  M --> B[route target]
+  M --> C[timeout policy]
+  M --> D[Reporter dispatch]
+  M --> E[contract tests]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+  class M deep;
+              </pre>
+            </div>
+          </div>
+          <p><b>Problem.</b> The interface for a new method leaks across several switches and docs, so adding <span class="code">session.search</span> succeeded in one place and failed in another.</p>
+          <p><b>Solution.</b> Put method role, scope, timeout, and dispatch facts behind one deep method registry module.</p>
+          <ul class="grid md:grid-cols-3 gap-2 text-sm">
+            <li class="rounded bg-slate-50 p-2">locality: one method source</li>
+            <li class="rounded bg-slate-50 p-2">leverage: one test surface</li>
+            <li class="rounded bg-slate-50 p-2">interface stops leaking</li>
+          </ul>
+          <div class="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Docs conflict: <span class="code">cmd.skills</span> is async in ADR/code, but <span class="code">docs/registry-protocol.md</span> still says synchronous.</div>
+        </article>
+
+        <article id="candidate-workspace-operation-runtime" class="rounded-lg border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold mr-auto">2. Deepen the Workspace Operation Runtime</h2>
+            <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-semibold">Strong</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">local-substitutable</span>
+          </div>
+          <div class="text-sm code text-slate-700 grid md:grid-cols-2 gap-1">
+            <span>app/web/src/main.tsx:4217</span>
+            <span>app/web/src/main.tsx:8920</span>
+            <span>app/web/src/main.tsx:9016</span>
+            <span>app/web/src/main.tsx:3838</span>
+            <span>app/web/src/chat/chatReadRepair.ts:1</span>
+            <span>app/web/src/chat/chatDurablePersist.ts:1</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before</p>
+              <div class="mass">
+                <div class="mass-col">
+                  <div class="mass-iface rounded p-2 h-28">session search<br/>timer + errors + done map</div>
+                  <div class="mass-impl rounded p-2 h-20">query loop</div>
+                </div>
+                <div class="mass-col">
+                  <div class="mass-iface rounded p-2 h-28">npm / skills / upload<br/>timers + pending keys + queues</div>
+                  <div class="mass-impl rounded p-2 h-20">poll and retry code</div>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">After</p>
+              <div class="rounded-lg deep p-5 h-44 flex flex-col justify-between">
+                <div>
+                  <p class="text-xs uppercase tracking-wider text-slate-300">deep module</p>
+                  <p class="text-lg font-semibold">Workspace Operation Runtime</p>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-xs text-slate-200">
+                  <span class="rounded bg-white/10 p-2">poll</span>
+                  <span class="rounded bg-white/10 p-2">timeout</span>
+                  <span class="rounded bg-white/10 p-2">serial</span>
+                  <span class="rounded bg-white/10 p-2">cancel</span>
+                  <span class="rounded bg-white/10 p-2">retry</span>
+                  <span class="rounded bg-white/10 p-2">snapshot</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p><b>Problem.</b> The current App interface to long operations is shallow: every view knows timer cleanup, pending flags, polling cadence, and stale response guards.</p>
+          <p><b>Solution.</b> Move operation state, timeout, polling, serial policy, and cancellation into one Workspace Operation Runtime module, with domain adapters for search, uploads, npm, skills, and update.</p>
+          <ul class="grid md:grid-cols-3 gap-2 text-sm">
+            <li class="rounded bg-slate-50 p-2">locality: timers concentrate</li>
+            <li class="rounded bg-slate-50 p-2">leverage: views shrink</li>
+            <li class="rounded bg-slate-50 p-2">interface absorbs races</li>
+          </ul>
+        </article>
+
+        <article id="candidate-hub-operation-runtime" class="rounded-lg border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold mr-auto">3. Deepen the Hub Operation Runtime</h2>
+            <span class="rounded-full bg-amber-100 text-amber-800 px-3 py-1 text-xs font-semibold">Worth exploring</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">ports & adapters</span>
+          </div>
+          <div class="text-sm code text-slate-700 grid md:grid-cols-2 gap-1">
+            <span>server/internal/hub/npm_command.go:59</span>
+            <span>server/internal/hub/skills_command.go:84</span>
+            <span>server/internal/hub/client/session_search.go:69</span>
+            <span>server/internal/hub/client/session_attachments.go:32</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before</p>
+              <pre class="mermaid">
+flowchart LR
+  A[NPMCommand] --> A1[operation + mutex]
+  B[SkillsCommand] --> B1[operation + mutex]
+  C[sessionSearchManager] --> C1[tasks + TTL]
+  D[attachmentManager] --> D1[uploads + TTL]
+  A1 -. duplicated state rules .-> B1
+  C1 -. duplicated cleanup shape .-> D1
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class A1,B1,C1,D1 leak;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">After</p>
+              <pre class="mermaid">
+flowchart LR
+  R[Deep Hub Operation Runtime] --> P[policy: singleton or keyed]
+  R --> T[TTL and capacity]
+  R --> S[snapshot clone]
+  R --> C[cancel/finish]
+  N[npm adapter] --> R
+  K[skills adapter] --> R
+  Q[search adapter] --> R
+  U[upload adapter] --> R
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+  class R deep;
+              </pre>
+            </div>
+          </div>
+          <p><b>Problem.</b> Server operation modules repeat the same implementation concerns while exposing slightly different operation snapshots and error modes.</p>
+          <p><b>Solution.</b> Put task ownership, TTL cleanup, single-run/keyed-run policy, and snapshot cloning behind a deep Hub Operation Runtime module.</p>
+          <ul class="grid md:grid-cols-3 gap-2 text-sm">
+            <li class="rounded bg-slate-50 p-2">locality: concurrency rules</li>
+            <li class="rounded bg-slate-50 p-2">leverage: four adapters</li>
+            <li class="rounded bg-slate-50 p-2">tests hit one interface</li>
+          </ul>
+        </article>
+
+        <article id="candidate-operation-contract" class="rounded-lg border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold mr-auto">4. Deepen the Operation Contract</h2>
+            <span class="rounded-full bg-amber-100 text-amber-800 px-3 py-1 text-xs font-semibold">Worth exploring</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">mock</span>
+          </div>
+          <div class="text-sm code text-slate-700 grid md:grid-cols-2 gap-1">
+            <span>app/web/src/types/registry.ts:313</span>
+            <span>app/web/src/types/registry.ts:410</span>
+            <span>server/internal/hub/update_command.go:117</span>
+            <span>docs/registry-protocol.md:1423</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before</p>
+              <pre class="mermaid">
+flowchart TD
+  A[cmd.npm operation] --> X[running/status/errorSummary]
+  B[cmd.skills operation] --> Y[running/status/errorSummary]
+  C[cmd.update signal] --> Z[accepted/status/pendingSignal]
+  D[session.search] --> W[done/results/errors]
+  X -. shape drift .-> Y
+  Z -. no operation snapshot .-> X
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class X,Y,Z,W leak;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">After</p>
+              <div class="relative rounded-lg deep p-5 h-48">
+                <p class="text-xs uppercase tracking-wider text-slate-300">deep contract module</p>
+                <p class="text-lg font-semibold">Operation Snapshot</p>
+                <div class="absolute left-5 right-5 bottom-5 grid grid-cols-4 gap-2 text-xs text-slate-200">
+                  <span class="rounded bg-white/10 p-2">accepted</span>
+                  <span class="rounded bg-white/10 p-2">running</span>
+                  <span class="rounded bg-white/10 p-2">terminal</span>
+                  <span class="rounded bg-white/10 p-2">summary</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p><b>Problem.</b> Callers must learn a different interface for each long operation even when the implementation concept is the same.</p>
+          <p><b>Solution.</b> Define one operation contract vocabulary and let existing method families adapt into it without flattening their domain payloads.</p>
+          <ul class="grid md:grid-cols-3 gap-2 text-sm">
+            <li class="rounded bg-slate-50 p-2">leverage: one UI contract</li>
+            <li class="rounded bg-slate-50 p-2">locality: status labels</li>
+            <li class="rounded bg-slate-50 p-2">interface gets smaller</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="rounded-lg border border-slate-300 bg-slate-900 p-6 text-white">
+        <h2 class="text-xl font-semibold">Top recommendation</h2>
+        <p class="mt-2">Start with <a class="underline" href="#candidate-method-registry">the Registry Method Registry</a>: it has an immediate correctness bug, high locality, and gives the operation runtime a stable seam to build on.</p>
+      </section>
+    </main>
+  </body>
+</html>
