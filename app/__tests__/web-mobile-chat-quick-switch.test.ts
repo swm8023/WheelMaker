@@ -26,51 +26,42 @@ function session(
 }
 
 describe('mobile chat quick switch', () => {
-  test('selects up to five known sessions with unread and running sessions first', () => {
+  test('selects eight sessions with unread and running first, then newest updates', () => {
     const sections = buildMobileChatQuickSwitchSections({
       projects: [project('p1', 'Alpha'), project('p2', 'Beta'), project('p3', 'Gamma')],
       sessionsByProjectId: {
         p1: [
-          session('p1-recent-read', '2026-05-05T00:00:00.000Z'),
-          session('p1-unread', '2026-05-04T00:00:00.000Z', {unreadCount: 2}),
-          session('p1-old-read', '2026-05-03T00:00:00.000Z'),
+          session('p1-old-a', '2026-01-01T00:00:00.000Z'),
+          session('p1-old-b', '2026-01-02T00:00:00.000Z'),
+          session('p1-mid', '2026-05-04T00:00:00.000Z'),
         ],
         p2: [
-          session('p2-running', '2026-05-02T00:00:00.000Z', {running: true}),
-          session('p2-read', '2026-05-01T00:00:00.000Z'),
+          session('p2-newest', '2026-05-08T00:00:00.000Z'),
+          session('p2-running-old', '2026-01-03T00:00:00.000Z', {running: true}),
+          session('p2-new', '2026-05-07T00:00:00.000Z'),
         ],
         p3: [
-          session('p3-unread', '2026-04-30T00:00:00.000Z', {unreadCount: 1}),
-          session('p3-read', '2026-04-29T00:00:00.000Z'),
+          session('p3-unread-old', '2026-01-04T00:00:00.000Z', {unreadCount: 1}),
+          session('p3-recent', '2026-05-06T00:00:00.000Z'),
+          session('p3-newer', '2026-05-09T00:00:00.000Z'),
+          session('p3-old', '2026-01-05T00:00:00.000Z'),
         ],
       },
     });
 
-    expect(sections).toEqual([
-      {
-        projectId: 'p1',
-        projectName: 'Alpha',
-        sessions: [
-          session('p1-recent-read', '2026-05-05T00:00:00.000Z'),
-          session('p1-unread', '2026-05-04T00:00:00.000Z', {unreadCount: 2}),
-          session('p1-old-read', '2026-05-03T00:00:00.000Z'),
-        ],
-      },
-      {
-        projectId: 'p2',
-        projectName: 'Beta',
-        sessions: [
-          session('p2-running', '2026-05-02T00:00:00.000Z', {running: true}),
-        ],
-      },
-      {
-        projectId: 'p3',
-        projectName: 'Gamma',
-        sessions: [
-          session('p3-unread', '2026-04-30T00:00:00.000Z', {unreadCount: 1}),
-        ],
-      },
+    expect(sections.flatMap(section =>
+      section.sessions.map(item => `${section.projectId}:${item.sessionId}`),
+    )).toEqual([
+      'p3:p3-unread-old',
+      'p3:p3-newer',
+      'p3:p3-recent',
+      'p3:p3-old',
+      'p2:p2-running-old',
+      'p2:p2-newest',
+      'p2:p2-new',
+      'p1:p1-mid',
     ]);
+    expect(sections.flatMap(section => section.sessions)).toHaveLength(8);
   });
 
   test('returns an empty section list when no known sessions exist', () => {

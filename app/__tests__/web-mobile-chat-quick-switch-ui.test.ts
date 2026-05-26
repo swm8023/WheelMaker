@@ -12,6 +12,7 @@ describe('mobile chat quick switch UI source structure', () => {
     expect(mainTsx).toContain('const chatQuickSwitchTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);');
     expect(mainTsx).toContain('const mobileChatQuickSwitchSections = useMemo(');
     expect(mainTsx).toContain('buildMobileChatQuickSwitchSections({');
+    expect(mainTsx).toContain('limit: 8,');
     expect(mainTsx).toContain('const handleChatQuickSwitchPointerDown = useCallback(');
     expect(mainTsx).toContain('setChatQuickSwitchMenuOpen(true);');
     expect(mainTsx).toContain('const handleMobileChatQuickSwitchSelect = useCallback(async (targetProjectId: string, session: RegistryChatSession) => {');

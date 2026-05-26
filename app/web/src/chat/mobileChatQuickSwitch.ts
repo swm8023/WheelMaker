@@ -12,6 +12,16 @@ type BuildMobileChatQuickSwitchSectionsInput = {
   limit?: number;
 };
 
+type MobileChatQuickSwitchCandidate = {
+  key: string;
+  projectId: string;
+  projectName: string;
+  projectIndex: number;
+  session: RegistryChatSession;
+  sessionIndex: number;
+  priority: boolean;
+};
+
 function chatQuickSwitchSessionKey(projectId: string, sessionId: string): string {
   return `${projectId}\n${sessionId}`;
 }
@@ -20,21 +30,56 @@ function isPriorityQuickSwitchSession(session: RegistryChatSession): boolean {
   return (session.unreadCount ?? 0) > 0 || session.running === true;
 }
 
+function compareUpdatedAtDesc(left: string, right: string): number {
+  if (left === right) {
+    return 0;
+  }
+  if (!left) {
+    return 1;
+  }
+  if (!right) {
+    return -1;
+  }
+  return right.localeCompare(left);
+}
+
+function compareQuickSwitchCandidates(
+  left: MobileChatQuickSwitchCandidate,
+  right: MobileChatQuickSwitchCandidate,
+): number {
+  if (left.priority !== right.priority) {
+    return left.priority ? -1 : 1;
+  }
+  const updatedAtDiff = compareUpdatedAtDesc(
+    left.session.updatedAt || '',
+    right.session.updatedAt || '',
+  );
+  if (updatedAtDiff !== 0) {
+    return updatedAtDiff;
+  }
+  if (left.projectIndex !== right.projectIndex) {
+    return left.projectIndex - right.projectIndex;
+  }
+  return left.sessionIndex - right.sessionIndex;
+}
+
 export function buildMobileChatQuickSwitchSections({
   projects,
   sessionsByProjectId,
-  limit = 5,
+  limit = 8,
 }: BuildMobileChatQuickSwitchSectionsInput): MobileChatQuickSwitchSection[] {
-  const priorityKeys: string[] = [];
-  const fallbackKeys: string[] = [];
+  const candidates: MobileChatQuickSwitchCandidate[] = [];
   const seen = new Set<string>();
 
-  for (const project of projects) {
+  for (let projectIndex = 0; projectIndex < projects.length; projectIndex += 1) {
+    const project = projects[projectIndex];
     const projectId = project.projectId;
     if (!projectId) {
       continue;
     }
-    for (const session of sessionsByProjectId[projectId] ?? []) {
+    const sessions = sessionsByProjectId[projectId] ?? [];
+    for (let sessionIndex = 0; sessionIndex < sessions.length; sessionIndex += 1) {
+      const session = sessions[sessionIndex];
       if (!session.sessionId) {
         continue;
       }
@@ -43,35 +88,39 @@ export function buildMobileChatQuickSwitchSections({
         continue;
       }
       seen.add(key);
-      if (isPriorityQuickSwitchSession(session)) {
-        priorityKeys.push(key);
-      } else {
-        fallbackKeys.push(key);
-      }
+      candidates.push({
+        key,
+        projectId,
+        projectName: project.name || projectId,
+        projectIndex,
+        session,
+        sessionIndex,
+        priority: isPriorityQuickSwitchSession(session),
+      });
     }
   }
 
-  const selectedKeys = new Set([...priorityKeys, ...fallbackKeys].slice(0, Math.max(0, limit)));
-  if (selectedKeys.size === 0) {
+  const selected = candidates
+    .sort(compareQuickSwitchCandidates)
+    .slice(0, Math.max(0, limit));
+  if (selected.length === 0) {
     return [];
   }
 
   const sections: MobileChatQuickSwitchSection[] = [];
-  for (const project of projects) {
-    const projectId = project.projectId;
-    if (!projectId) {
-      continue;
+  const sectionsByProjectId = new Map<string, MobileChatQuickSwitchSection>();
+  for (const candidate of selected) {
+    let section = sectionsByProjectId.get(candidate.projectId);
+    if (!section) {
+      section = {
+        projectId: candidate.projectId,
+        projectName: candidate.projectName,
+        sessions: [],
+      };
+      sectionsByProjectId.set(candidate.projectId, section);
+      sections.push(section);
     }
-    const sessions = (sessionsByProjectId[projectId] ?? [])
-      .filter(session => session.sessionId && selectedKeys.has(chatQuickSwitchSessionKey(projectId, session.sessionId)));
-    if (sessions.length === 0) {
-      continue;
-    }
-    sections.push({
-      projectId,
-      projectName: project.name || projectId,
-      sessions,
-    });
+    section.sessions.push(candidate.session);
   }
   return sections;
 }
