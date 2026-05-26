@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -6852,6 +6853,134 @@ func newTestClient(t *testing.T, mock *mockSession) *Client {
 	return c
 }
 
+func newAttachmentTestClient(t *testing.T, sessionID string) *Client {
+	t.Helper()
+	return newAttachmentTestClientWithMock(t, &mockSession{agentName: "codex", sessionID: sessionID})
+}
+
+func newAttachmentTestClientWithMock(t *testing.T, mock *mockSession) *Client {
+	t.Helper()
+	c := newTestClient(t, mock)
+	c.SetSessionHistoryRoot(filepath.Join(t.TempDir(), "db", "session"))
+	return c
+}
+
+func uploadSessionAttachmentForTest(t *testing.T, c *Client, sessionID, name, mimeType string, data []byte) acp.ContentBlock {
+	t.Helper()
+	uploadID := startSessionAttachmentForTest(t, c, sessionID, name, mimeType, len(data))
+	chunkSessionAttachmentForTest(t, c, sessionID, uploadID, 0, base64ForTest(data))
+	sum := sha256.Sum256(data)
+	payload := fmt.Sprintf(`{"sessionId":%q,"uploadId":%q,"sha256":"%x"}`, sessionID, uploadID, sum)
+	resp, err := c.HandleSessionRequest(context.Background(), "session.attachment.finish", "proj1", json.RawMessage(payload))
+	if err != nil {
+		t.Fatalf("finish attachment: %v", err)
+	}
+	body := responseMapForTest(t, resp)
+	raw, err := json.Marshal(body["block"])
+	if err != nil {
+		t.Fatalf("marshal block response: %v", err)
+	}
+	var block acp.ContentBlock
+	if err := json.Unmarshal(raw, &block); err != nil {
+		t.Fatalf("unmarshal block response: %v", err)
+	}
+	return block
+}
+
+func startSessionAttachmentForTest(t *testing.T, c *Client, sessionID, name, mimeType string, size int) string {
+	t.Helper()
+	payload := fmt.Sprintf(`{"sessionId":%q,"name":%q,"mimeType":%q,"size":%d}`, sessionID, name, mimeType, size)
+	resp, err := c.HandleSessionRequest(context.Background(), "session.attachment.start", "proj1", json.RawMessage(payload))
+	if err != nil {
+		t.Fatalf("start attachment: %v", err)
+	}
+	body := responseMapForTest(t, resp)
+	uploadID, _ := body["uploadId"].(string)
+	if uploadID == "" {
+		t.Fatalf("start response=%#v, want uploadId", body)
+	}
+	return uploadID
+}
+
+func chunkSessionAttachmentForTest(t *testing.T, c *Client, sessionID, uploadID string, offset int, data string) {
+	t.Helper()
+	payload := fmt.Sprintf(`{"sessionId":%q,"uploadId":%q,"offset":%d,"data":%q}`, sessionID, uploadID, offset, data)
+	if _, err := c.HandleSessionRequest(context.Background(), "session.attachment.chunk", "proj1", json.RawMessage(payload)); err != nil {
+		t.Fatalf("chunk attachment: %v", err)
+	}
+}
+
+func responseMapForTest(t *testing.T, resp any) map[string]any {
+	t.Helper()
+	body, ok := resp.(map[string]any)
+	if !ok {
+		t.Fatalf("response type=%T, want map[string]any", resp)
+	}
+	return body
+}
+
+func attachmentFileURIPathForTest(t *testing.T, uri string) string {
+	t.Helper()
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		t.Fatalf("parse uri %q: %v", uri, err)
+	}
+	if !strings.EqualFold(parsed.Scheme, "file") {
+		t.Fatalf("uri=%q, want file scheme", uri)
+	}
+	path := parsed.Path
+	if parsed.Host != "" {
+		path = "//" + parsed.Host + path
+	}
+	if len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+		path = path[1:]
+	}
+	return filepath.FromSlash(path)
+}
+
+func attachmentSidecarPathForTest(path string) string {
+	return strings.TrimSuffix(path, filepath.Ext(path)) + ".json"
+}
+
+func blockAttachmentIDForTest(t *testing.T, block acp.ContentBlock) string {
+	t.Helper()
+	path := attachmentFileURIPathForTest(t, block.URI)
+	id := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	if id == "" {
+		t.Fatalf("block URI %q does not contain attachment id", block.URI)
+	}
+	return id
+}
+
+func base64ForTest(data []byte) string {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	var b strings.Builder
+	for i := 0; i < len(data); i += 3 {
+		remain := len(data) - i
+		a := data[i]
+		var c1, c2 byte
+		if remain > 1 {
+			c1 = data[i+1]
+		}
+		if remain > 2 {
+			c2 = data[i+2]
+		}
+		b.WriteByte(alphabet[a>>2])
+		b.WriteByte(alphabet[((a&0x03)<<4)|(c1>>4)])
+		if remain > 1 {
+			b.WriteByte(alphabet[((c1&0x0f)<<2)|(c2>>6)])
+		} else {
+			b.WriteByte('=')
+		}
+		if remain > 2 {
+			b.WriteByte(alphabet[c2&0x3f])
+		} else {
+			b.WriteByte('=')
+		}
+	}
+	return b.String()
+}
+
 func captureReplies(c *Client) *[]string {
 	router := NewTestCaptureRouter()
 	c.SetIMRouter(router)
@@ -7167,6 +7296,188 @@ func TestHandleSessionRequest_SessionSendSlashSkills(t *testing.T) {
 	}
 	if !strings.Contains(reply, "diagnose") {
 		t.Fatalf("skills reply missing skill name: %q", reply)
+	}
+}
+
+func TestSessionAttachmentUploadCompletesResourceLinkBlock(t *testing.T) {
+	c := newAttachmentTestClient(t, "sess-attach-file")
+	block := uploadSessionAttachmentForTest(t, c, "sess-attach-file", "report.pdf", "application/pdf", []byte("hello world"))
+
+	if block.Type != acp.ContentBlockTypeResourceLink {
+		t.Fatalf("block.Type=%q, want resource_link", block.Type)
+	}
+	if block.Name != "report.pdf" || block.MimeType != "application/pdf" || block.Size != 11 {
+		t.Fatalf("block=%#v, want report.pdf metadata", block)
+	}
+	uriPath := attachmentFileURIPathForTest(t, block.URI)
+	if !strings.Contains(filepath.ToSlash(uriPath), "/attachments/sha256-") || !strings.HasSuffix(uriPath, ".pdf") {
+		t.Fatalf("uri path=%q, want attachment sha path with pdf extension", uriPath)
+	}
+	raw, err := os.ReadFile(uriPath)
+	if err != nil {
+		t.Fatalf("read attachment: %v", err)
+	}
+	if string(raw) != "hello world" {
+		t.Fatalf("attachment content=%q, want hello world", raw)
+	}
+}
+
+func TestSessionAttachmentUploadCompletesImageBlock(t *testing.T) {
+	c := newAttachmentTestClient(t, "sess-attach-image")
+	block := uploadSessionAttachmentForTest(t, c, "sess-attach-image", "pixel.png", "image/png", []byte("hello"))
+
+	if block.Type != acp.ContentBlockTypeImage {
+		t.Fatalf("block.Type=%q, want image", block.Type)
+	}
+	if block.Data != "" {
+		t.Fatalf("block.Data=%q, want uploaded image to use file uri", block.Data)
+	}
+	if block.URI == "" || block.MimeType != "image/png" || block.Name != "pixel.png" {
+		t.Fatalf("block=%#v, want image uri metadata", block)
+	}
+}
+
+func TestSessionAttachmentUploadRejectsOffsetMismatch(t *testing.T) {
+	c := newAttachmentTestClient(t, "sess-attach-offset")
+	uploadID := startSessionAttachmentForTest(t, c, "sess-attach-offset", "note.txt", "text/plain", 2)
+	chunkSessionAttachmentForTest(t, c, "sess-attach-offset", uploadID, 0, "YQ==")
+
+	payload := fmt.Sprintf(`{"sessionId":"sess-attach-offset","uploadId":%q,"offset":0,"data":"Yg=="}`, uploadID)
+	_, err := c.HandleSessionRequest(context.Background(), "session.attachment.chunk", "proj1", json.RawMessage(payload))
+	if err == nil || !strings.Contains(err.Error(), "offset") {
+		t.Fatalf("second chunk err=%v, want offset rejection", err)
+	}
+}
+
+func TestSessionAttachmentUploadRejectsSHA256Mismatch(t *testing.T) {
+	c := newAttachmentTestClient(t, "sess-attach-sha")
+	uploadID := startSessionAttachmentForTest(t, c, "sess-attach-sha", "note.txt", "text/plain", 5)
+	chunkSessionAttachmentForTest(t, c, "sess-attach-sha", uploadID, 0, "aGVsbG8=")
+
+	payload := fmt.Sprintf(`{"sessionId":"sess-attach-sha","uploadId":%q,"sha256":"%064x"}`, uploadID, 0)
+	_, err := c.HandleSessionRequest(context.Background(), "session.attachment.finish", "proj1", json.RawMessage(payload))
+	if err == nil || !strings.Contains(err.Error(), "sha256") {
+		t.Fatalf("finish err=%v, want sha256 rejection", err)
+	}
+}
+
+func TestSessionAttachmentUploadExpiresIdlePartial(t *testing.T) {
+	oldNow := attachmentNow
+	base := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	attachmentNow = func() time.Time { return base }
+	t.Cleanup(func() { attachmentNow = oldNow })
+
+	c := newAttachmentTestClient(t, "sess-attach-expire")
+	uploadID := startSessionAttachmentForTest(t, c, "sess-attach-expire", "note.txt", "text/plain", 5)
+	chunkSessionAttachmentForTest(t, c, "sess-attach-expire", uploadID, 0, "aGVsbG8=")
+	startedPath := c.attachments.uploadPartPathForTest(uploadID)
+	if _, err := os.Stat(startedPath); err != nil {
+		t.Fatalf("partial stat before expiry: %v", err)
+	}
+
+	attachmentNow = func() time.Time { return base.Add(attachmentIdleTTL + time.Second) }
+	payload := fmt.Sprintf(`{"sessionId":"sess-attach-expire","uploadId":%q,"offset":5,"data":"IQ=="}`, uploadID)
+	_, err := c.HandleSessionRequest(context.Background(), "session.attachment.chunk", "proj1", json.RawMessage(payload))
+	if err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expired chunk err=%v, want expired rejection", err)
+	}
+	if _, err := os.Stat(startedPath); !os.IsNotExist(err) {
+		t.Fatalf("partial stat after expiry err=%v, want removed", err)
+	}
+}
+
+func TestSessionAttachmentUploadCancelRemovesPartial(t *testing.T) {
+	c := newAttachmentTestClient(t, "sess-attach-cancel")
+	uploadID := startSessionAttachmentForTest(t, c, "sess-attach-cancel", "note.txt", "text/plain", 5)
+	chunkSessionAttachmentForTest(t, c, "sess-attach-cancel", uploadID, 0, "aGVsbG8=")
+	startedPath := c.attachments.uploadPartPathForTest(uploadID)
+
+	payload := fmt.Sprintf(`{"sessionId":"sess-attach-cancel","uploadId":%q}`, uploadID)
+	resp, err := c.HandleSessionRequest(context.Background(), "session.attachment.cancel", "proj1", json.RawMessage(payload))
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	body := responseMapForTest(t, resp)
+	if body["ok"] != true {
+		t.Fatalf("cancel response=%#v, want ok", body)
+	}
+	if _, err := os.Stat(startedPath); !os.IsNotExist(err) {
+		t.Fatalf("partial stat after cancel err=%v, want removed", err)
+	}
+}
+
+func TestSessionAttachmentDeleteRemovesCompletedFileAndSidecar(t *testing.T) {
+	c := newAttachmentTestClient(t, "sess-attach-delete")
+	block := uploadSessionAttachmentForTest(t, c, "sess-attach-delete", "report.pdf", "application/pdf", []byte("hello world"))
+	path := attachmentFileURIPathForTest(t, block.URI)
+	sidecarPath := attachmentSidecarPathForTest(path)
+
+	payload := fmt.Sprintf(`{"sessionId":"sess-attach-delete","attachmentId":"%s"}`, blockAttachmentIDForTest(t, block))
+	resp, err := c.HandleSessionRequest(context.Background(), "session.attachment.delete", "proj1", json.RawMessage(payload))
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	body := responseMapForTest(t, resp)
+	if body["ok"] != true {
+		t.Fatalf("delete response=%#v, want ok", body)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("attachment stat after delete err=%v, want removed", err)
+	}
+	if _, err := os.Stat(sidecarPath); !os.IsNotExist(err) {
+		t.Fatalf("sidecar stat after delete err=%v, want removed", err)
+	}
+}
+
+func TestSessionSendAcceptsUploadedAttachmentBlock(t *testing.T) {
+	mock := &mockSession{agentName: "codex", sessionID: "sess-send-attachment"}
+	c := newAttachmentTestClientWithMock(t, mock)
+	block := uploadSessionAttachmentForTest(t, c, "sess-send-attachment", "report.pdf", "application/pdf", []byte("hello world"))
+	payload := mustJSON(map[string]any{
+		"sessionId": "sess-send-attachment",
+		"blocks": []acp.ContentBlock{
+			{Type: acp.ContentBlockTypeText, Text: "read this"},
+			block,
+		},
+	})
+
+	resp, err := c.HandleSessionRequest(context.Background(), "session.send", "proj1", payload)
+	if err != nil {
+		t.Fatalf("session.send: %v", err)
+	}
+	body := responseMapForTest(t, resp)
+	if body["ok"] != true {
+		t.Fatalf("send response=%#v, want ok", body)
+	}
+	sess, err := c.resolveSession(testRouteKey)
+	if err != nil {
+		t.Fatalf("resolveSession: %v", err)
+	}
+	inst := sess.instance.(*testInjectedInstance)
+	if len(inst.lastPrompt) != 2 || inst.lastPrompt[1].URI != block.URI || inst.lastPrompt[1].Data != "" {
+		t.Fatalf("lastPrompt=%#v, want uploaded attachment block", inst.lastPrompt)
+	}
+}
+
+func TestSessionSendRejectsAttachmentFileURIOutsideSession(t *testing.T) {
+	mock := &mockSession{agentName: "codex", sessionID: "sess-send-outside"}
+	c := newAttachmentTestClientWithMock(t, mock)
+	payload := mustJSON(map[string]any{
+		"sessionId": "sess-send-outside",
+		"blocks": []acp.ContentBlock{{
+			Type:     acp.ContentBlockTypeResourceLink,
+			URI:      "file:///C:/outside/report.pdf",
+			Name:     "report.pdf",
+			MimeType: "application/pdf",
+		}},
+	})
+
+	_, err := c.HandleSessionRequest(context.Background(), "session.send", "proj1", payload)
+	if err == nil || !strings.Contains(err.Error(), "attachment") {
+		t.Fatalf("session.send err=%v, want attachment containment rejection", err)
+	}
+	if len(mock.promptCalls) != 0 {
+		t.Fatalf("promptCalls=%v, want rejected before prompt", mock.promptCalls)
 	}
 }
 

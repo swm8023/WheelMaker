@@ -61,6 +61,11 @@ describe('registry workspace project-scoped chat service methods', () => {
       setSessionConfig: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1', configOptions: [] }),
       renameSession: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1', session: { sessionId: 's1', title: 'Manual title', updatedAt: '' } }),
       deleteSession: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1' }),
+      startSessionAttachment: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1', uploadId: 'upload-1', chunkSize: 1048576 }),
+      uploadSessionAttachmentChunk: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1', uploadId: 'upload-1', received: 1 }),
+      finishSessionAttachment: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1', attachment: { id: 'sha256-a', name: 'a.txt', size: 1, uri: 'file:///a.txt' }, block: { type: 'resource_link', uri: 'file:///a.txt', name: 'a.txt', size: 1 } }),
+      cancelSessionAttachment: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1', uploadId: 'upload-1' }),
+      deleteSessionAttachment: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1', attachmentId: 'sha256-a' }),
     };
 
     Object.assign(service as unknown as { repository: unknown; session: unknown }, {
@@ -85,6 +90,30 @@ describe('registry workspace project-scoped chat service methods', () => {
     });
     await (service as any).renameProjectSession('chat-project', 's1', 'Manual title');
     await (service as any).deleteProjectSession('chat-project', 's1');
+    await (service as any).startProjectSessionAttachment('chat-project', {
+      sessionId: 's1',
+      name: 'a.txt',
+      size: 1,
+    });
+    await (service as any).uploadProjectSessionAttachmentChunk('chat-project', {
+      sessionId: 's1',
+      uploadId: 'upload-1',
+      offset: 0,
+      data: 'YQ==',
+    });
+    await (service as any).finishProjectSessionAttachment('chat-project', {
+      sessionId: 's1',
+      uploadId: 'upload-1',
+      sha256: 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb',
+    });
+    await (service as any).cancelProjectSessionAttachment('chat-project', {
+      sessionId: 's1',
+      uploadId: 'upload-1',
+    });
+    await (service as any).deleteProjectSessionAttachment('chat-project', {
+      sessionId: 's1',
+      attachmentId: 'sha256-a',
+    });
 
     expect(repository.readSession).toHaveBeenCalledWith('chat-project', 's1', 7);
     expect(repository.sendSessionMessage).toHaveBeenCalledWith('chat-project', {
@@ -99,6 +128,30 @@ describe('registry workspace project-scoped chat service methods', () => {
     });
     expect(repository.renameSession).toHaveBeenCalledWith('chat-project', 's1', 'Manual title');
     expect(repository.deleteSession).toHaveBeenCalledWith('chat-project', 's1');
+    expect(repository.startSessionAttachment).toHaveBeenCalledWith('chat-project', {
+      sessionId: 's1',
+      name: 'a.txt',
+      size: 1,
+    });
+    expect(repository.uploadSessionAttachmentChunk).toHaveBeenCalledWith('chat-project', {
+      sessionId: 's1',
+      uploadId: 'upload-1',
+      offset: 0,
+      data: 'YQ==',
+    });
+    expect(repository.finishSessionAttachment).toHaveBeenCalledWith('chat-project', {
+      sessionId: 's1',
+      uploadId: 'upload-1',
+      sha256: 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb',
+    });
+    expect(repository.cancelSessionAttachment).toHaveBeenCalledWith('chat-project', {
+      sessionId: 's1',
+      uploadId: 'upload-1',
+    });
+    expect(repository.deleteSessionAttachment).toHaveBeenCalledWith('chat-project', {
+      sessionId: 's1',
+      attachmentId: 'sha256-a',
+    });
     expect(repository.readSession).not.toHaveBeenCalledWith('workspace-project', 's1', 7);
   });
 

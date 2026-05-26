@@ -889,6 +889,49 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 	if deleteResp.Type != "response" || deleteResp.Method != "session.delete" {
 		t.Fatalf("unexpected session.delete response: %#v", deleteResp)
 	}
+
+	attachmentRequests := []struct {
+		method  string
+		payload map[string]any
+	}{
+		{method: "session.attachment.start", payload: map[string]any{"sessionId": "sess-1", "name": "a.txt", "mimeType": "text/plain", "size": 1}},
+		{method: "session.attachment.chunk", payload: map[string]any{"sessionId": "sess-1", "uploadId": "upload-1", "offset": 0, "data": "YQ=="}},
+		{method: "session.attachment.finish", payload: map[string]any{"sessionId": "sess-1", "uploadId": "upload-1", "sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"}},
+		{method: "session.attachment.cancel", payload: map[string]any{"sessionId": "sess-1", "uploadId": "upload-2"}},
+		{method: "session.attachment.delete", payload: map[string]any{"sessionId": "sess-1", "attachmentId": "sha256-ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"}},
+	}
+	for i, request := range attachmentRequests {
+		mustWriteJSON(t, client, testEnvelope{
+			RequestID: int64(7 + i),
+			Type:      "request",
+			Method:    request.method,
+			ProjectID: "hub-a:server",
+			Payload:   request.payload,
+		})
+		forwardedAttachment := mustReadEnvelope(t, hub)
+		if forwardedAttachment.Method != request.method {
+			t.Fatalf("forwarded.method=%q, want %s", forwardedAttachment.Method, request.method)
+		}
+		if forwardedAttachment.ProjectID != "hub-a:server" {
+			t.Fatalf("forwarded.projectId=%q, want hub-a:server", forwardedAttachment.ProjectID)
+		}
+		if forwardedAttachment.Payload["sessionId"] != "sess-1" {
+			t.Fatalf("forwarded attachment payload=%v", forwardedAttachment.Payload)
+		}
+		mustWriteJSON(t, hub, testEnvelope{
+			RequestID: forwardedAttachment.RequestID,
+			Type:      "response",
+			Method:    request.method,
+			ProjectID: forwardedAttachment.ProjectID,
+			Payload: map[string]any{
+				"ok": true,
+			},
+		})
+		attachmentResp := mustReadEnvelope(t, client)
+		if attachmentResp.Type != "response" || attachmentResp.Method != request.method {
+			t.Fatalf("unexpected %s response: %#v", request.method, attachmentResp)
+		}
+	}
 }
 
 func TestConnectInitMonitorRole(t *testing.T) {

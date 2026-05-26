@@ -80,6 +80,7 @@ type Client struct {
 	sessionRecorder *SessionRecorder
 	archiveStore    *sessionArchiveStore
 	sessionSearch   *sessionSearchManager
+	attachments     *attachmentManager
 	viewSink        SessionViewSink
 	httpClient      *http.Client
 	deepSeekBaseURL string
@@ -96,6 +97,7 @@ func New(store Store, projectName string, cwd string) *Client {
 		routeMap:        make(map[string]string),
 		suspendTimeout:  5 * time.Minute,
 		stopPersistCh:   make(chan struct{}),
+		attachments:     newAttachmentManager(),
 		httpClient:      &http.Client{Timeout: 15 * time.Second},
 		deepSeekBaseURL: "https://api.deepseek.com",
 	}
@@ -662,6 +664,16 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			return nil, err
 		}
 		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
+	case "session.attachment.start":
+		return c.handleSessionAttachmentStart(ctx, payload)
+	case "session.attachment.chunk":
+		return c.handleSessionAttachmentChunk(ctx, payload)
+	case "session.attachment.finish":
+		return c.handleSessionAttachmentFinish(ctx, payload)
+	case "session.attachment.cancel":
+		return c.handleSessionAttachmentCancel(ctx, payload)
+	case "session.attachment.delete":
+		return c.handleSessionAttachmentDelete(ctx, payload)
 	case "session.token.providers":
 		return map[string]any{
 			"providers": []map[string]any{
@@ -731,6 +743,10 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 		if len(blocks) == 0 {
 			return nil, fmt.Errorf("session prompt is empty")
 		}
+		attachmentRefs, err := c.validateSessionAttachmentBlocks(ctx, req.SessionID, blocks)
+		if err != nil {
+			return nil, err
+		}
 		if text, ok := singleTextIMPrompt(blocks); ok {
 			if cmd, args, parsed := parseCommand(text); parsed {
 				sess, err := c.SessionByID(ctx, req.SessionID)
@@ -744,6 +760,9 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			}
 		}
 		if err := c.PromptToSession(ctx, req.SessionID, im.ChatRef{ChannelID: "app", ChatID: strings.TrimSpace(req.SessionID)}, blocks); err != nil {
+			return nil, err
+		}
+		if err := c.markSessionAttachmentsSent(attachmentRefs); err != nil {
 			return nil, err
 		}
 		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil

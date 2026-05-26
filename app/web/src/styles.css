@@ -6875,6 +6875,11 @@ body,
   padding: 5px 6px 3px;
 }
 
+.chat-composer-frame.drag-over {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
 .chat-composer-input-row {
   display: flex;
   align-items: flex-start;
@@ -7116,7 +7121,7 @@ body,
   line-height: 1;
 }
 
-.chat-photo-button {
+.chat-attach-button {
   color: color-mix(in srgb, #4db6ac 72%, var(--text));
 }
 
@@ -7154,6 +7159,15 @@ body,
   position: relative;
 }
 
+.chat-attachment-preview.uploading,
+.chat-attachment-preview.queued {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+.chat-attachment-preview.failed {
+  border-color: color-mix(in srgb, var(--danger) 58%, var(--border));
+}
+
 .chat-attachment-thumb {
   width: 76px;
   height: 76px;
@@ -7162,10 +7176,24 @@ body,
   object-fit: cover;
 }
 
+.chat-attachment-thumb.file {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel-2));
+}
+
+.chat-attachment-thumb.file .codicon {
+  font-size: 26px;
+}
+
 .chat-attachment-meta {
   min-width: 0;
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
 }
 
 .chat-attachment-name {
@@ -7175,6 +7203,30 @@ body,
   white-space: normal;
   overflow: hidden;
   word-break: break-word;
+}
+
+.chat-attachment-status {
+  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+  font-size: 10.5px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-attachment-progress {
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.chat-attachment-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 75%, #4db6ac);
 }
 
 .chat-attachment-remove {
@@ -7191,6 +7243,27 @@ body,
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+
+.chat-attachment-retry {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--text);
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.chat-attachment-retry:hover {
+  color: color-mix(in srgb, var(--accent) 75%, var(--text));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
 
 .chat-attachment-remove:hover {

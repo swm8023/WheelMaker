@@ -17,6 +17,17 @@ import type {
   RegistryPortRelaySnapshot,
   RegistryProject,
   RegistryProjectListResponse,
+  RegistrySessionAttachmentCancelPayload,
+  RegistrySessionAttachmentCancelResponse,
+  RegistrySessionAttachmentChunkPayload,
+  RegistrySessionAttachmentChunkResponse,
+  RegistrySessionAttachmentDeletePayload,
+  RegistrySessionAttachmentDeleteResponse,
+  RegistrySessionAttachmentFinishPayload,
+  RegistrySessionAttachmentFinishResponse,
+  RegistrySessionAttachmentStartPayload,
+  RegistrySessionAttachmentStartResponse,
+  RegistrySessionContentBlock,
   RegistrySessionConfigOption,
   RegistrySessionMessage,
   RegistrySessionReadResponse,
@@ -418,18 +429,68 @@ export class RegistryWorkspaceService {
     return this.repository.createSession(projectId, agentType, title);
   }
 
-  async sendSessionMessage(payload: {sessionId: string; text?: string; blocks?: unknown[]}): Promise<{ok: boolean; sessionId: string}> {
+  async sendSessionMessage(payload: {sessionId: string; text?: string; blocks?: RegistrySessionContentBlock[]}): Promise<{ok: boolean; sessionId: string}> {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');
     }
     return this.repository.sendSessionMessage(this.session.selectedProjectId, payload);
   }
 
-  async sendProjectSessionMessage(projectId: string, payload: {sessionId: string; text?: string; blocks?: unknown[]}): Promise<{ok: boolean; sessionId: string}> {
+  async sendProjectSessionMessage(projectId: string, payload: {sessionId: string; text?: string; blocks?: RegistrySessionContentBlock[]}): Promise<{ok: boolean; sessionId: string}> {
     if (!this.repository) {
       throw new Error('session is not ready');
     }
     return this.repository.sendSessionMessage(projectId, payload);
+  }
+
+  async startProjectSessionAttachment(
+    projectId: string,
+    payload: RegistrySessionAttachmentStartPayload,
+  ): Promise<RegistrySessionAttachmentStartResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.startSessionAttachment(projectId, payload);
+  }
+
+  async uploadProjectSessionAttachmentChunk(
+    projectId: string,
+    payload: RegistrySessionAttachmentChunkPayload,
+  ): Promise<RegistrySessionAttachmentChunkResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.uploadSessionAttachmentChunk(projectId, payload);
+  }
+
+  async finishProjectSessionAttachment(
+    projectId: string,
+    payload: RegistrySessionAttachmentFinishPayload,
+  ): Promise<RegistrySessionAttachmentFinishResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.finishSessionAttachment(projectId, payload);
+  }
+
+  async cancelProjectSessionAttachment(
+    projectId: string,
+    payload: RegistrySessionAttachmentCancelPayload,
+  ): Promise<RegistrySessionAttachmentCancelResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.cancelSessionAttachment(projectId, payload);
+  }
+
+  async deleteProjectSessionAttachment(
+    projectId: string,
+    payload: RegistrySessionAttachmentDeletePayload,
+  ): Promise<RegistrySessionAttachmentDeleteResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.deleteSessionAttachment(projectId, payload);
   }
 
   async cancelProjectSession(projectId: string, sessionId: string): Promise<{ok: boolean; sessionId: string}> {

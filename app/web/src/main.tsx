@@ -228,7 +228,15 @@ type ChatAttachment = {
   id: string;
   name: string;
   mimeType: string;
-  data: string;
+  size: number;
+  status: 'queued' | 'uploading' | 'failed' | 'completed';
+  progress: number;
+  file?: File;
+  objectUrl?: string;
+  block?: RegistryChatContentBlock;
+  uploadId?: string;
+  attachmentId?: string;
+  error?: string;
 };
 type WideProjectActionMenuState = {
   projectId: string;
@@ -534,6 +542,7 @@ const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 const CHAT_KEYBOARD_INSET_SETTLE_DELAY_MS = 120;
 const CHAT_PENDING_CONFIRM_TIMEOUT_MS = 5000;
+const CHAT_ATTACHMENT_CHUNK_SIZE = 1024 * 1024;
 const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
 const CHAT_CONFIG_INLINE_LIMIT = 3;
@@ -548,6 +557,87 @@ const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: []
 const DEFAULT_PORT_RELAY_SNAPSHOT: RegistryPortRelaySnapshot = {ok: true, enabled: false, status: 'Disabled'};
 let mermaidRenderSequence = 0;
 let mermaidModulePromise: Promise<typeof import('mermaid').default> | null = null;
+
+function isRegistryChatContentBlock(block: RegistryChatContentBlock | undefined): block is RegistryChatContentBlock {
+  return !!block && typeof block.type === 'string' && block.type.length > 0;
+}
+
+function isChatAttachmentUploadPending(attachment: ChatAttachment): boolean {
+  return attachment.status === 'queued' || attachment.status === 'uploading';
+}
+
+function chatAttachmentPreviewSrc(attachment: ChatAttachment): string {
+  if (attachment.objectUrl) {
+    return attachment.objectUrl;
+  }
+  const data = attachment.block?.data;
+  if (attachment.block?.type === 'image' && data) {
+    return `data:${attachment.mimeType || 'image/png'};base64,${data}`;
+  }
+  return '';
+}
+
+function attachmentIdFromBlock(block: RegistryChatContentBlock | undefined): string {
+  const uri = block?.uri || '';
+  if (!uri) {
+    return '';
+  }
+  const last = uri.split(/[\\/]/).pop() || '';
+  const withoutQuery = last.split(/[?#]/)[0] || '';
+  const withoutExtension = withoutQuery.replace(/\.[^.]+$/, '');
+  return withoutExtension.startsWith('sha256-') ? withoutExtension : '';
+}
+
+function revokeChatAttachmentObjectUrl(attachment: ChatAttachment): void {
+  if (attachment.objectUrl) {
+    URL.revokeObjectURL(attachment.objectUrl);
+  }
+}
+
+function chatFilesFromDataTransferItems(items: DataTransferItemList | DataTransferItem[] | undefined | null): File[] {
+  return Array.from(items ?? [])
+    .filter(item => item.kind === 'file')
+    .map(item => item.getAsFile())
+    .filter((file): file is File => !!file);
+}
+
+function chatFilesFromFileList(files: FileList | File[] | undefined | null): File[] {
+  return Array.from(files ?? []).filter((file): file is File => !!file);
+}
+
+function chatFallbackAttachmentName(index: number): string {
+  return `attachment-${index + 1}`;
+}
+
+function formatChatAttachmentSize(size: number): string {
+  if (!Number.isFinite(size) || size <= 0) {
+    return '0 B';
+  }
+  if (size < 1024) {
+    return `${Math.round(size)} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read attachment chunk'));
+    reader.readAsDataURL(blob);
+  });
+  return dataUrl.includes(',') ? dataUrl.slice(dataUrl.indexOf(',') + 1) : dataUrl;
+}
+
+async function sha256Hex(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest))
+    .map(value => value.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 type MarkdownRemarkPlugins = NonNullable<React.ComponentProps<typeof ReactMarkdown>['remarkPlugins']>;
 type MarkdownRehypePlugins = NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']>;
@@ -2702,7 +2792,7 @@ function App() {
   const [safeAreaTopInset, setSafeAreaTopInset] = useState<number>(() => readSafeAreaTopInset());
   const layoutMode = resolveLayoutMode(windowWidth);
   const isWide = layoutMode === 'desktop';
-  const supportsChatClipboardImages = useMemo(() => {
+  const supportsChatClipboardFiles = useMemo(() => {
     const userAgent = window.navigator.userAgent || '';
     const platform = window.navigator.platform || '';
     if (/iPad|iPhone|iPod/i.test(userAgent)) {
@@ -3145,7 +3235,8 @@ function App() {
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
   const [chatComposerText, setChatComposerText] = useState('');
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
-  const [chatAttachmentReadPending, setChatAttachmentReadPending] = useState(false);
+  const chatAttachmentUploadPending = chatAttachments.some(isChatAttachmentUploadPending);
+  const [chatComposerDragActive, setChatComposerDragActive] = useState(false);
   const [chatComposerDrafts, setChatComposerDrafts] = useState<Record<string, ChatComposerDraft>>({});
   const [chatPendingPromptsByKey, setChatPendingPromptsByKey] = useState<Record<string, PendingChatPrompt>>({});
   const [chatCancellingRuntimeKey, setChatCancellingRuntimeKey] = useState('');
@@ -3156,10 +3247,11 @@ function App() {
   const chatComposerDraftsRef = useRef<Record<string, ChatComposerDraft>>({});
   const chatPendingPromptsByKeyRef = useRef<Record<string, PendingChatPrompt>>({});
   const chatPendingPromptTimersRef = useRef<Record<string, number>>({});
-  const chatAttachmentReadCountRef = useRef<Record<string, number>>({});
   const chatDraftGenerationRef = useRef<Record<string, number>>({});
   const currentChatDraftKeyRef = useRef('');
   const chatAttachmentIdRef = useRef(0);
+  const chatAttachmentUploadQueueRef = useRef(Promise.resolve());
+  const chatAttachmentCancelIdsRef = useRef<Set<string>>(new Set());
   const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);
   const [chatFileMentionMenuOpen, setChatFileMentionMenuOpen] = useState(false);
   const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');
@@ -3631,50 +3723,6 @@ function App() {
     [getChatDraftGeneration],
   );
 
-  const syncChatAttachmentReadPending = useCallback(() => {
-    const normalizedDraftKey = currentChatDraftKeyRef.current.trim();
-    if (!normalizedDraftKey) {
-      setChatAttachmentReadPending(false);
-      return;
-    }
-    setChatAttachmentReadPending(
-      (chatAttachmentReadCountRef.current[normalizedDraftKey] ?? 0) > 0,
-    );
-  }, []);
-
-  const beginChatAttachmentRead = useCallback(
-    (draftKey: string) => {
-      const normalizedDraftKey = draftKey.trim();
-      if (!normalizedDraftKey) {
-        return;
-      }
-      chatAttachmentReadCountRef.current[normalizedDraftKey] =
-        (chatAttachmentReadCountRef.current[normalizedDraftKey] ?? 0) + 1;
-      syncChatAttachmentReadPending();
-    },
-    [syncChatAttachmentReadPending],
-  );
-
-  const endChatAttachmentRead = useCallback(
-    (draftKey: string) => {
-      const normalizedDraftKey = draftKey.trim();
-      if (!normalizedDraftKey) {
-        return;
-      }
-      const nextCount = Math.max(
-        0,
-        (chatAttachmentReadCountRef.current[normalizedDraftKey] ?? 0) - 1,
-      );
-      if (nextCount === 0) {
-        delete chatAttachmentReadCountRef.current[normalizedDraftKey];
-      } else {
-        chatAttachmentReadCountRef.current[normalizedDraftKey] = nextCount;
-      }
-      syncChatAttachmentReadPending();
-    },
-    [syncChatAttachmentReadPending],
-  );
-
   const applyChatAttachments = useCallback(
     (
       updater: (current: ChatAttachment[]) => ChatAttachment[],
@@ -3735,10 +3783,49 @@ function App() {
     [applyChatAttachments, getChatDraftGeneration],
   );
 
+  const updateChatAttachment = useCallback(
+    (
+      attachmentId: string,
+      updater: (attachment: ChatAttachment) => ChatAttachment,
+      draftKey = currentChatDraftKeyRef.current,
+      expectedGeneration = getChatDraftGeneration(draftKey),
+    ) => {
+      applyChatAttachments(
+        current => current.map(attachment => (
+          attachment.id === attachmentId ? updater(attachment) : attachment
+        )),
+        draftKey,
+        expectedGeneration,
+      );
+    },
+    [applyChatAttachments, getChatDraftGeneration],
+  );
+
   const removeChatAttachment = useCallback(
     (attachmentId: string) => {
       if (!attachmentId) {
         return;
+      }
+      const attachment = chatAttachmentsRef.current.find(item => item.id === attachmentId);
+      if (!attachment) {
+        return;
+      }
+      revokeChatAttachmentObjectUrl(attachment);
+      const selectedKey = selectedChatKeyRef.current;
+      if (selectedKey?.sessionId) {
+        const selectedProjectId = selectedKey.projectId;
+        if (attachment.uploadId && isChatAttachmentUploadPending(attachment)) {
+          chatAttachmentCancelIdsRef.current.add(attachment.id);
+          service.cancelProjectSessionAttachment(selectedProjectId, {
+            sessionId: selectedKey.sessionId,
+            uploadId: attachment.uploadId,
+          }).catch(() => undefined);
+        } else if (attachment.attachmentId && attachment.status === 'completed') {
+          service.deleteProjectSessionAttachment(selectedProjectId, {
+            sessionId: selectedKey.sessionId,
+            attachmentId: attachment.attachmentId,
+          }).catch(err => setError(err instanceof Error ? err.message : String(err)));
+        }
       }
       applyChatAttachments(current => {
         const filtered = current.filter(attachment => attachment.id !== attachmentId);
@@ -3748,34 +3835,190 @@ function App() {
     [applyChatAttachments],
   );
 
-  const readChatAttachmentFile = useCallback(
-    async (file: File, fallbackName: string): Promise<ChatAttachment> => {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () =>
-          resolve(typeof reader.result === 'string' ? reader.result : '');
-        reader.onerror = () =>
-          reject(reader.error ?? new Error('Failed to read image file'));
-        reader.readAsDataURL(file);
-      });
-      const base64 = dataUrl.includes(',')
-        ? dataUrl.slice(dataUrl.indexOf(',') + 1)
-        : dataUrl;
-      chatAttachmentIdRef.current += 1;
-      return {
-        id: `chat-attachment-${chatAttachmentIdRef.current}`,
-        name: file.name || fallbackName,
-        mimeType: file.type || 'image/png',
-        data: base64,
-      };
+  const uploadChatAttachmentFile = useCallback(
+    async (
+      file: File,
+      fallbackName: string,
+      selectedProjectId: string,
+      sessionId: string,
+      attachmentId: string,
+      draftKey: string,
+      expectedGeneration: number,
+    ) => {
+      const attachmentName = file.name || fallbackName;
+      let uploadId = '';
+      try {
+        updateChatAttachment(
+          attachmentId,
+          attachment => ({...attachment, status: 'uploading', progress: Math.max(1, attachment.progress)}),
+          draftKey,
+          expectedGeneration,
+        );
+        const start = await service.startProjectSessionAttachment(selectedProjectId, {
+          sessionId,
+          name: attachmentName,
+          mimeType: file.type || '',
+          size: file.size,
+        });
+        if (!start.ok || !start.uploadId) {
+          throw new Error('session.attachment.start returned ok=false');
+        }
+        uploadId = start.uploadId;
+        updateChatAttachment(
+          attachmentId,
+          attachment => ({...attachment, uploadId, progress: Math.max(2, attachment.progress)}),
+          draftKey,
+          expectedGeneration,
+        );
+        const chunkSize = Math.max(1, start.chunkSize || CHAT_ATTACHMENT_CHUNK_SIZE);
+        let offset = 0;
+        while (offset < file.size) {
+          if (chatAttachmentCancelIdsRef.current.has(attachmentId)) {
+            throw new Error('Attachment upload cancelled');
+          }
+          const nextOffset = Math.min(file.size, offset + chunkSize);
+          const data = await blobToBase64(file.slice(offset, nextOffset));
+          const chunk = await service.uploadProjectSessionAttachmentChunk(selectedProjectId, {
+            sessionId,
+            uploadId,
+            offset,
+            data,
+          });
+          if (!chunk.ok) {
+            throw new Error('session.attachment.chunk returned ok=false');
+          }
+          offset = nextOffset;
+          const progress = file.size > 0 ? Math.max(3, Math.min(95, Math.round((offset / file.size) * 95))) : 95;
+          updateChatAttachment(
+            attachmentId,
+            attachment => ({...attachment, progress}),
+            draftKey,
+            expectedGeneration,
+          );
+        }
+        const sha256 = await sha256Hex(file);
+        const finished = await service.finishProjectSessionAttachment(selectedProjectId, {
+          sessionId,
+          uploadId,
+          sha256,
+        });
+        if (!finished.ok || !finished.block) {
+          throw new Error('session.attachment.finish returned ok=false');
+        }
+        updateChatAttachment(
+          attachmentId,
+          attachment => ({
+            ...attachment,
+            status: 'completed',
+            progress: 100,
+            block: finished.block,
+            attachmentId: finished.attachment?.id || attachmentIdFromBlock(finished.block),
+            error: '',
+          }),
+          draftKey,
+          expectedGeneration,
+        );
+      } catch (err) {
+        if (uploadId && !chatAttachmentCancelIdsRef.current.has(attachmentId)) {
+          service.cancelProjectSessionAttachment(selectedProjectId, {sessionId, uploadId}).catch(() => undefined);
+        }
+        if (!chatAttachmentCancelIdsRef.current.has(attachmentId)) {
+          const message = err instanceof Error ? err.message : String(err);
+          updateChatAttachment(
+            attachmentId,
+            attachment => ({...attachment, status: 'failed', error: message}),
+            draftKey,
+            expectedGeneration,
+          );
+          setError(message);
+        }
+      } finally {
+        chatAttachmentCancelIdsRef.current.delete(attachmentId);
+      }
     },
-    [],
+    [updateChatAttachment],
+  );
+
+  const enqueueChatAttachmentFiles = useCallback(
+    (
+      files: File[],
+      draftKey = currentChatDraftKeyRef.current,
+      expectedGeneration = getChatDraftGeneration(draftKey),
+    ) => {
+      if (files.length === 0) {
+        return;
+      }
+      const selectedKey = selectedChatKeyRef.current;
+      if (!selectedKey?.sessionId) {
+        setError('Select or create a chat session first.');
+        return;
+      }
+      const attachments = files.map((file, index): ChatAttachment => {
+        chatAttachmentIdRef.current += 1;
+        const name = file.name || chatFallbackAttachmentName(index);
+        return {
+          id: `chat-attachment-${chatAttachmentIdRef.current}`,
+          name,
+          mimeType: file.type || '',
+          size: file.size,
+          status: 'queued',
+          progress: 0,
+          file,
+          objectUrl: (file.type || '').toLowerCase().startsWith('image/') ? URL.createObjectURL(file) : undefined,
+        };
+      });
+      appendChatAttachments(attachments, draftKey, expectedGeneration);
+      for (const attachment of attachments) {
+        const file = attachment.file;
+        if (!file) {
+          continue;
+        }
+        chatAttachmentUploadQueueRef.current = chatAttachmentUploadQueueRef.current
+          .catch(() => undefined)
+          .then(() => uploadChatAttachmentFile(
+            file,
+            attachment.name,
+            selectedKey.projectId,
+            selectedKey.sessionId,
+            attachment.id,
+            draftKey,
+            expectedGeneration,
+          ));
+      }
+    },
+    [appendChatAttachments, getChatDraftGeneration, uploadChatAttachmentFile],
+  );
+
+  const retryChatAttachment = useCallback(
+    (attachmentId: string) => {
+      const attachment = chatAttachmentsRef.current.find(item => item.id === attachmentId);
+      const selectedKey = selectedChatKeyRef.current;
+      if (!attachment?.file || !selectedKey?.sessionId) {
+        setError('Attachment can only be retried before the page is refreshed.');
+        return;
+      }
+      updateChatAttachment(
+        attachmentId,
+        current => ({...current, status: 'queued', progress: 0, error: '', uploadId: undefined, block: undefined, attachmentId: undefined}),
+      );
+      chatAttachmentUploadQueueRef.current = chatAttachmentUploadQueueRef.current
+        .catch(() => undefined)
+        .then(() => uploadChatAttachmentFile(
+          attachment.file as File,
+          attachment.name,
+          selectedKey.projectId,
+          selectedKey.sessionId,
+          attachment.id,
+          currentChatDraftKeyRef.current,
+          getChatDraftGeneration(currentChatDraftKeyRef.current),
+        ));
+    },
+    [getChatDraftGeneration, updateChatAttachment, uploadChatAttachmentFile],
   );
 
   useEffect(() => {
     currentChatDraftKeyRef.current = currentChatDraftKey;
-    syncChatAttachmentReadPending();
-  }, [currentChatDraftKey, syncChatAttachmentReadPending]);
+  }, [currentChatDraftKey]);
 
   useEffect(() => {
     chatComposerTextRef.current = chatComposerText;
@@ -7230,6 +7473,7 @@ function App() {
     }
   }, [tab, connected, selectedChatEncodedKey, chatMessages.length, chatLoading, setVisibleChatMessagesForRuntimeKey]);
   const resetChatComposer = () => {
+    chatAttachmentsRef.current.forEach(revokeChatAttachmentObjectUrl);
     chatComposerTextRef.current = '';
     chatAttachmentsRef.current = [];
     bumpChatDraftGeneration(currentChatDraftKeyRef.current);
@@ -7624,8 +7868,8 @@ function App() {
       return;
     }
     const sourceAttachments = options.attachmentsOverride ?? chatAttachments;
-    if (!options.blocksOverride && sourceAttachments.length > 0 && chatAttachmentReadPending) {
-      setError('Wait for images to finish loading.');
+    if (!options.blocksOverride && sourceAttachments.some(attachment => attachment.status !== 'completed' || !attachment.block)) {
+      setError('Wait for attachments to finish uploading.');
       return;
     }
     const trimmedText = (options.textOverride ?? chatComposerText).trim();
@@ -7633,16 +7877,15 @@ function App() {
       setError('Use the stop button to cancel in app.');
       return;
     }
-    const blocks: RegistryChatContentBlock[] = options.blocksOverride
-      ? options.blocksOverride.map(block => ({...block}))
-      : [
-          ...(trimmedText ? [{ type: 'text', text: trimmedText } satisfies RegistryChatContentBlock] : []),
-          ...sourceAttachments.map(attachment => ({
-            type: 'image',
-            mimeType: attachment.mimeType,
-            data: attachment.data,
-          } satisfies RegistryChatContentBlock)),
-        ];
+    const blocks: RegistryChatContentBlock[] = [];
+    if (options.blocksOverride) {
+      blocks.push(...options.blocksOverride.map(block => ({...block})));
+    } else {
+      if (trimmedText) {
+        blocks.push({ type: 'text', text: trimmedText });
+      }
+      blocks.push(...sourceAttachments.map(attachment => attachment.block).filter(isRegistryChatContentBlock));
+    }
     if (blocks.length === 0) return;
     const firstAttachmentName = sourceAttachments[0]?.name || '';
     const previewText = trimmedText || firstAttachmentName || msgText('prompt_request', {contentBlocks: blocks}).trim();
@@ -7720,16 +7963,22 @@ function App() {
     const attachments: ChatAttachment[] = [];
     for (const [index, block] of blocks.entries()) {
       const blockType = typeof block.type === 'string' ? block.type.trim().toLowerCase() : '';
-      const data = typeof block.data === 'string' ? block.data : '';
-      if (blockType !== 'image' || !data) {
+      if (blockType !== 'image' && blockType !== 'resource_link') {
+        continue;
+      }
+      if (!block.uri && !block.data) {
         continue;
       }
       chatAttachmentIdRef.current += 1;
       attachments.push({
         id: `chat-attachment-${chatAttachmentIdRef.current}`,
-        name: `undelivered-image-${index + 1}.png`,
-        mimeType: typeof block.mimeType === 'string' && block.mimeType ? block.mimeType : 'image/png',
-        data,
+        name: block.name || `undelivered-attachment-${index + 1}`,
+        mimeType: typeof block.mimeType === 'string' ? block.mimeType : '',
+        size: typeof block.size === 'number' ? block.size : 0,
+        status: 'completed',
+        progress: 100,
+        block: {...block},
+        attachmentId: attachmentIdFromBlock(block),
       });
     }
     return attachments;
@@ -7848,49 +8097,16 @@ function App() {
     }
   };
 
-  const handleChatFileChange = async (
+  const handleChatFileChange = (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
-    const files = Array.from(event.target.files ?? []);
+    const files = chatFilesFromFileList(event.target.files);
     if (files.length === 0) {
       return;
     }
     const attachmentDraftKey = currentChatDraftKeyRef.current;
     const attachmentDraftGeneration = getChatDraftGeneration(attachmentDraftKey);
-    beginChatAttachmentRead(attachmentDraftKey);
-    let readError = '';
-    try {
-      const attachments = (
-        await Promise.all(
-          files.map(async (file, index) => {
-            if (!(file.type || '').toLowerCase().startsWith('image/')) {
-              return null;
-            }
-            try {
-              return await readChatAttachmentFile(
-                file,
-                `selected-image-${index + 1}.png`,
-              );
-            } catch (err) {
-              if (!readError) {
-                readError = err instanceof Error ? err.message : String(err);
-              }
-              return null;
-            }
-          }),
-        )
-      ).filter((attachment): attachment is ChatAttachment => !!attachment);
-      appendChatAttachments(
-        attachments,
-        attachmentDraftKey,
-        attachmentDraftGeneration,
-      );
-      if (readError) {
-        setError(readError);
-      }
-    } finally {
-      endChatAttachmentRead(attachmentDraftKey);
-    }
+    enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration);
     event.target.value = '';
   };
 
@@ -13684,39 +13900,92 @@ function App() {
             <input
               ref={chatFileInputRef}
               type="file"
-              accept="image/*"
               multiple
               style={{ display: 'none' }}
-              onChange={event => {
-                handleChatFileChange(event).catch(err =>
-                  setError(err instanceof Error ? err.message : String(err)),
-                );
-              }}
+              onChange={handleChatFileChange}
             />
-            <div className="chat-composer-frame">
+            <div
+              className={`chat-composer-frame${chatComposerDragActive ? ' drag-over' : ''}`}
+              onDragOver={event => {
+                if (event.dataTransfer.types.includes('Files')) {
+                  event.preventDefault();
+                  setChatComposerDragActive(true);
+                }
+              }}
+              onDragLeave={event => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  setChatComposerDragActive(false);
+                }
+              }}
+              onDrop={event => {
+                const files = chatFilesFromFileList(event.dataTransfer.files);
+                if (files.length === 0) {
+                  setChatComposerDragActive(false);
+                  return;
+                }
+                event.preventDefault();
+                setChatComposerDragActive(false);
+                const attachmentDraftKey = currentChatDraftKeyRef.current;
+                const attachmentDraftGeneration = getChatDraftGeneration(attachmentDraftKey);
+                enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration);
+              }}
+            >
               {chatAttachments.length > 0 ? (
                 <div className="chat-attachment-preview-list">
-                  {chatAttachments.map(attachment => (
-                    <div key={attachment.id} className="chat-attachment-preview">
-                      <img
-                        className="chat-attachment-thumb"
-                        src={`data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`}
-                        alt={attachment.name || 'attachment preview'}
-                      />
-                      <div className="chat-attachment-meta">
-                        <div className="chat-attachment-name">{attachment.name}</div>
+                  {chatAttachments.map(attachment => {
+                    const previewSrc = chatAttachmentPreviewSrc(attachment);
+                    const pending = isChatAttachmentUploadPending(attachment);
+                    return (
+                      <div key={attachment.id} className={`chat-attachment-preview ${attachment.status}`}>
+                        {previewSrc ? (
+                          <img
+                            className="chat-attachment-thumb"
+                            src={previewSrc}
+                            alt={attachment.name || 'attachment preview'}
+                          />
+                        ) : (
+                          <div className="chat-attachment-thumb file" aria-hidden="true">
+                            <span className="codicon codicon-file" />
+                          </div>
+                        )}
+                        <div className="chat-attachment-meta">
+                          <div className="chat-attachment-name">{attachment.name}</div>
+                          <div className="chat-attachment-status">
+                            {attachment.status === 'failed'
+                              ? (attachment.error || 'Upload failed')
+                              : attachment.status === 'completed'
+                                ? formatChatAttachmentSize(attachment.size)
+                                : `${attachment.progress}%`}
+                          </div>
+                          {pending ? (
+                            <div className="chat-attachment-progress" aria-hidden="true">
+                              <span style={{width: `${Math.max(4, attachment.progress)}%`}} />
+                            </div>
+                          ) : null}
+                        </div>
+                        {attachment.status === 'failed' ? (
+                          <button
+                            type="button"
+                            className="chat-attachment-retry"
+                            onClick={() => retryChatAttachment(attachment.id)}
+                            title="Retry upload"
+                            aria-label="Retry upload"
+                          >
+                            <span className="codicon codicon-refresh" />
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="chat-attachment-remove"
+                          onClick={() => removeChatAttachment(attachment.id)}
+                          title={pending ? 'Cancel upload' : 'Remove attachment'}
+                          aria-label={pending ? 'Cancel upload' : 'Remove attachment'}
+                        >
+                          <span className="codicon codicon-close" />
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        className="chat-attachment-remove"
-                        onClick={() => removeChatAttachment(attachment.id)}
-                        title="Remove image"
-                        aria-label="Remove image"
-                      >
-                        <span className="codicon codicon-close" />
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : null}
               <div className="chat-composer-input-row">
@@ -13742,58 +14011,17 @@ function App() {
                     value={chatComposerText}
                     onChange={event => updateChatComposerText(event.target.value)}
                     onPaste={event => {
-                      if (!supportsChatClipboardImages) {
+                      if (!supportsChatClipboardFiles) {
                         return;
                       }
                       const attachmentDraftKey = currentChatDraftKeyRef.current;
                       const attachmentDraftGeneration = getChatDraftGeneration(attachmentDraftKey);
-                      const items = Array.from(event.clipboardData?.items ?? []);
-                      const imageItems = items.filter(item =>
-                        item.type.toLowerCase().startsWith('image/'),
-                      );
-                      if (imageItems.length === 0) {
+                      const files = chatFilesFromDataTransferItems(event.clipboardData?.items);
+                      if (files.length === 0) {
                         return;
                       }
                       event.preventDefault();
-                      beginChatAttachmentRead(attachmentDraftKey);
-                      let readError = '';
-                      Promise.all(
-                        imageItems.map(async (item, index) => {
-                          const file = item.getAsFile();
-                          if (!file) {
-                            if (!readError) {
-                              readError = 'Clipboard image is unavailable';
-                            }
-                            return null;
-                          }
-                          try {
-                            return await readChatAttachmentFile(file, `pasted-image-${index + 1}.png`);
-                          } catch (err) {
-                            if (!readError) {
-                              readError = err instanceof Error ? err.message : String(err);
-                            }
-                            return null;
-                          }
-                        }),
-                      )
-                        .then(nextAttachments => {
-                          appendChatAttachments(
-                            nextAttachments.filter(
-                              (attachment): attachment is ChatAttachment => !!attachment,
-                            ),
-                            attachmentDraftKey,
-                            attachmentDraftGeneration,
-                          );
-                          if (readError) {
-                            setError(readError);
-                          }
-                        })
-                        .catch(err =>
-                          setError(err instanceof Error ? err.message : String(err)),
-                        )
-                        .finally(() => {
-                          endChatAttachmentRead(attachmentDraftKey);
-                        });
+                      enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration);
                     }}
                     onKeyDown={event => {
                       if (chatSlashMenuVisible) {
@@ -13833,7 +14061,7 @@ function App() {
                         return;
                       }
                       event.preventDefault();
-                      if (chatSending || chatAttachmentReadPending) {
+                      if (chatSending || chatAttachmentUploadPending) {
                         return;
                       }
                       sendChatMessage().catch(() => undefined);
@@ -13846,7 +14074,7 @@ function App() {
                     type="button"
                     className="chat-send-button"
                     onClick={() => sendChatMessage().catch(() => undefined)}
-                    disabled={chatSending || chatAttachmentReadPending}
+                    disabled={chatSending || chatAttachmentUploadPending}
                     title="Send"
                     aria-label="Send message"
                   >
@@ -13913,7 +14141,7 @@ function App() {
                   </button>
                   <button
                     type="button"
-                    className="chat-tool-button chat-photo-button"
+                    className="chat-tool-button chat-attach-button"
                     onClick={() => {
                       setChatPromptMenuOpen(false);
                       setChatFileMentionMenuOpen(false);
@@ -13921,10 +14149,10 @@ function App() {
                       setChatConfigOverflowOpen(false);
                       chatFileInputRef.current?.click();
                     }}
-                    title="Attach image"
-                    aria-label="Attach image"
+                    title="Attach file"
+                    aria-label="Attach file"
                   >
-                    <span className="codicon codicon-device-camera" />
+                    <span className="codicon codicon-new-file" />
                   </button>
                 </div>
                 {selectedChatConfigOptions.length > 0 ? (

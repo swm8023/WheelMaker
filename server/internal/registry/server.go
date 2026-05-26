@@ -296,7 +296,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "cmd.npm", "cmd.update", "cmd.skills", "cmd.token":
 			go s.handleHubCommandForwardRequest(state.peer, state, in)
 		case "chat.send",
-			"session.list", "session.read", "session.search", "session.new", "session.resume.list", "session.resume.import", "session.reload", "session.archive", "session.delete", "session.rename", "session.send", "session.cancel", "session.markRead", "session.setConfig", "session.token.providers", "session.token.deepseek.stats", "session.token.scan",
+			"session.list", "session.read", "session.search", "session.new", "session.resume.list", "session.resume.import", "session.reload", "session.archive", "session.delete", "session.rename", "session.send", "session.cancel", "session.markRead", "session.setConfig", "session.attachment.start", "session.attachment.chunk", "session.attachment.finish", "session.attachment.cancel", "session.attachment.delete", "session.token.providers", "session.token.deepseek.stats", "session.token.scan",
 			"fs.list", "fs.info", "fs.read", "fs.search", "fs.grep",
 			"git.refs", "git.log", "git.commit.files", "git.commit.fileDiff",
 			"git.diff", "git.diff.fileDiff", "git.status", "git.workingTree.fileDiff":

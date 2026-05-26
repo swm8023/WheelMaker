@@ -148,7 +148,11 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('attachments: ChatAttachment[];');
     expect(mainTsx).toContain("const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };");
     expect(mainTsx).toContain('const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);');
-    expect(mainTsx).toContain('const [chatAttachmentReadPending, setChatAttachmentReadPending] = useState(false);');
+    expect(mainTsx).toContain("status: 'queued' | 'uploading' | 'failed' | 'completed';");
+    expect(mainTsx).toContain('progress: number;');
+    expect(mainTsx).toContain('block?: RegistryChatContentBlock;');
+    expect(mainTsx).toContain('objectUrl?: string;');
+    expect(mainTsx).toContain('const chatAttachmentUploadPending = chatAttachments.some(');
     expect(mainTsx).toContain('const chatConfigOverflowOpen = workspaceUiState.mobile.chatConfigOverflowOpen;');
     expect(mainTsx).toContain("dispatchWorkspaceUi({ type: 'mobile/setChatConfigOverflowOpen', next });");
     expect(mainTsx).toContain('const chatAttachmentsRef = useRef<ChatAttachment[]>([]);');
@@ -202,8 +206,10 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('expectedGeneration = getChatDraftGeneration(draftKey)');
     expect(mainTsx).toContain('if (expectedGeneration !== getChatDraftGeneration(normalizedDraftKey)) {');
     expect(mainTsx).toContain('const removeChatAttachment = useCallback(');
-    expect(mainTsx).toContain('const readChatAttachmentFile = useCallback(');
-    expect(mainTsx).toContain('const supportsChatClipboardImages = useMemo(');
+    expect(mainTsx).toContain('const uploadChatAttachmentFile = useCallback(');
+    expect(mainTsx).toContain('const enqueueChatAttachmentFiles = useCallback(');
+    expect(mainTsx).toContain('const retryChatAttachment = useCallback(');
+    expect(mainTsx).toContain('const supportsChatClipboardFiles = useMemo(');
     expect(mainTsx).toContain('const userAgent = window.navigator.userAgent || \'\';');
     expect(mainTsx).toContain('const platform = window.navigator.platform || \'\';');
     expect(mainTsx).toContain('if (/iPad|iPhone|iPod/i.test(userAgent)) {');
@@ -211,27 +217,33 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('(window.navigator.maxTouchPoints ?? 0) > 1');
     expect(mainTsx).toContain('return true;');
     expect(mainTsx).toContain('return false;');
-    expect(mainTsx).toContain('item.type.toLowerCase().startsWith(\'image/\')');
-    expect(mainTsx).toContain('Promise.all(');
-    expect(mainTsx).toContain('readChatAttachmentFile(file, `pasted-image-${index + 1}.png`)');
+    expect(mainTsx).toContain('const files = chatFilesFromDataTransferItems(');
+    expect(mainTsx).toContain('enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration);');
+    expect(mainTsx).toContain('service.startProjectSessionAttachment(selectedProjectId, {');
+    expect(mainTsx).toContain('service.uploadProjectSessionAttachmentChunk(selectedProjectId, {');
+    expect(mainTsx).toContain('service.finishProjectSessionAttachment(selectedProjectId, {');
+    expect(mainTsx).toContain('service.cancelProjectSessionAttachment(selectedProjectId, {');
+    expect(mainTsx).toContain('service.deleteProjectSessionAttachment(selectedProjectId, {');
     expect(mainTsx).toContain('const attachmentDraftKey = currentChatDraftKeyRef.current;');
     expect(mainTsx).toContain('const attachmentDraftGeneration = getChatDraftGeneration(attachmentDraftKey);');
     expect(mainTsx).toContain('appendChatAttachments(');
-    expect(mainTsx).toContain('attachments,');
     expect(mainTsx).toContain('const sourceAttachments = options.attachmentsOverride ?? chatAttachments;');
     expect(mainTsx).toContain('blocksOverride?: RegistryChatContentBlock[];');
-    expect(mainTsx).toContain('const blocks: RegistryChatContentBlock[] = options.blocksOverride');
-    expect(mainTsx).toContain('...sourceAttachments.map(attachment => ({');
-    expect(mainTsx).toContain("if (!options.blocksOverride && sourceAttachments.length > 0 && chatAttachmentReadPending) {");
-    expect(mainTsx).toContain("setError('Wait for images to finish loading.');");
+    expect(mainTsx).toContain('const blocks: RegistryChatContentBlock[] = [];');
+    expect(mainTsx).toContain('blocks.push(...sourceAttachments.map(attachment => attachment.block).filter(');
+    expect(mainTsx).not.toContain('data: attachment.data');
+    expect(mainTsx).toContain("if (!options.blocksOverride && sourceAttachments.some(attachment => attachment.status !== 'completed' || !attachment.block)) {");
+    expect(mainTsx).toContain("setError('Wait for attachments to finish uploading.');");
     expect(mainTsx).toContain('type="file"');
     expect(mainTsx).toContain('multiple');
     expect(mainTsx).toContain('onPaste={event => {');
-    expect(mainTsx).toContain('if (!supportsChatClipboardImages) {');
-    expect(mainTsx).toContain('appendChatAttachments(');
+    expect(mainTsx).toContain('if (!supportsChatClipboardFiles) {');
+    expect(mainTsx).toContain('onDragOver={event => {');
+    expect(mainTsx).toContain('onDrop={event => {');
+    expect(mainTsx).toContain('enqueueChatAttachmentFiles(');
     expect(mainTsx).toContain('attachmentDraftKey,');
-    expect(mainTsx).toContain('attachmentDraftGeneration,');
-    expect(mainTsx).toContain('if (chatSending || chatAttachmentReadPending) {');
+    expect(mainTsx).toContain('attachmentDraftGeneration);');
+    expect(mainTsx).toContain('if (chatSending || chatAttachmentUploadPending) {');
     expect(mainTsx).not.toContain('respondToChatPermission');
     expect(mainTsx).not.toContain("const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);");
     expect(stylesCss).toContain('.chat-composer');
@@ -484,9 +496,9 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.breadcrumb-current \{[\s\S]*min-width: 0;[\s\S]*overflow: hidden;[\s\S]*text-overflow: ellipsis;[\s\S]*\}/,
     );
-    expect(mainTsx).toContain('chatAttachments.map(attachment => (');
+    expect(mainTsx).toContain('chatAttachments.map(attachment => {');
     expect(mainTsx).toContain('onClick={() => removeChatAttachment(attachment.id)}');
-    expect(mainTsx).toContain('disabled={chatSending || chatAttachmentReadPending}');
+    expect(mainTsx).toContain('disabled={chatSending || chatAttachmentUploadPending}');
     expect(stylesCss).not.toContain('.project-presence {');
     expect(stylesCss).not.toContain('.project-dirty {');
     expect(stylesCss).not.toContain('.chat-permission-button');
@@ -600,7 +612,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');");
     expect(mainTsx).toContain('selectedChatConfigOptions.length <= CHAT_CONFIG_INLINE_LIMIT');
     expect(mainTsx).toContain('prioritized.slice(0, CHAT_CONFIG_INLINE_LIMIT)');
-    expect(mainTsx).toContain('className="chat-composer-frame"');
+    expect(mainTsx).toContain("className={`chat-composer-frame${chatComposerDragActive ? ' drag-over' : ''}`}");
     expect(mainTsx).toContain('className="chat-composer-input-row"');
     expect(mainTsx).toContain('className={`chat-composer-stop-trigger${selectedChatPromptRunning ? \' active\' : \'\'}`}');
     expect(mainTsx).toContain('title="Skills"');
@@ -636,9 +648,8 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('className="chat-tool-button chat-skill-button"');
     expect(mainTsx).not.toContain('codicon-wand');
     expect(mainTsx).not.toContain('codicon-symbol-keyword');
-    expect(mainTsx).toContain('className="chat-tool-button chat-photo-button"');
-    expect(mainTsx).toContain('codicon-device-camera');
-    expect(mainTsx).not.toContain('codicon-file-media');
+    expect(mainTsx).toContain('className="chat-tool-button chat-attach-button"');
+    expect(mainTsx).toContain('codicon-new-file');
     expect(mainTsx).toContain('chatFileInputRef.current?.click();');
     expect(mainTsx).not.toContain('className={`chat-tool-button chat-stop-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
     expect(mainTsx).not.toContain('chat-voice-button');
@@ -716,7 +727,7 @@ describe('web chat integration', () => {
     const toolsBlock = mainTsx.slice(toolsStart, toolsEnd);
     expect(toolsBlock.indexOf('chat-slash-button')).toBeGreaterThanOrEqual(0);
     expect(toolsBlock.indexOf('chat-mention-button')).toBeGreaterThan(toolsBlock.indexOf('chat-slash-button'));
-    expect(toolsBlock.indexOf('chat-photo-button')).toBeGreaterThan(toolsBlock.indexOf('chat-mention-button'));
+    expect(toolsBlock.indexOf('chat-attach-button')).toBeGreaterThan(toolsBlock.indexOf('chat-mention-button'));
     expect(toolsBlock).not.toContain('chat-stop-button');
     const slashButtonStart = toolsBlock.indexOf('chat-slash-button');
     const slashButtonBlock = toolsBlock.slice(toolsBlock.lastIndexOf('<button', slashButtonStart), toolsBlock.indexOf('</button>', slashButtonStart));
@@ -731,7 +742,7 @@ describe('web chat integration', () => {
     expect(configPillBlock).not.toContain('codicon-chevron-down');
 
     const configChangeStart = mainTsx.indexOf('const handleChatConfigOptionChange = async');
-    const configChangeEnd = mainTsx.indexOf('const handleChatFileChange = async', configChangeStart);
+    const configChangeEnd = mainTsx.indexOf('const handleChatFileChange = (', configChangeStart);
     const configChangeBody = mainTsx.slice(configChangeStart, configChangeEnd);
     const setConfigCall = configChangeBody.indexOf('const result = await service.setProjectSessionConfig');
     expect(setConfigCall).toBeGreaterThanOrEqual(0);
@@ -843,7 +854,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-mention-symbol {');
     expect(stylesCss).not.toContain('.chat-skill-button {');
     expect(stylesCss).toMatch(
-      /\.chat-photo-button \{[\s\S]*color: color-mix\(in srgb, #4db6ac 72%, var\(--text\)\);[\s\S]*\}/,
+      /\.chat-attach-button \{[\s\S]*color: color-mix\(in srgb, #4db6ac 72%, var\(--text\)\);[\s\S]*\}/,
     );
     expect(stylesCss).not.toContain('.chat-stop-button {');
     expect(stylesCss).not.toContain('.chat-stop-button.active {');

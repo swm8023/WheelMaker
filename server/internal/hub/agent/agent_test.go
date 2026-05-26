@@ -1842,7 +1842,7 @@ func TestCodexAppSessionPromptSendsBase64ImageAsLocalImage(t *testing.T) {
 				t.Fatalf("image input=%#v, want localImage path", imageInput)
 			}
 			if !strings.Contains(filepath.ToSlash(imagePath), "/db/session/Proj_Name-") ||
-				!strings.Contains(filepath.ToSlash(imagePath), "/thread-1/images/sha256-") ||
+				!strings.Contains(filepath.ToSlash(imagePath), "/thread-1/attachments/sha256-") ||
 				!strings.HasSuffix(imagePath, ".png") {
 				t.Fatalf("image path=%q, want project/session image artifact path", imagePath)
 			}
@@ -1939,7 +1939,7 @@ func TestCodexAppSessionPromptRejectsOversizedBase64Image(t *testing.T) {
 	}
 }
 
-func TestCodexAppCleanupSessionArtifactsRemovesImageDirectory(t *testing.T) {
+func TestCodexAppCleanupSessionArtifactsRemovesAttachmentDirectory(t *testing.T) {
 	oldRoot := codexappArtifactRootPathFunc
 	artifactRoot := t.TempDir()
 	codexappArtifactRootPathFunc = func() (string, error) { return artifactRoot, nil }
@@ -1953,7 +1953,7 @@ func TestCodexAppCleanupSessionArtifactsRemovesImageDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("codexappWriteImageArtifact: %v", err)
 	}
-	imageDir := filepath.Dir(path)
+	attachmentDir := filepath.Dir(path)
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("image artifact not written: %v", err)
 	}
@@ -1961,8 +1961,8 @@ func TestCodexAppCleanupSessionArtifactsRemovesImageDirectory(t *testing.T) {
 	if err := CleanupSessionArtifacts("Proj:Name", string(protocol.ACPProviderCodex), "thread-1"); err != nil {
 		t.Fatalf("CleanupSessionArtifacts: %v", err)
 	}
-	if _, err := os.Stat(imageDir); !os.IsNotExist(err) {
-		t.Fatalf("image dir stat err=%v, want removed", err)
+	if _, err := os.Stat(attachmentDir); !os.IsNotExist(err) {
+		t.Fatalf("attachment dir stat err=%v, want removed", err)
 	}
 }
 

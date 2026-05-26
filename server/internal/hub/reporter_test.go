@@ -241,6 +241,56 @@ func TestReporterRespondsToSessionRequests(t *testing.T) {
 
 }
 
+func TestReporterRespondsToSessionAttachmentRequests(t *testing.T) {
+	addr := newRegistryServer(t, registry.New(registry.Config{}).Handler())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	reporter := NewReporter(ReporterConfig{
+		Server:            addr,
+		HubID:             "hub-attachment",
+		ReconnectInterval: 50 * time.Millisecond,
+	}, []ProjectInfo{{Name: "proj1", Path: t.TempDir(), Online: true}})
+	handler := &stubSessionHandler{}
+	reporter.RegisterSessionHandler(rp.ProjectID("hub-attachment", "proj1"), handler)
+
+	done := make(chan error, 1)
+	go func() { done <- reporter.Run(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("reporter did not stop")
+		}
+	}()
+
+	waitForProjectOnline(t, addr, "hub-attachment:proj1", "")
+	app := dialWS(t, "http://"+addr+"/ws")
+	defer app.Close()
+	connectClient(t, app, "")
+
+	mustWriteJSON(t, app, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "session.attachment.start",
+		ProjectID: "hub-attachment:proj1",
+		Payload: map[string]any{
+			"sessionId": "sess-1",
+			"name":      "a.txt",
+			"mimeType":  "text/plain",
+			"size":      1,
+		},
+	})
+	resp := mustReadEnvelope(t, app)
+	if resp.Type != "response" || resp.Method != "session.attachment.start" {
+		t.Fatalf("unexpected session.attachment.start response: %#v", resp)
+	}
+	if handler.lastMethod != "session.attachment.start" || !strings.Contains(handler.lastBody, `"name":"a.txt"`) {
+		t.Fatalf("handler saw method=%q body=%q, want session.attachment.start payload", handler.lastMethod, handler.lastBody)
+	}
+}
+
 func TestReporterRespondsToCmdNPMRequests(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	respSeen := make(chan testEnvelope, 1)

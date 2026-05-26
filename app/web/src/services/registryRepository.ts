@@ -24,6 +24,17 @@ import type {
   RegistryPortRelayEnablePayload,
   RegistryPortRelaySnapshot,
   RegistryResumableSession,
+  RegistrySessionAttachmentCancelPayload,
+  RegistrySessionAttachmentCancelResponse,
+  RegistrySessionAttachmentChunkPayload,
+  RegistrySessionAttachmentChunkResponse,
+  RegistrySessionAttachmentDeletePayload,
+  RegistrySessionAttachmentDeleteResponse,
+  RegistrySessionAttachmentFinishPayload,
+  RegistrySessionAttachmentFinishResponse,
+  RegistrySessionAttachmentStartPayload,
+  RegistrySessionAttachmentStartResponse,
+  RegistrySessionContentBlock,
   RegistrySessionConfigOption,
   RegistrySessionConfigOptionValue,
   RegistrySessionCommand,
@@ -888,7 +899,7 @@ export class RegistryRepository {
     };
   }
 
-  async sendSessionMessage(projectId: string, payload: {sessionId: string; text?: string; blocks?: unknown[]}): Promise<{ok: boolean; sessionId: string}> {
+  async sendSessionMessage(projectId: string, payload: {sessionId: string; text?: string; blocks?: RegistrySessionContentBlock[]}): Promise<{ok: boolean; sessionId: string}> {
     const resp = await this.client.request({
       method: 'session.send',
       projectId,
@@ -899,6 +910,100 @@ export class RegistryRepository {
     return {
       ok: body.ok ?? false,
       sessionId: body.sessionId ?? payload.sessionId,
+    };
+  }
+
+  async startSessionAttachment(
+    projectId: string,
+    payload: RegistrySessionAttachmentStartPayload,
+  ): Promise<RegistrySessionAttachmentStartResponse> {
+    const resp = await this.client.request({
+      method: 'session.attachment.start',
+      projectId,
+      payload,
+      timeoutMs: 30000,
+    });
+    const body = (resp.payload ?? {}) as Partial<RegistrySessionAttachmentStartResponse>;
+    return {
+      ok: body.ok ?? false,
+      sessionId: body.sessionId ?? payload.sessionId,
+      uploadId: body.uploadId ?? '',
+      chunkSize: body.chunkSize ?? 1024 * 1024,
+      expiresIn: body.expiresIn,
+    };
+  }
+
+  async uploadSessionAttachmentChunk(
+    projectId: string,
+    payload: RegistrySessionAttachmentChunkPayload,
+  ): Promise<RegistrySessionAttachmentChunkResponse> {
+    const resp = await this.client.request({
+      method: 'session.attachment.chunk',
+      projectId,
+      payload,
+      timeoutMs: 30000,
+    });
+    const body = (resp.payload ?? {}) as Partial<RegistrySessionAttachmentChunkResponse>;
+    return {
+      ok: body.ok ?? false,
+      sessionId: body.sessionId ?? payload.sessionId,
+      uploadId: body.uploadId ?? payload.uploadId,
+      received: body.received ?? payload.offset,
+    };
+  }
+
+  async finishSessionAttachment(
+    projectId: string,
+    payload: RegistrySessionAttachmentFinishPayload,
+  ): Promise<RegistrySessionAttachmentFinishResponse> {
+    const resp = await this.client.request({
+      method: 'session.attachment.finish',
+      projectId,
+      payload,
+      timeoutMs: 30000,
+    });
+    const body = (resp.payload ?? {}) as Partial<RegistrySessionAttachmentFinishResponse>;
+    return {
+      ok: body.ok ?? false,
+      sessionId: body.sessionId ?? payload.sessionId,
+      attachment: body.attachment ?? {id: '', name: '', size: 0, uri: ''},
+      block: body.block ?? {type: 'resource_link', uri: '', name: '', size: 0},
+    };
+  }
+
+  async cancelSessionAttachment(
+    projectId: string,
+    payload: RegistrySessionAttachmentCancelPayload,
+  ): Promise<RegistrySessionAttachmentCancelResponse> {
+    const resp = await this.client.request({
+      method: 'session.attachment.cancel',
+      projectId,
+      payload,
+      timeoutMs: 15000,
+    });
+    const body = (resp.payload ?? {}) as Partial<RegistrySessionAttachmentCancelResponse>;
+    return {
+      ok: body.ok ?? false,
+      sessionId: body.sessionId ?? payload.sessionId,
+      uploadId: body.uploadId ?? payload.uploadId,
+    };
+  }
+
+  async deleteSessionAttachment(
+    projectId: string,
+    payload: RegistrySessionAttachmentDeletePayload,
+  ): Promise<RegistrySessionAttachmentDeleteResponse> {
+    const resp = await this.client.request({
+      method: 'session.attachment.delete',
+      projectId,
+      payload,
+      timeoutMs: 15000,
+    });
+    const body = (resp.payload ?? {}) as Partial<RegistrySessionAttachmentDeleteResponse>;
+    return {
+      ok: body.ok ?? false,
+      sessionId: body.sessionId ?? payload.sessionId,
+      attachmentId: body.attachmentId ?? payload.attachmentId,
     };
   }
 

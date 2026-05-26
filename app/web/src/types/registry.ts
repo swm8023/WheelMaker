@@ -15,10 +15,86 @@ export interface RegistryEnvelope<TPayload = unknown> {
 }
 
 export interface RegistrySessionContentBlock {
-  type: 'text' | 'image';
+  type: 'text' | 'image' | 'resource_link';
   text?: string;
   mimeType?: string;
   data?: string;
+  uri?: string;
+  name?: string;
+  size?: number;
+}
+
+export interface RegistrySessionAttachmentView {
+  id: string;
+  name: string;
+  mimeType?: string;
+  size: number;
+  sha256?: string;
+  uri: string;
+}
+
+export interface RegistrySessionAttachmentStartPayload {
+  sessionId: string;
+  name: string;
+  mimeType?: string;
+  size: number;
+}
+
+export interface RegistrySessionAttachmentStartResponse {
+  ok: boolean;
+  sessionId: string;
+  uploadId: string;
+  chunkSize: number;
+  expiresIn?: number;
+}
+
+export interface RegistrySessionAttachmentChunkPayload {
+  sessionId: string;
+  uploadId: string;
+  offset: number;
+  data: string;
+}
+
+export interface RegistrySessionAttachmentChunkResponse {
+  ok: boolean;
+  sessionId: string;
+  uploadId: string;
+  received: number;
+}
+
+export interface RegistrySessionAttachmentFinishPayload {
+  sessionId: string;
+  uploadId: string;
+  sha256: string;
+}
+
+export interface RegistrySessionAttachmentFinishResponse {
+  ok: boolean;
+  sessionId: string;
+  attachment: RegistrySessionAttachmentView;
+  block: RegistrySessionContentBlock;
+}
+
+export interface RegistrySessionAttachmentCancelPayload {
+  sessionId: string;
+  uploadId: string;
+}
+
+export interface RegistrySessionAttachmentCancelResponse {
+  ok: boolean;
+  sessionId: string;
+  uploadId: string;
+}
+
+export interface RegistrySessionAttachmentDeletePayload {
+  sessionId: string;
+  attachmentId: string;
+}
+
+export interface RegistrySessionAttachmentDeleteResponse {
+  ok: boolean;
+  sessionId: string;
+  attachmentId: string;
 }
 
 export interface RegistrySessionMessage {
