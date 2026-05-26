@@ -396,12 +396,6 @@ type PortRelayTargetMenuPressState = {
   originY: number;
   longPressed: boolean;
 };
-type ChatQuickSwitchPressState = {
-  pointerId: number;
-  originX: number;
-  originY: number;
-  longPressed: boolean;
-};
 type GestureNavigationState = {
   phase: 'pressing' | 'neutral' | 'expanded';
   pointerId: number;
@@ -3345,8 +3339,6 @@ function App() {
   const [chatHubMenuOpen, setChatHubMenuOpen] = useState(false);
   const chatHubMenuRef = useRef<HTMLDivElement | null>(null);
   const [chatQuickSwitchMenuOpen, setChatQuickSwitchMenuOpen] = useState(false);
-  const chatQuickSwitchTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-  const chatQuickSwitchPressRef = useRef<ChatQuickSwitchPressState | null>(null);
   const chatQuickSwitchMenuRef = useRef<HTMLDivElement | null>(null);
   const [chatSlashActiveIndex, setChatSlashActiveIndex] = useState(0);
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
@@ -5531,12 +5523,6 @@ function App() {
       floatingCooldownTimerRef.current = null;
     }, remaining);
   }, [clearFloatingCooldownTimer]);
-  const clearChatQuickSwitchTimer = useCallback(() => {
-    if (chatQuickSwitchTimerRef.current) {
-      window.clearTimeout(chatQuickSwitchTimerRef.current);
-      chatQuickSwitchTimerRef.current = null;
-    }
-  }, []);
   const beginFloatingPress = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
       if (isWide || event.button !== 0) {
@@ -5576,86 +5562,16 @@ function App() {
     },
     [beginFloatingPress],
   );
-  const handleChatQuickSwitchPointerDown = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      event.stopPropagation();
-      if (isWide || event.button !== 0) {
-        return;
-      }
-      if (floatingClickCooldownUntilRef.current > Date.now()) {
-        return;
-      }
-      clearChatQuickSwitchTimer();
-      event.currentTarget.setPointerCapture(event.pointerId);
-      chatQuickSwitchPressRef.current = {
-        pointerId: event.pointerId,
-        originX: event.clientX,
-        originY: event.clientY,
-        longPressed: false,
-      };
-      chatQuickSwitchTimerRef.current = window.setTimeout(() => {
-        const current = chatQuickSwitchPressRef.current;
-        if (!current || current.pointerId !== event.pointerId) {
-          return;
-        }
-        chatQuickSwitchPressRef.current = {
-          ...current,
-          longPressed: true,
-        };
-        chatQuickSwitchTimerRef.current = null;
-        floatingClickCooldownUntilRef.current = Date.now() + 180;
-        setPortRelayTargetMenuOpen(false);
-        setChatQuickSwitchMenuOpen(true);
-      }, GESTURE_LONG_PRESS_MS);
-    },
-    [clearChatQuickSwitchTimer, isWide],
-  );
-  const handleChatQuickSwitchPointerMove = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      event.stopPropagation();
-      const current = chatQuickSwitchPressRef.current;
-      if (!current || current.pointerId !== event.pointerId || current.longPressed) {
-        return;
-      }
-      const distancePx = Math.hypot(event.clientX - current.originX, event.clientY - current.originY);
-      if (distancePx < 10) {
-        return;
-      }
-      clearChatQuickSwitchTimer();
-      chatQuickSwitchPressRef.current = null;
-    },
-    [clearChatQuickSwitchTimer],
-  );
-  const finishChatQuickSwitchPress = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      event.stopPropagation();
-      const current = chatQuickSwitchPressRef.current;
-      if (!current || current.pointerId !== event.pointerId) {
-        return;
-      }
-      clearChatQuickSwitchTimer();
-      chatQuickSwitchPressRef.current = null;
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture can already be released by the browser on some mobile WebViews.
-      }
-      if (!current.longPressed) {
-        return;
-      }
-      event.preventDefault();
-      floatingClickCooldownUntilRef.current = Date.now() + 180;
-    },
-    [clearChatQuickSwitchTimer],
-  );
-  useEffect(() => () => {
-    clearChatQuickSwitchTimer();
-  }, [clearChatQuickSwitchTimer]);
   useEffect(() => {
     if (mobilePortRelayFrameOpen) {
       setChatQuickSwitchMenuOpen(false);
     }
   }, [mobilePortRelayFrameOpen]);
+  useEffect(() => {
+    if (tab !== 'chat' || sidebarSettingsOpen) {
+      setChatQuickSwitchMenuOpen(false);
+    }
+  }, [sidebarSettingsOpen, tab]);
   useEffect(() => {
     if (!chatQuickSwitchMenuOpen) {
       return;
@@ -5798,6 +5714,23 @@ function App() {
     setTab(nextTab);
     setDrawerOpen(false);
   }, [drawerOpen, tab, setDrawerOpen, setTab]);
+  const handleFloatingChatSelect = useCallback(() => {
+    if (floatingClickCooldownUntilRef.current > Date.now()) {
+      return;
+    }
+    setPortRelayTargetMenuOpen(false);
+    if (tab !== 'chat' || sidebarSettingsOpen) {
+      setChatQuickSwitchMenuOpen(false);
+      setTab('chat');
+      setDrawerOpen(false);
+      if (sidebarSettingsOpen) {
+        setSidebarSettingsOpen(false);
+      }
+      return;
+    }
+    setDrawerOpen(false);
+    setChatQuickSwitchMenuOpen(open => !open);
+  }, [sidebarSettingsOpen, tab, setDrawerOpen, setSidebarSettingsOpen, setTab]);
   const handleFloatingDrawerToggle = useCallback(() => {
     if (floatingClickCooldownUntilRef.current > Date.now()) {
       return;
@@ -15132,7 +15065,7 @@ function App() {
     </div>
   ) : null;
 
-  const chatQuickSwitchMenu = chatQuickSwitchMenuOpen && !mobilePortRelayFrameOpen ? (
+  const chatQuickSwitchMenu = chatQuickSwitchMenuOpen && tab === 'chat' && !sidebarSettingsOpen && !mobilePortRelayFrameOpen ? (
     <div
       ref={chatQuickSwitchMenuRef}
       className="chat-quick-switch-menu"
@@ -15331,12 +15264,9 @@ function App() {
                 type="button"
                 className="floating-nav-button"
                 data-active={tab === 'chat'}
-                onPointerDown={handleChatQuickSwitchPointerDown}
-                onPointerMove={handleChatQuickSwitchPointerMove}
-                onPointerUp={finishChatQuickSwitchPress}
-                onPointerCancel={finishChatQuickSwitchPress}
+                onPointerDown={event => event.stopPropagation()}
                 onContextMenu={event => event.preventDefault()}
-                onClick={() => handleFloatingNavSelect('chat')}
+                onClick={handleFloatingChatSelect}
                 title="Chat"
                 aria-label="Chat"
               >
@@ -15864,11 +15794,6 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
-
-
-
-
-
 
 
 

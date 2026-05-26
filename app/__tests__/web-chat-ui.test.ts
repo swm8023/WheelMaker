@@ -361,7 +361,7 @@ describe('web chat integration', () => {
     );
     expect(mainTsx).toContain('event.stopPropagation();');
     expect(mainTsx).toMatch(
-      /className="floating-nav-button"[\s\S]*?onPointerDown=\{handleChatQuickSwitchPointerDown\}[\s\S]*?onClick=\{\(\) => handleFloatingNavSelect\('chat'\)\}/,
+      /className="floating-nav-button"[\s\S]*?onPointerDown=\{event => event\.stopPropagation\(\)\}[\s\S]*?onClick=\{handleFloatingChatSelect\}/,
     );
     expect(mainTsx).toMatch(
       /className="floating-nav-button"[\s\S]*?onPointerDown=\{handleFloatingControlButtonPointerDown\}[\s\S]*?onClick=\{\(\) => handleFloatingNavSelect\('file'\)\}/,
