@@ -50,6 +50,24 @@ type FeishuConfig struct {
 	AppSecret string `json:"app_secret,omitempty"`
 }
 
+type rawFeishuConfig struct {
+	AppIDLegacy     string `json:"appID,omitempty"`
+	AppSecretLegacy string `json:"appSecret,omitempty"`
+	AppIDSnake      string `json:"app_id,omitempty"`
+	AppSecretSnake  string `json:"app_secret,omitempty"`
+	AppSecretTypo   string `json:"app_secrect,omitempty"`
+}
+
+func (c *FeishuConfig) UnmarshalJSON(data []byte) error {
+	var raw rawFeishuConfig
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.AppID = firstNonEmpty(raw.AppIDSnake, raw.AppIDLegacy)
+	c.AppSecret = firstNonEmpty(raw.AppSecretSnake, raw.AppSecretTypo, raw.AppSecretLegacy)
+	return nil
+}
+
 // MonitorConfig configures the wheelmaker-monitor web dashboard.
 type MonitorConfig struct {
 	Port int `json:"port,omitempty"` // HTTP listen port (default: 9631)
@@ -117,4 +135,13 @@ func validateRemovedLegacyFields(path string, data []byte) error {
 		}
 	}
 	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

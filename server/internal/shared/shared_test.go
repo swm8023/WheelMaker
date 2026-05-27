@@ -119,6 +119,47 @@ func TestLoadConfig_FeishuDoesNotRequireCredentials(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_FeishuLegacyFieldVariantsAreAcceptedAsIgnoredConfig(t *testing.T) {
+	tests := []struct {
+		name   string
+		config string
+	}{
+		{
+			name: "camel case app credentials",
+			config: `{
+				"projects": [{
+					"name": "proj",
+					"path": "D:/repo",
+					"feishu": {"appID": "cli_xxx", "appSecret": "secret"}
+				}]
+			}`,
+		},
+		{
+			name: "historical typo secret",
+			config: `{
+				"projects": [{
+					"name": "proj",
+					"path": "D:/repo",
+					"feishu": {"app_id": "cli_xxx", "app_secrect": "secret"}
+				}]
+			}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempConfig(t, tt.config)
+			cfg, err := LoadConfig(path)
+			if err != nil {
+				t.Fatalf("LoadConfig() error = %v, want feishu legacy fields ignored", err)
+			}
+			if len(cfg.Projects) != 1 || cfg.Projects[0].Name != "proj" {
+				t.Fatalf("projects=%+v, want parsed project", cfg.Projects)
+			}
+		})
+	}
+}
+
 func TestLoadConfig_ConfigExampleIsValid(t *testing.T) {
 	path := filepath.Join("..", "..", "config.example.json")
 	if _, err := LoadConfig(path); err != nil {
