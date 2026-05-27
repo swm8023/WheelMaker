@@ -495,15 +495,15 @@ func TestReportTimeoutErrorRecordsSystemEventThroughViewSink(t *testing.T) {
 	}
 }
 
-func TestRecordSessionViewEventReturnsFalseWhenViewSinkFails(t *testing.T) {
+func TestRecordSessionViewEventReturnsTrueWhenConfiguredViewSinkFails(t *testing.T) {
 	s := mustNewSession(t, "sess-1", "/tmp", "claude")
 	s.viewSink = &failingSessionViewSink{}
 
-	if delivered := s.recordSessionViewEvent(SessionViewEvent{
+	if handled := s.recordSessionViewEvent(SessionViewEvent{
 		Type:    SessionViewEventTypeSystem,
 		Content: "fallback please",
-	}); delivered {
-		t.Fatal("recordSessionViewEvent returned true for failed view sink, want false")
+	}); !handled {
+		t.Fatal("recordSessionViewEvent returned false for configured failed view sink, want true")
 	}
 }
 

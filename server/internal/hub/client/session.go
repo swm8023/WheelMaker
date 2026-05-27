@@ -281,9 +281,10 @@ func (s *Session) recordSessionViewEvent(event SessionViewEvent) bool {
 	s.lastActiveAt = maxTime(s.lastActiveAt, event.UpdatedAt)
 	s.mu.Unlock()
 	if s.viewSink != nil {
-		if err := s.viewSink.RecordEvent(context.Background(), event); err == nil {
-			return true
+		if err := s.viewSink.RecordEvent(context.Background(), event); err != nil {
+			hubLogger(s.projectName).Warn("record session view event failed session=%s type=%s err=%v", event.SessionID, event.Type, err)
 		}
+		return true
 	}
 	return false
 }
