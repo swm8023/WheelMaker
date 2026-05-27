@@ -2830,6 +2830,11 @@ function App() {
       ? persistedGlobal.registryDebug
       : false,
   );
+  const [disableFileCache, setDisableFileCache] = useState(
+    typeof persistedGlobal.disableFileCache === 'boolean'
+      ? persistedGlobal.disableFileCache
+      : false,
+  );
   const [localHubReadEnabled, setLocalHubReadEnabled] = useState(
     typeof persistedGlobal.localHubReadEnabled === 'boolean'
       ? persistedGlobal.localHubReadEnabled
@@ -5117,6 +5122,16 @@ function App() {
   }, [registryDebug]);
 
   useEffect(() => {
+    workspaceStore.setDisableFileCache(disableFileCache);
+    if (disableFileCache) {
+      workspaceStore.clearFileCache();
+      dirHashRef.current = {};
+      fileHashRef.current = {};
+      fileCacheRef.current = {};
+    }
+  }, [disableFileCache]);
+
+  useEffect(() => {
     service.setLocalHubReadEnabled(localHubReadEnabled);
     setLocalHubReadStatuses(service.getLocalHubReadStatuses(registryHubs));
     workspaceStore.rememberGlobalState({ localHubReadEnabled });
@@ -6704,16 +6719,17 @@ function App() {
   const loadDirectory = async (path: string, options?: {projectId?: string}) => {
     if (loadingDirs[path]) return;
     const targetProjectId = options?.projectId || projectIdRef.current || projectId;
+    const fileCacheDisabled = disableFileCache === true;
     setLoadingDirs(prev => ({ ...prev, [path]: true }));
     try {
-      const persistedCache = targetProjectId
+      const persistedCache = !fileCacheDisabled && targetProjectId
         ? workspaceStore.getCachedDirectory(targetProjectId, path)
         : null;
-      const knownHash =
+      const knownHash = fileCacheDisabled ? '' :
         dirHashRef.current[path] || persistedCache?.hash || '';
       const result = await service.listDirectory(
         path,
-        knownHash || undefined,
+        fileCacheDisabled ? undefined : knownHash || undefined,
       );
 
       if (result.notModified) {
@@ -6722,8 +6738,10 @@ function App() {
           setDirEntries(prev => ({ ...prev, [path]: sortEntries(cachedEntries) }));
         }
         if (result.hash) {
-          dirHashRef.current[path] = result.hash;
-          if (targetProjectId && Array.isArray(cachedEntries)) {
+          if (!fileCacheDisabled) {
+            dirHashRef.current[path] = result.hash;
+          }
+          if (!fileCacheDisabled && targetProjectId && Array.isArray(cachedEntries)) {
             workspaceStore.cacheDirectory(targetProjectId, path, result.hash, cachedEntries);
           }
         }
@@ -6733,10 +6751,10 @@ function App() {
       const entries = sortEntries(result.entries);
       setDirEntries(prev => ({ ...prev, [path]: entries }));
       const nextHash = result.hash || persistedCache?.hash || '';
-      if (nextHash) {
+      if (!fileCacheDisabled && nextHash) {
         dirHashRef.current[path] = nextHash;
       }
-      if (targetProjectId) {
+      if (!fileCacheDisabled && targetProjectId) {
         workspaceStore.cacheDirectory(targetProjectId, path, nextHash, entries);
       }
     } finally {
@@ -6781,18 +6799,20 @@ function App() {
       if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;
       setFileInfo(info);
       const cacheKey = fileMemoryCacheKey(targetProjectId, path);
-      const persistedFile = workspaceStore.getCachedFile(targetProjectId, path);
+      const fileCacheDisabled = disableFileCache === true;
+      const persistedFile = fileCacheDisabled ? null : workspaceStore.getCachedFile(targetProjectId, path);
       if (
+        !fileCacheDisabled &&
         typeof persistedFile?.content === 'string' &&
         fileCacheRef.current[cacheKey] === undefined
       ) {
         fileCacheRef.current[cacheKey] = persistedFile.content;
       }
-      if (persistedFile?.hash && !fileHashRef.current[cacheKey]) {
+      if (!fileCacheDisabled && persistedFile?.hash && !fileHashRef.current[cacheKey]) {
         fileHashRef.current[cacheKey] = persistedFile.hash;
       }
-      const cachedContent = fileCacheRef.current[cacheKey] ?? persistedFile?.content;
-      const knownHash = typeof cachedContent === 'string'
+      const cachedContent = fileCacheDisabled ? undefined : fileCacheRef.current[cacheKey] ?? persistedFile?.content;
+      const knownHash = !fileCacheDisabled && typeof cachedContent === 'string'
         ? fileHashRef.current[cacheKey] || persistedFile?.hash || ''
         : '';
       const isFirstLoad = !knownHash;
@@ -6807,20 +6827,33 @@ function App() {
         }
       }
       const result = await service.readProjectFile(path, targetProjectId, {
-        knownHash: knownHash || undefined,
+        knownHash: fileCacheDisabled ? undefined : knownHash || undefined,
       });
       if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;
+      if (result.notModified && fileCacheDisabled) {
+        const freshResult = await service.readProjectFile(path, targetProjectId);
+        if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;
+        setFileContent(freshResult.content);
+        if (shouldRestoreScroll) {
+          scheduleRestoreSelectedFileScroll(path);
+        }
+        return;
+      }
       if (result.notModified) {
         if (typeof cachedContent !== 'string') {
           const freshResult = await service.readProjectFile(path, targetProjectId);
           if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;
           setFileContent(freshResult.content);
-          fileCacheRef.current[cacheKey] = freshResult.content;
+          if (!fileCacheDisabled) {
+            fileCacheRef.current[cacheKey] = freshResult.content;
+          }
           const freshHash = freshResult.hash || knownHash;
-          if (freshHash) {
+          if (!fileCacheDisabled && freshHash) {
             fileHashRef.current[cacheKey] = freshHash;
           }
-          workspaceStore.cacheFile(targetProjectId, path, freshHash, freshResult.content);
+          if (!fileCacheDisabled) {
+            workspaceStore.cacheFile(targetProjectId, path, freshHash, freshResult.content);
+          }
           if (shouldRestoreScroll) {
             scheduleRestoreSelectedFileScroll(path);
           }
@@ -6828,7 +6861,7 @@ function App() {
         }
         setFileContent(cachedContent);
         const nextHash = result.hash || knownHash;
-        if (nextHash) {
+        if (!fileCacheDisabled && nextHash) {
           fileHashRef.current[cacheKey] = nextHash;
           workspaceStore.cacheFile(targetProjectId, path, nextHash, cachedContent);
         }
@@ -6838,12 +6871,16 @@ function App() {
         return;
       }
       setFileContent(result.content);
-      fileCacheRef.current[cacheKey] = result.content;
+      if (!fileCacheDisabled) {
+        fileCacheRef.current[cacheKey] = result.content;
+      }
       const nextHash = result.hash || knownHash;
-      if (nextHash) {
+      if (!fileCacheDisabled && nextHash) {
         fileHashRef.current[cacheKey] = nextHash;
       }
-      workspaceStore.cacheFile(targetProjectId, path, nextHash, result.content);
+      if (!fileCacheDisabled) {
+        workspaceStore.cacheFile(targetProjectId, path, nextHash, result.content);
+      }
       if (shouldRestoreScroll) {
         scheduleRestoreSelectedFileScroll(path);
       }
@@ -8325,7 +8362,7 @@ function App() {
     }
     try {
       const ws = toRegistryWsUrl(nextAddress);
-      const result = await workspaceController.connect(ws, trimmedToken);
+      const result = await workspaceController.connect(ws, trimmedToken, {disableFileCache});
       submitDesktopRemoteWebCandidate(ws);
       const persistedSelectedChatKey = workspaceStore.migrateSelectedChatSessionKey(result.hydrated.projectId);
       const preferredSelectedChatKey =
@@ -8381,6 +8418,7 @@ function App() {
           result.hydrated.projectId,
           result.rootEntries,
           result.hydrated.expandedDirs,
+          {disableFileCache},
         )
         .then(validated => {
           if (projectIdRef.current !== result.hydrated.projectId) return;
@@ -9892,7 +9930,7 @@ function App() {
     }
 
     try {
-      const result = await workspaceController.switchProjectLightweight(nextProjectId);
+      const result = await workspaceController.switchProjectLightweight(nextProjectId, {disableFileCache});
       projectsRef.current = result.projects;
       setProjects(result.projects);
       setRegistryHubs(result.hubs);
@@ -9927,7 +9965,7 @@ function App() {
   const switchProject = async (nextProjectId: string) => {
     setLoadingProject(true);
     try {
-      const result = await workspaceController.switchProject(nextProjectId);
+      const result = await workspaceController.switchProject(nextProjectId, {disableFileCache});
       setProjects(result.projects);
       setHasPendingProjectUpdates(false);
       applyHydratedProjectState(result.hydrated);
@@ -9936,6 +9974,7 @@ function App() {
           result.hydrated.projectId,
           result.rootEntries,
           result.hydrated.expandedDirs,
+          {disableFileCache},
         )
         .then(validated => {
           if (projectIdRef.current !== result.hydrated.projectId) return;
@@ -10561,7 +10600,7 @@ function App() {
       if (needsProjectOrFsRefresh) {
         const validated = await workspaceController.refreshProject(projectId, [
           ...latestExpandedDirs,
-        ]);
+        ], {disableFileCache});
         setDirEntries(validated.dirEntries);
         setExpandedDirs(validated.expandedDirs);
         dirHashRef.current = {};
@@ -12716,6 +12755,17 @@ function App() {
             type="checkbox"
             checked={registryDebug}
             onChange={event => setRegistryDebug(event.target.checked)}
+          />
+        </label>
+        <label className="settings-row sidebar-setting-row">
+          <span>
+            <span className="codicon codicon-files settings-row-icon" aria-hidden="true" />
+            Disable File Cache
+          </span>
+          <input
+            type="checkbox"
+            checked={disableFileCache}
+            onChange={event => setDisableFileCache(event.target.checked)}
           />
         </label>
         <button
@@ -15770,8 +15820,4 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
-
-
-
-
 

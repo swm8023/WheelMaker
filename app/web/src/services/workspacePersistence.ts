@@ -73,6 +73,7 @@ export type PersistedGlobalState = {
   showLineNumbers: boolean;
   hideToolCalls: boolean;
   registryDebug: boolean;
+  disableFileCache: boolean;
   localHubReadEnabled: boolean;
   gestureNavigation: boolean;
   tab: PersistedTab;
@@ -146,6 +147,7 @@ const GLOBAL_KEYS = {
   showLineNumbers: 'showLineNumbers',
   hideToolCalls: 'hideToolCalls',
   registryDebug: 'registryDebug',
+  disableFileCache: 'disableFileCache',
   localHubReadEnabled: 'localHubReadEnabled',
   gestureNavigation: 'gestureNavigation',
   tab: 'tab',
@@ -178,6 +180,7 @@ function defaultGlobalState(): PersistedGlobalState {
     showLineNumbers: true,
     hideToolCalls: true,
     registryDebug: false,
+    disableFileCache: false,
     localHubReadEnabled: true,
     gestureNavigation: false,
     tab: 'file',
@@ -387,6 +390,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     showLineNumbers: typeof input.showLineNumbers === 'boolean' ? input.showLineNumbers : base.showLineNumbers,
     hideToolCalls: typeof input.hideToolCalls === 'boolean' ? input.hideToolCalls : base.hideToolCalls,
     registryDebug: typeof input.registryDebug === 'boolean' ? input.registryDebug : base.registryDebug,
+    disableFileCache: typeof input.disableFileCache === 'boolean' ? input.disableFileCache : base.disableFileCache,
     localHubReadEnabled: typeof input.localHubReadEnabled === 'boolean' ? input.localHubReadEnabled : base.localHubReadEnabled,
     gestureNavigation: typeof input.gestureNavigation === 'boolean' ? input.gestureNavigation : base.gestureNavigation,
     tab: input.tab === 'chat' || input.tab === 'git' ? input.tab : 'file',
@@ -854,6 +858,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.showLineNumbers, v: serialize(this.state.global.showLineNumbers), updatedAt: now},
       {k: GLOBAL_KEYS.hideToolCalls, v: serialize(this.state.global.hideToolCalls), updatedAt: now},
       {k: GLOBAL_KEYS.registryDebug, v: serialize(this.state.global.registryDebug), updatedAt: now},
+      {k: GLOBAL_KEYS.disableFileCache, v: serialize(this.state.global.disableFileCache), updatedAt: now},
       {k: GLOBAL_KEYS.localHubReadEnabled, v: serialize(this.state.global.localHubReadEnabled), updatedAt: now},
       {k: GLOBAL_KEYS.gestureNavigation, v: serialize(this.state.global.gestureNavigation), updatedAt: now},
       {k: GLOBAL_KEYS.tab, v: serialize(this.state.global.tab), updatedAt: now},
@@ -1201,6 +1206,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.showLineNumbers, v: serialize(next.showLineNumbers), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.hideToolCalls, v: serialize(next.hideToolCalls), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.registryDebug, v: serialize(next.registryDebug), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.disableFileCache, v: serialize(next.disableFileCache), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.localHubReadEnabled, v: serialize(next.localHubReadEnabled), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.gestureNavigation, v: serialize(next.gestureNavigation), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.tab, v: serialize(next.tab), updatedAt: now});
@@ -1309,6 +1315,13 @@ export class WorkspacePersistenceRepository {
       v: value,
       updatedAt: now,
     })).catch(() => undefined);
+  }
+
+  clearFileCache(): void {
+    this.fileCache.clear();
+    void this.ready().then(async () => {
+      await this.db.clearStores([TABLE_FILE_CACHE]);
+    }).catch(() => undefined);
   }
 
   clearCachePreservingToken(): void {
