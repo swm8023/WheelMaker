@@ -113,8 +113,8 @@ func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 			"hubId":           "hub-a",
 			"connectionEpoch": int64(connectionEpoch),
 			"projects": []map[string]any{
-				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "agents": []string{"codex", "claude", "copilot"}, "imType": "console", "projectRev": "", "git": map[string]any{}},
-				{"name": "app", "path": "D:/Code/WheelMaker/app", "online": true, "agent": "claude", "agents": []string{"claude", "codex"}, "imType": "feishu", "projectRev": "", "git": map[string]any{}},
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "agents": []string{"codex", "claude", "copilot"}, "imType": "app", "projectRev": "", "git": map[string]any{}},
+				{"name": "app", "path": "D:/Code/WheelMaker/app", "online": true, "agent": "claude", "agents": []string{"claude", "codex"}, "imType": "app", "projectRev": "", "git": map[string]any{}},
 			},
 		},
 	})

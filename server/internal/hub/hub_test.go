@@ -30,22 +30,6 @@ import (
 	"time"
 )
 
-func TestBuildClient_FeishuConfigStartsSessionClient(t *testing.T) {
-	h := New(&logger.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
-	c, err := h.buildClient(context.Background(), logger.ProjectConfig{
-		Name:   "p",
-		Path:   ".",
-		Feishu: &logger.FeishuConfig{AppID: "cli_xxx", AppSecret: "yyy"},
-	})
-	if err != nil {
-		t.Fatalf("buildClient: %v", err)
-	}
-	if _, err := c.HandleSessionRequest(context.Background(), "session.list", "p", nil); err != nil {
-		t.Fatalf("session.list: %v", err)
-	}
-	t.Cleanup(func() { _ = c.Close() })
-}
-
 func TestBuildClient_DefaultConfigStartsSessionClient(t *testing.T) {
 	h := New(&logger.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
 	c, err := h.buildClient(context.Background(), logger.ProjectConfig{
@@ -122,19 +106,6 @@ func TestBuildClientStartsWithSessionTurnStore(t *testing.T) {
 	if len(body.Turns) != 1 || !strings.Contains(body.Turns[0].Content, "from-db-session") {
 		t.Fatalf("turns=%+v, want db/session turn", body.Turns)
 	}
-}
-
-func TestBuildClient_IncompleteFeishuConfigDoesNotBlockSessionClient(t *testing.T) {
-	h := New(&logger.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
-	c, err := h.buildClient(context.Background(), logger.ProjectConfig{
-		Name:   "p",
-		Path:   ".",
-		Feishu: &logger.FeishuConfig{AppID: "cli_xxx"},
-	})
-	if err != nil {
-		t.Fatalf("buildClient: %v", err)
-	}
-	t.Cleanup(func() { _ = c.Close() })
 }
 
 func TestStartRejectsSchemaMismatchWithDeleteHint(t *testing.T) {
