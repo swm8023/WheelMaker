@@ -21,13 +21,13 @@ type rawAppConfig struct {
 }
 
 type rawProjectConfig struct {
-	Debug    json.RawMessage `json:"debug,omitempty"`
-	IM       json.RawMessage `json:"im,omitempty"`
-	Client   json.RawMessage `json:"client,omitempty"`
-	IMFilter json.RawMessage `json:"imFilter,omitempty"`
+	Debug          json.RawMessage `json:"debug,omitempty"`
+	LegacyIM       json.RawMessage `json:"im,omitempty"`
+	Client         json.RawMessage `json:"client,omitempty"`
+	LegacyIMFilter json.RawMessage `json:"imFilter,omitempty"`
 }
 
-type rawIMConfig struct {
+type rawLegacyIMConfig struct {
 	Version json.RawMessage `json:"version,omitempty"`
 }
 
@@ -73,7 +73,7 @@ type MonitorConfig struct {
 	Port int `json:"port,omitempty"` // HTTP listen port (default: 9631)
 }
 
-// RegistryConfig configures registry sync independent of IM mode.
+// RegistryConfig configures registry sync.
 type RegistryConfig struct {
 	Port   int    `json:"port,omitempty"`
 	Listen bool   `json:"listen,omitempty"`
@@ -113,24 +113,24 @@ func validateRemovedLegacyFields(path string, data []byte) error {
 	}
 
 	if len(raw.Version) != 0 {
-		return fmt.Errorf("parse config %s: im.version has been removed; IM is the only supported runtime", path)
+		return fmt.Errorf("parse config %s: im.version has been removed; configure App sessions through registry settings", path)
 	}
 
 	for _, project := range raw.Projects {
 		if len(project.Debug) != 0 {
 			return fmt.Errorf("parse config %s: projects[].debug has been removed", path)
 		}
-		if len(project.IM) != 0 {
-			var legacyIM rawIMConfig
-			if err := json.Unmarshal(project.IM, &legacyIM); err == nil && len(legacyIM.Version) != 0 {
-				return fmt.Errorf("parse config %s: im.version has been removed; IM is the only supported runtime", path)
+		if len(project.LegacyIM) != 0 {
+			var legacyIM rawLegacyIMConfig
+			if err := json.Unmarshal(project.LegacyIM, &legacyIM); err == nil && len(legacyIM.Version) != 0 {
+				return fmt.Errorf("parse config %s: projects[].im.version has been removed; configure App sessions through registry settings", path)
 			}
 			return fmt.Errorf("parse config %s: projects[].im has been removed; configure App sessions through registry settings", path)
 		}
 		if len(project.Client) != 0 {
 			return fmt.Errorf("parse config %s: projects[].client has been removed; provider is auto-detected", path)
 		}
-		if len(project.IMFilter) != 0 {
+		if len(project.LegacyIMFilter) != 0 {
 			return fmt.Errorf("parse config %s: projects[].imFilter has been removed", path)
 		}
 	}

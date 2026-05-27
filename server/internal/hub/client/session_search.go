@@ -400,20 +400,20 @@ func sessionSearchTurnVisibleText(content string) string {
 	if content == "" {
 		return ""
 	}
-	var turn acp.IMTurnMessage
+	var turn acp.SessionTurnMessage
 	if err := json.Unmarshal([]byte(content), &turn); err != nil {
 		return ""
 	}
 	method := strings.TrimSpace(turn.Method)
 	switch method {
-	case acp.IMMethodPromptRequest:
-		var payload acp.IMPromptRequest
+	case acp.SessionTurnMethodPromptRequest:
+		var payload acp.SessionTurnPromptRequest
 		if err := json.Unmarshal(turn.Param, &payload); err != nil {
 			return ""
 		}
 		return sessionSearchContentBlockText(payload.ContentBlocks)
-	case acp.IMMethodPromptDone:
-		var payload acp.IMPromptResult
+	case acp.SessionTurnMethodPromptDone:
+		var payload acp.SessionTurnPromptResult
 		if err := json.Unmarshal(turn.Param, &payload); err != nil {
 			return ""
 		}
@@ -424,16 +424,16 @@ func sessionSearchTurnVisibleText(content string) string {
 		default:
 			return strings.TrimSpace(payload.Message)
 		}
-	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought, acp.SessionUpdateUserMessageChunk, acp.IMMethodSystem:
-		var payload acp.IMTextResult
+	case acp.SessionTurnMethodAgentMessage, acp.SessionTurnMethodAgentThought, acp.SessionUpdateUserMessageChunk, acp.SessionTurnMethodSystem:
+		var payload acp.SessionTurnTextResult
 		if err := json.Unmarshal(turn.Param, &payload); err != nil {
 			return ""
 		}
 		return strings.TrimSpace(payload.Text)
-	case acp.IMMethodToolCall:
+	case acp.SessionTurnMethodToolCall:
 		return ""
-	case acp.IMMethodAgentPlan:
-		var payload []acp.IMPlanResult
+	case acp.SessionTurnMethodAgentPlan:
+		var payload []acp.SessionTurnPlanResult
 		if err := json.Unmarshal(turn.Param, &payload); err != nil {
 			return ""
 		}

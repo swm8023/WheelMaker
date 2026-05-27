@@ -1150,7 +1150,7 @@ function extractTextFromACPContent(content: unknown): string {
   return chunks.join('\n').trim();
 }
 
-function extractTextFromIMParam(param: unknown): string {
+function extractTextFromSessionTurnParam(param: unknown): string {
   if (typeof param === 'string') {
     return param.trim();
   }
@@ -1191,7 +1191,7 @@ function msgText(method: string, param: Record<string, unknown>): string {
   if (method === 'prompt_done') {
     return typeof param.stopReason === 'string' ? param.stopReason : '';
   }
-  return extractTextFromIMParam(param);
+  return extractTextFromSessionTurnParam(param);
 }
 
 function msgBlocks(
@@ -15820,4 +15820,3 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
-

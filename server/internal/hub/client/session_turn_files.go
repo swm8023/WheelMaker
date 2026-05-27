@@ -376,7 +376,7 @@ func (s *fileSessionTurnStore) turnPath(projectName, sessionID string, turnIndex
 }
 
 func sessionGapTurnJSON(turnIndex int64) string {
-	return buildIMContentJSON("session/gap", map[string]any{"reason": "missing_turn", "turnIndex": turnIndex})
+	return buildSessionTurnContentJSON("session/gap", map[string]any{"reason": "missing_turn", "turnIndex": turnIndex})
 }
 
 func readOrInitTurnHeader(f *os.File) ([]byte, error) {

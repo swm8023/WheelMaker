@@ -1009,7 +1009,6 @@ func (s *Server) snapshotProjects(scopeHubID string) []rp.ProjectListItem {
 				Agent:         p.Agent,
 				Agents:        agents,
 				AgentProfiles: agentProfiles,
-				IMType:        p.IMType,
 				ProjectRev:    p.ProjectRev,
 				Git:           p.Git,
 			})

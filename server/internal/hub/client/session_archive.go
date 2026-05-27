@@ -341,7 +341,7 @@ func sha256Hex(raw []byte) string {
 }
 
 func archiveGapTurnJSON() string {
-	return buildIMContentJSON(sessionArchiveGapMethod, map[string]string{"reason": "missing_turn"})
+	return buildSessionTurnContentJSON(sessionArchiveGapMethod, map[string]string{"reason": "missing_turn"})
 }
 
 func formatArchiveTime(value time.Time) string {

@@ -20,7 +20,7 @@ import (
 )
 
 // Hub orchestrates one or more WheelMaker project clients.
-// Each project has its own IM channel, agent session, and state partition.
+// Each project has its own client, agent session, and state partition.
 type Hub struct {
 	cfg           *logger.AppConfig
 	dbPath        string
@@ -40,7 +40,6 @@ func New(cfg *logger.AppConfig, dbPath string) *Hub {
 }
 
 // Start validates config, creates one client.Client per project, and starts each client.
-// Returns an error if any project has an unsupported IM type.
 func (h *Hub) Start(ctx context.Context) error {
 	hubLogger("").Info("start projects=%d", len(h.cfg.Projects))
 	if err := client.CheckStoreSchema(h.dbPath); err != nil {
@@ -76,10 +75,10 @@ func (h *Hub) buildClient(ctx context.Context, pc logger.ProjectConfig) (*client
 			cwd = "."
 		}
 	}
-	return h.buildIMClient(ctx, pc, cwd)
+	return h.buildProjectClient(ctx, pc, cwd)
 }
 
-func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd string) (*client.Client, error) {
+func (h *Hub) buildProjectClient(ctx context.Context, pc logger.ProjectConfig, cwd string) (*client.Client, error) {
 	hubLogger(pc.Name).Info("opening store db=%s", h.dbPath)
 	store, err := client.NewStore(h.dbPath)
 	if err != nil {
@@ -217,7 +216,6 @@ func (h *Hub) collectProjectInfo(cfgProject logger.ProjectConfig) ProjectInfo {
 		Path:   path,
 		Online: true,
 		Agent:  "auto",
-		IMType: "app",
 	}
 	if preferred := strings.TrimSpace(agent.DefaultACPFactory().PreferredName()); preferred != "" {
 		info.Agent = preferred

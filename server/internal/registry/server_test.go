@@ -113,8 +113,8 @@ func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 			"hubId":           "hub-a",
 			"connectionEpoch": int64(connectionEpoch),
 			"projects": []map[string]any{
-				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "agents": []string{"codex", "claude", "copilot"}, "imType": "app", "projectRev": "", "git": map[string]any{}},
-				{"name": "app", "path": "D:/Code/WheelMaker/app", "online": true, "agent": "claude", "agents": []string{"claude", "codex"}, "imType": "app", "projectRev": "", "git": map[string]any{}},
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "agents": []string{"codex", "claude", "copilot"}, "projectRev": "", "git": map[string]any{}},
+				{"name": "app", "path": "D:/Code/WheelMaker/app", "online": true, "agent": "claude", "agents": []string{"claude", "codex"}, "projectRev": "", "git": map[string]any{}},
 			},
 		},
 	})
@@ -233,7 +233,7 @@ func TestProjectListIncludesLocalReadCandidate(t *testing.T) {
 				"proofFingerprint": "sha256:fingerprint",
 			},
 			"projects": []map[string]any{
-				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "", "git": map[string]any{}},
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "projectRev": "", "git": map[string]any{}},
 			},
 		},
 	})
@@ -337,7 +337,7 @@ func TestRegistryReportProjectsRejectsStaleConnectionEpoch(t *testing.T) {
 			"hubId":           "hub-a",
 			"connectionEpoch": int64(newEpoch),
 			"projects": []map[string]any{
-				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "p2", "git": map[string]any{"gitRev": "g2", "worktreeRev": "w2"}},
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "projectRev": "p2", "git": map[string]any{"gitRev": "g2", "worktreeRev": "w2"}},
 			},
 		},
 	})
@@ -351,7 +351,7 @@ func TestRegistryReportProjectsRejectsStaleConnectionEpoch(t *testing.T) {
 			"hubId":           "hub-a",
 			"connectionEpoch": int64(oldEpoch),
 			"projects": []map[string]any{
-				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
 			},
 		},
 	})
@@ -472,7 +472,7 @@ func TestBatchForwardsProjectRequests(t *testing.T) {
 			"hubId":           "hub-a",
 			"connectionEpoch": int64(connectionEpoch),
 			"projects": []map[string]any{
-				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
 			},
 		},
 	})
@@ -596,7 +596,7 @@ func TestRegistryUpdateProjectBroadcastsEvents(t *testing.T) {
 			"hubId":           "hub-a",
 			"connectionEpoch": int64(connectionEpoch),
 			"projects": []map[string]any{
-				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1", "headSha": "h1", "dirty": false}},
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1", "headSha": "h1", "dirty": false}},
 			},
 		},
 	})
@@ -630,7 +630,6 @@ func TestRegistryUpdateProjectBroadcastsEvents(t *testing.T) {
 				"path":       "D:/Code/WheelMaker/server",
 				"online":     true,
 				"agent":      "codex",
-				"imType":     "console",
 				"projectRev": "p2",
 				"git": map[string]any{
 					"gitRev":      "g2",
@@ -686,7 +685,7 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 			"hubId":           "hub-a",
 			"connectionEpoch": int64(connectionEpoch),
 			"projects": []map[string]any{
-				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "app", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
 			},
 		},
 	})
@@ -1007,7 +1006,7 @@ func TestBatchChatSendIsUnsupportedAfterIMRemoval(t *testing.T) {
 			"hubId":           "hub-a",
 			"connectionEpoch": int64(connectionEpoch),
 			"projects": []map[string]any{
-				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
 			},
 		},
 	})
@@ -1148,7 +1147,7 @@ func TestMonitorBatchRejectsClientForwardMethods(t *testing.T) {
 					"hubId":           "hub-a",
 					"connectionEpoch": int64(connectionEpoch),
 					"projects": []map[string]any{
-						{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
+						{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
 					},
 				},
 			})
@@ -1293,7 +1292,7 @@ func TestMonitorListHubAndMonitorStatusForwarding(t *testing.T) {
 			"hubId":           "hub-a",
 			"connectionEpoch": int64(connectionEpoch),
 			"projects": []map[string]any{
-				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "", "git": map[string]any{}},
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "projectRev": "", "git": map[string]any{}},
 			},
 		},
 	})

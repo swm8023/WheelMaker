@@ -2298,7 +2298,7 @@ func sessionViewACPSystemEvent(sessionID, text string) SessionViewEvent {
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content: acp.BuildACPContentJSON(acp.IMMethodSystem, map[string]any{
+		Content: acp.BuildACPContentJSON(acp.SessionTurnMethodSystem, map[string]any{
 			"result": text,
 		}),
 	}
@@ -2318,8 +2318,8 @@ func TestParseSessionViewEventSessionUpdateReturnsToolTurnKey(t *testing.T) {
 	if !parsed.bMessage {
 		t.Fatal("parsed.bMessage = false, want true")
 	}
-	if parsed.method != acp.IMMethodToolCall {
-		t.Fatalf("parsed.method = %q, want %q", parsed.method, acp.IMMethodToolCall)
+	if parsed.method != acp.SessionTurnMethodToolCall {
+		t.Fatalf("parsed.method = %q, want %q", parsed.method, acp.SessionTurnMethodToolCall)
 	}
 	if parsed.turnKey != "call-1" {
 		t.Fatalf("parsed.turnKey = %q, want %q", parsed.turnKey, "call-1")
@@ -2356,30 +2356,30 @@ func TestMergeTurnMessageMergesTypedTextPayload(t *testing.T) {
 	merged := mergeTurnMessage(
 		sessionTurnMessage{
 			sessionID: "sess-1",
-			method:    acp.IMMethodAgentMessage,
-			payload:   acp.IMTextResult{Text: "hello"},
+			method:    acp.SessionTurnMethodAgentMessage,
+			payload:   acp.SessionTurnTextResult{Text: "hello"},
 			turnIndex: 2,
 		},
 		sessionTurnMessage{
 			sessionID: "sess-1",
-			method:    acp.IMMethodAgentMessage,
-			payload:   acp.IMTextResult{Text: " world"},
+			method:    acp.SessionTurnMethodAgentMessage,
+			payload:   acp.SessionTurnTextResult{Text: " world"},
 			turnIndex: 2,
 		},
 		2,
 	)
-	result, ok := merged.payload.(acp.IMTextResult)
+	result, ok := merged.payload.(acp.SessionTurnTextResult)
 	if !ok {
-		t.Fatalf("merged.payload type = %T, want %T", merged.payload, acp.IMTextResult{})
+		t.Fatalf("merged.payload type = %T, want %T", merged.payload, acp.SessionTurnTextResult{})
 	}
 	if result.Text != "hello world" {
 		t.Fatalf("merged text = %q, want %q", result.Text, "hello world")
 	}
 }
 
-func TestBuildIMContentJSONDoesNotTrimMethod(t *testing.T) {
-	raw := buildIMContentJSON("  method.with.space  ", map[string]any{"k": "v"})
-	msg := acp.IMTurnMessage{}
+func TestBuildSessionTurnContentJSONDoesNotTrimSessionTurnMethod(t *testing.T) {
+	raw := buildSessionTurnContentJSON("  method.with.space  ", map[string]any{"k": "v"})
+	msg := acp.SessionTurnMessage{}
 	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
@@ -2489,8 +2489,8 @@ func TestGetTurnIndexUsesGenericTurnKeyIndex(t *testing.T) {
 	state := sessionPromptState{
 		nextTurnIndex: 3,
 		turns: []sessionTurnMessage{
-			{turnIndex: 1, method: acp.IMMethodSystem},
-			{turnIndex: 2, method: acp.IMMethodToolCall},
+			{turnIndex: 1, method: acp.SessionTurnMethodSystem},
+			{turnIndex: 2, method: acp.SessionTurnMethodToolCall},
 		},
 		turnIndexByKey: map[string]int64{
 			"merge-key": 2,
@@ -2528,8 +2528,8 @@ func TestAddMessageTurnMutatesStateInPlace(t *testing.T) {
 		t.Fatalf("len(state.turns) = %d, want 1", len(state.turns))
 	}
 	turn := state.turns[0]
-	if turn.method != acp.IMMethodPromptRequest {
-		t.Fatalf("turn method = %q, want %q", turn.method, acp.IMMethodPromptRequest)
+	if turn.method != acp.SessionTurnMethodPromptRequest {
+		t.Fatalf("turn method = %q, want %q", turn.method, acp.SessionTurnMethodPromptRequest)
 	}
 }
 
@@ -2554,12 +2554,12 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			event:         sessionViewPromptEvent("sess-1", "say hi", nil),
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
-			wantMethod:    acp.IMMethodPromptRequest,
+			wantMethod:    acp.SessionTurnMethodPromptRequest,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				requestPayload, ok := parsed.payload.(acp.IMPromptRequest)
+				requestPayload, ok := parsed.payload.(acp.SessionTurnPromptRequest)
 				if !ok {
-					t.Fatalf("parsed.payload type = %T, want %T", parsed.payload, acp.IMPromptRequest{})
+					t.Fatalf("parsed.payload type = %T, want %T", parsed.payload, acp.SessionTurnPromptRequest{})
 				}
 				if len(requestPayload.ContentBlocks) != 1 || strings.TrimSpace(requestPayload.ContentBlocks[0].Text) != "say hi" {
 					t.Fatalf("payload.ContentBlocks = %#v, want single text block", requestPayload.ContentBlocks)
@@ -2571,12 +2571,12 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			event:         sessionViewPromptFinishedEvent("sess-1", acp.StopReasonEndTurn),
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
-			wantMethod:    acp.IMMethodPromptDone,
+			wantMethod:    acp.SessionTurnMethodPromptDone,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				resultPayload, ok := parsed.payload.(acp.IMPromptResult)
+				resultPayload, ok := parsed.payload.(acp.SessionTurnPromptResult)
 				if !ok {
-					t.Fatalf("parsed.payload type = %T, want %T", parsed.payload, acp.IMPromptResult{})
+					t.Fatalf("parsed.payload type = %T, want %T", parsed.payload, acp.SessionTurnPromptResult{})
 				}
 				if resultPayload.StopReason != acp.StopReasonEndTurn {
 					t.Fatalf("payload.StopReason = %q, want %q", resultPayload.StopReason, acp.StopReasonEndTurn)
@@ -2593,7 +2593,7 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			}),
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionUpdate,
-			wantMethod:    acp.IMMethodToolCall,
+			wantMethod:    acp.SessionTurnMethodToolCall,
 			wantTurnKey:   "call-1",
 		},
 		{
@@ -2613,7 +2613,7 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			},
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
-			wantMethod:    acp.IMMethodPromptRequest,
+			wantMethod:    acp.SessionTurnMethodPromptRequest,
 		},
 	}
 
@@ -2660,12 +2660,12 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			},
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
-			wantMethod:    acp.IMMethodPromptRequest,
+			wantMethod:    acp.SessionTurnMethodPromptRequest,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				request, ok := parsed.payload.(acp.IMPromptRequest)
+				request, ok := parsed.payload.(acp.SessionTurnPromptRequest)
 				if !ok {
-					t.Fatalf("parsed.payload type = %T, want acp.IMPromptRequest", parsed.payload)
+					t.Fatalf("parsed.payload type = %T, want acp.SessionTurnPromptRequest", parsed.payload)
 				}
 				if len(request.ContentBlocks) != 0 {
 					t.Fatalf("request.ContentBlocks len = %d, want 0", len(request.ContentBlocks))
@@ -2681,12 +2681,12 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			},
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
-			wantMethod:    acp.IMMethodPromptRequest,
+			wantMethod:    acp.SessionTurnMethodPromptRequest,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				request, ok := parsed.payload.(acp.IMPromptRequest)
+				request, ok := parsed.payload.(acp.SessionTurnPromptRequest)
 				if !ok {
-					t.Fatalf("parsed.payload type = %T, want acp.IMPromptRequest", parsed.payload)
+					t.Fatalf("parsed.payload type = %T, want acp.SessionTurnPromptRequest", parsed.payload)
 				}
 				if len(request.ContentBlocks) != 0 {
 					t.Fatalf("request.ContentBlocks len = %d, want 0", len(request.ContentBlocks))
@@ -2720,10 +2720,10 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			event: SessionViewEvent{
 				Type:      SessionViewEventTypeACP,
 				SessionID: "sess-1",
-				Content:   acp.BuildACPContentJSON(acp.IMMethodSystem, nil),
+				Content:   acp.BuildACPContentJSON(acp.SessionTurnMethodSystem, nil),
 			},
 			wantMessage:   false,
-			wantACPMethod: acp.IMMethodSystem,
+			wantACPMethod: acp.SessionTurnMethodSystem,
 			wantMethod:    "",
 		},
 		{
@@ -2731,12 +2731,12 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			event: SessionViewEvent{
 				Type:      SessionViewEventTypeACP,
 				SessionID: "sess-1",
-				Content: acp.BuildACPContentJSON(acp.IMMethodSystem, map[string]any{
+				Content: acp.BuildACPContentJSON(acp.SessionTurnMethodSystem, map[string]any{
 					"result": "ignored",
 				}),
 			},
 			wantMessage:   false,
-			wantACPMethod: acp.IMMethodSystem,
+			wantACPMethod: acp.SessionTurnMethodSystem,
 			wantMethod:    "",
 		},
 		{
@@ -2748,12 +2748,12 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			},
 			wantMessage:   true,
 			wantACPMethod: "",
-			wantMethod:    acp.IMMethodSystem,
+			wantMethod:    acp.SessionTurnMethodSystem,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				result, ok := parsed.payload.(acp.IMTextResult)
+				result, ok := parsed.payload.(acp.SessionTurnTextResult)
 				if !ok {
-					t.Fatalf("parsed.payload type = %T, want acp.IMTextResult", parsed.payload)
+					t.Fatalf("parsed.payload type = %T, want acp.SessionTurnTextResult", parsed.payload)
 				}
 				if strings.TrimSpace(result.Text) != "legacy system" {
 					t.Fatalf("result.Text = %q, want %q", result.Text, "legacy system")
@@ -3578,14 +3578,14 @@ func TestPromptBoundaryTurnsCarryModelAndTimes(t *testing.T) {
 	var doneContent string
 	for _, event := range *published {
 		content := publishedTurnMap(t, event.payload)["content"].(string)
-		var msg acp.IMTurnMessage
+		var msg acp.SessionTurnMessage
 		if err := json.Unmarshal([]byte(content), &msg); err != nil {
 			t.Fatalf("unmarshal content: %v", err)
 		}
 		switch msg.Method {
-		case acp.IMMethodPromptRequest:
+		case acp.SessionTurnMethodPromptRequest:
 			requestContent = content
-		case acp.IMMethodPromptDone:
+		case acp.SessionTurnMethodPromptDone:
 			doneContent = content
 		}
 	}
@@ -3683,12 +3683,12 @@ func TestPromptDoneIsPublishedAsFinishedRealTurn(t *testing.T) {
 	last := lastPublishedEvent(t, *published, "registry.session.message")
 	turn := publishedTurnMap(t, last)
 	content := turn["content"].(string)
-	var msg acp.IMTurnMessage
+	var msg acp.SessionTurnMessage
 	if err := json.Unmarshal([]byte(content), &msg); err != nil {
 		t.Fatalf("unmarshal content: %v", err)
 	}
-	if msg.Method != acp.IMMethodPromptDone {
-		t.Fatalf("method = %q, want %q", msg.Method, acp.IMMethodPromptDone)
+	if msg.Method != acp.SessionTurnMethodPromptDone {
+		t.Fatalf("method = %q, want %q", msg.Method, acp.SessionTurnMethodPromptDone)
 	}
 	if got := turn["finished"]; got != true {
 		t.Fatalf("finished = %v, want true", got)
@@ -3738,12 +3738,12 @@ func TestSessionReadReturnsPromptDoneAsFinishedTurn(t *testing.T) {
 	if last.Finished != true {
 		t.Fatalf("prompt_done finished = %v, want true", last.Finished)
 	}
-	var msg acp.IMTurnMessage
+	var msg acp.SessionTurnMessage
 	if err := json.Unmarshal([]byte(last.Content), &msg); err != nil {
 		t.Fatalf("unmarshal prompt_done content: %v", err)
 	}
-	if msg.Method != acp.IMMethodPromptDone {
-		t.Fatalf("last method = %q, want %q", msg.Method, acp.IMMethodPromptDone)
+	if msg.Method != acp.SessionTurnMethodPromptDone {
+		t.Fatalf("last method = %q, want %q", msg.Method, acp.SessionTurnMethodPromptDone)
 	}
 }
 
@@ -4058,7 +4058,7 @@ func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 		t.Fatalf("turns len = %d, want 1", len(turns))
 	}
 
-	promptMessage := acp.IMTurnMessage{}
+	promptMessage := acp.SessionTurnMessage{}
 	if err := json.Unmarshal([]byte(turns[0].Content), &promptMessage); err != nil {
 		t.Fatalf("unmarshal prompt message: %v", err)
 	}
@@ -4066,8 +4066,8 @@ func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 	if err := json.Unmarshal([]byte(turns[0].Content), &promptDoc); err != nil {
 		t.Fatalf("unmarshal prompt message doc: %v", err)
 	}
-	if strings.TrimSpace(promptMessage.Method) != acp.IMMethodPromptRequest {
-		t.Fatalf("messages[0].method = %q, want %q", promptMessage.Method, acp.IMMethodPromptRequest)
+	if strings.TrimSpace(promptMessage.Method) != acp.SessionTurnMethodPromptRequest {
+		t.Fatalf("messages[0].method = %q, want %q", promptMessage.Method, acp.SessionTurnMethodPromptRequest)
 	}
 	if _, ok := promptDoc["session"]; ok {
 		t.Fatalf("messages[0].content unexpectedly contains session field")
@@ -4075,7 +4075,7 @@ func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 	if _, ok := promptDoc["index"]; ok {
 		t.Fatalf("messages[0].content unexpectedly contains index field")
 	}
-	promptRequest := acp.IMPromptRequest{}
+	promptRequest := acp.SessionTurnPromptRequest{}
 	if err := json.Unmarshal(promptMessage.Param, &promptRequest); err != nil {
 		t.Fatalf("unmarshal prompt request: %v", err)
 	}
@@ -4375,14 +4375,14 @@ func TestSessionViewPersistsLegacySystemEventsButIgnoresACPSystemEvents(t *testi
 		t.Fatalf("turns len = %d, want 3 (prompt + legacy system + prompt_done)", len(turns))
 	}
 
-	msg := acp.IMTurnMessage{}
+	msg := acp.SessionTurnMessage{}
 	if err := json.Unmarshal([]byte(turns[1]), &msg); err != nil {
 		t.Fatalf("unmarshal legacy system turn: %v", err)
 	}
-	if strings.TrimSpace(msg.Method) != acp.IMMethodSystem {
-		t.Fatalf("legacy system turn method = %q, want %q", msg.Method, acp.IMMethodSystem)
+	if strings.TrimSpace(msg.Method) != acp.SessionTurnMethodSystem {
+		t.Fatalf("legacy system turn method = %q, want %q", msg.Method, acp.SessionTurnMethodSystem)
 	}
-	result := acp.IMTextResult{}
+	result := acp.SessionTurnTextResult{}
 	if err := json.Unmarshal(msg.Param, &result); err != nil {
 		t.Fatalf("unmarshal legacy system result: %v", err)
 	}
@@ -4803,14 +4803,14 @@ func TestSessionViewPromptFinishedPublishesPromptDoneMessage(t *testing.T) {
 		t.Fatalf("published turnIndex = %d, want 3", got)
 	}
 	content, _ := turn["content"].(string)
-	msg := acp.IMTurnMessage{}
+	msg := acp.SessionTurnMessage{}
 	if err := json.Unmarshal([]byte(content), &msg); err != nil {
 		t.Fatalf("unmarshal prompt_done content: %v", err)
 	}
-	if strings.TrimSpace(msg.Method) != acp.IMMethodPromptDone {
-		t.Fatalf("published method = %q, want %q", msg.Method, acp.IMMethodPromptDone)
+	if strings.TrimSpace(msg.Method) != acp.SessionTurnMethodPromptDone {
+		t.Fatalf("published method = %q, want %q", msg.Method, acp.SessionTurnMethodPromptDone)
 	}
-	result := acp.IMPromptResult{}
+	result := acp.SessionTurnPromptResult{}
 	if err := json.Unmarshal(msg.Param, &result); err != nil {
 		t.Fatalf("unmarshal prompt_done param: %v", err)
 	}
@@ -4851,7 +4851,7 @@ func TestSessionViewPromptFinishedPublishesPromptDoneBeforeSessionUpdated(t *tes
 		if event.method == "registry.session.message" {
 			turn := publishedTurnMap(t, event.payload)
 			content, _ := turn["content"].(string)
-			if strings.Contains(content, acp.IMMethodAgentMessage) || strings.Contains(content, acp.IMMethodPromptDone) {
+			if strings.Contains(content, acp.SessionTurnMethodAgentMessage) || strings.Contains(content, acp.SessionTurnMethodPromptDone) {
 				finishTail = append(finishTail, event)
 			}
 			continue
@@ -4864,10 +4864,10 @@ func TestSessionViewPromptFinishedPublishesPromptDoneBeforeSessionUpdated(t *tes
 		t.Fatalf("finish publish tail len = %d, want at least 3; events=%+v", len(finishTail), finishTail)
 	}
 	tail := finishTail[len(finishTail)-3:]
-	if tail[0].method != "registry.session.message" || !strings.Contains(publishedTurnMap(t, tail[0].payload)["content"].(string), acp.IMMethodAgentMessage) {
+	if tail[0].method != "registry.session.message" || !strings.Contains(publishedTurnMap(t, tail[0].payload)["content"].(string), acp.SessionTurnMethodAgentMessage) {
 		t.Fatalf("tail[0] = %+v, want sealed agent message", tail[0])
 	}
-	if tail[1].method != "registry.session.message" || !strings.Contains(publishedTurnMap(t, tail[1].payload)["content"].(string), acp.IMMethodPromptDone) {
+	if tail[1].method != "registry.session.message" || !strings.Contains(publishedTurnMap(t, tail[1].payload)["content"].(string), acp.SessionTurnMethodPromptDone) {
 		t.Fatalf("tail[1] = %+v, want prompt_done message", tail[1])
 	}
 	if tail[2].method != "registry.session.updated" {
@@ -5353,13 +5353,13 @@ func TestHandleSessionRequestSessionArchiveWritesPackAndDeletesActiveSession(t *
 	if len(contents) != 3 {
 		t.Fatalf("archive turn contents len = %d, want 3", len(contents))
 	}
-	if !strings.Contains(contents[0], acp.IMMethodPromptRequest) {
+	if !strings.Contains(contents[0], acp.SessionTurnMethodPromptRequest) {
 		t.Fatalf("first archived turn = %s, want prompt request", contents[0])
 	}
 	if !strings.Contains(contents[1], "world") {
 		t.Fatalf("second archived turn = %s, want agent message", contents[1])
 	}
-	if !strings.Contains(contents[2], acp.IMMethodPromptDone) {
+	if !strings.Contains(contents[2], acp.SessionTurnMethodPromptDone) {
 		t.Fatalf("third archived turn = %s, want prompt done", contents[2])
 	}
 }
@@ -5425,8 +5425,8 @@ func TestHandleSessionRequestSessionMutationsRejectRunningSession(t *testing.T) 
 			state := newSessionPromptState(1)
 			state.updateTurn(sessionTurnMessage{
 				sessionID: "sess-running",
-				method:    acp.IMMethodPromptRequest,
-				payload:   acp.IMPromptRequest{ContentBlocks: []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "still running"}}},
+				method:    acp.SessionTurnMethodPromptRequest,
+				payload:   acp.SessionTurnPromptRequest{ContentBlocks: []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "still running"}}},
 				turnIndex: 1,
 				finished:  true,
 			}, "")
@@ -5783,19 +5783,19 @@ func decodeTurnSessionUpdate(t *testing.T, raw string) acp.SessionUpdate {
 		return legacy.Params.Update
 	}
 
-	msg := acp.IMTurnMessage{}
+	msg := acp.SessionTurnMessage{}
 	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 		t.Fatalf("unmarshal turn update_json: %v", err)
 	}
 	switch strings.TrimSpace(msg.Method) {
-	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought, acp.SessionUpdateUserMessageChunk:
-		result := acp.IMTextResult{}
+	case acp.SessionTurnMethodAgentMessage, acp.SessionTurnMethodAgentThought, acp.SessionUpdateUserMessageChunk:
+		result := acp.SessionTurnTextResult{}
 		if err := json.Unmarshal(msg.Param, &result); err != nil {
 			t.Fatalf("unmarshal text result: %v", err)
 		}
 		return acp.SessionUpdate{SessionUpdate: strings.TrimSpace(msg.Method), Content: mustJSON(map[string]any{"text": result.Text})}
-	case acp.IMMethodToolCall:
-		result := acp.IMToolResult{}
+	case acp.SessionTurnMethodToolCall:
+		result := acp.SessionTurnToolResult{}
 		if err := json.Unmarshal(msg.Param, &result); err != nil {
 			t.Fatalf("unmarshal tool result: %v", err)
 		}
@@ -5805,8 +5805,8 @@ func decodeTurnSessionUpdate(t *testing.T, raw string) acp.SessionUpdate {
 			Kind:          strings.TrimSpace(result.Kind),
 			Status:        strings.TrimSpace(result.Status),
 		}
-	case acp.IMMethodAgentPlan:
-		plan := []acp.IMPlanResult{}
+	case acp.SessionTurnMethodAgentPlan:
+		plan := []acp.SessionTurnPlanResult{}
 		if err := json.Unmarshal(msg.Param, &plan); err != nil {
 			t.Fatalf("unmarshal plan result: %v", err)
 		}
@@ -5823,10 +5823,10 @@ func decodeTurnSessionUpdate(t *testing.T, raw string) acp.SessionUpdate {
 
 func decodeTurnMethod(t *testing.T, raw string) string {
 	t.Helper()
-	msg := acp.IMTurnMessage{}
+	msg := acp.SessionTurnMessage{}
 	if err := json.Unmarshal([]byte(raw), &msg); err == nil {
 		switch strings.TrimSpace(msg.Method) {
-		case acp.IMMethodPromptRequest, acp.IMMethodPromptDone:
+		case acp.SessionTurnMethodPromptRequest, acp.SessionTurnMethodPromptDone:
 			return acp.MethodSessionPrompt
 		default:
 			return strings.TrimSpace(msg.Method)
@@ -6089,14 +6089,14 @@ func seedPromptWithTurns(t *testing.T, c *Client, ctx context.Context, sessionID
 func hasPromptDoneTurnWithStopReason(t *testing.T, turns []sessionViewTurn, stopReason string) bool {
 	t.Helper()
 	for _, message := range turns {
-		var turn acp.IMTurnMessage
+		var turn acp.SessionTurnMessage
 		if err := json.Unmarshal([]byte(message.Content), &turn); err != nil {
 			t.Fatalf("unmarshal turn content: %v", err)
 		}
-		if turn.Method != acp.IMMethodPromptDone {
+		if turn.Method != acp.SessionTurnMethodPromptDone {
 			continue
 		}
-		var result acp.IMPromptResult
+		var result acp.SessionTurnPromptResult
 		raw, err := json.Marshal(turn.Param)
 		if err != nil {
 			t.Fatalf("marshal prompt_done param: %v", err)
@@ -6111,14 +6111,14 @@ func hasPromptDoneTurnWithStopReason(t *testing.T, turns []sessionViewTurn, stop
 
 func decodePromptDoneStopReason(t *testing.T, raw string) string {
 	t.Helper()
-	var turn acp.IMTurnMessage
+	var turn acp.SessionTurnMessage
 	if err := json.Unmarshal([]byte(raw), &turn); err != nil {
 		t.Fatalf("unmarshal prompt_done turn: %v", err)
 	}
-	if turn.Method != acp.IMMethodPromptDone {
-		t.Fatalf("turn method = %q, want %q", turn.Method, acp.IMMethodPromptDone)
+	if turn.Method != acp.SessionTurnMethodPromptDone {
+		t.Fatalf("turn method = %q, want %q", turn.Method, acp.SessionTurnMethodPromptDone)
 	}
-	var result acp.IMPromptResult
+	var result acp.SessionTurnPromptResult
 	if err := json.Unmarshal(turn.Param, &result); err != nil {
 		t.Fatalf("unmarshal prompt_done param: %v", err)
 	}
@@ -6127,7 +6127,7 @@ func decodePromptDoneStopReason(t *testing.T, raw string) string {
 
 func decodeTurnParamMap(t *testing.T, raw string) map[string]any {
 	t.Helper()
-	var turn acp.IMTurnMessage
+	var turn acp.SessionTurnMessage
 	if err := json.Unmarshal([]byte(raw), &turn); err != nil {
 		t.Fatalf("unmarshal turn: %v", err)
 	}
@@ -6150,11 +6150,11 @@ func listRecordedPromptTurns(ctx context.Context, t *testing.T, c *Client, sessi
 	currentPrompt := int64(0)
 	out := []string{}
 	for _, turn := range turns {
-		var msg acp.IMTurnMessage
+		var msg acp.SessionTurnMessage
 		if err := json.Unmarshal([]byte(turn.Content), &msg); err != nil {
 			t.Fatalf("unmarshal turn content: %v", err)
 		}
-		if strings.TrimSpace(msg.Method) == acp.IMMethodPromptRequest || currentPrompt == 0 {
+		if strings.TrimSpace(msg.Method) == acp.SessionTurnMethodPromptRequest || currentPrompt == 0 {
 			currentPrompt++
 		}
 		if currentPrompt == promptOrdinal {

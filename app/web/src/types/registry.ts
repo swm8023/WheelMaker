@@ -553,7 +553,6 @@ export interface RegistryProject {
   agent?: string;
   agents?: string[];
   agentProfiles?: RegistryProjectAgentProfile[];
-  imType?: string;
   projectRev?: string;
   git?: RegistryProjectGitState;
 }

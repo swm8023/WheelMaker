@@ -898,7 +898,6 @@ func (r *Reporter) localReadProjectListPayload() map[string]any {
 			Agent:         project.Agent,
 			Agents:        append([]string(nil), project.Agents...),
 			AgentProfiles: append([]rp.ProjectAgentProfile(nil), project.AgentProfiles...),
-			IMType:        project.IMType,
 			ProjectRev:    project.ProjectRev,
 			Git:           project.Git,
 		})
@@ -2009,7 +2008,7 @@ func (r *Reporter) resolvePending(id int64, msg envelope) bool {
 
 func diffProjectDomains(previous, current ProjectInfo) []string {
 	domains := make([]string, 0, 3)
-	projectChanged := previous.ProjectRev != current.ProjectRev || previous.Agent != current.Agent || previous.IMType != current.IMType || previous.Path != current.Path || previous.Online != current.Online
+	projectChanged := previous.ProjectRev != current.ProjectRev || previous.Agent != current.Agent || previous.Path != current.Path || previous.Online != current.Online
 	gitChanged := previous.Git.GitRev != current.Git.GitRev || previous.Git.HeadSHA != current.Git.HeadSHA || previous.Git.Branch != current.Git.Branch
 	worktreeChanged := previous.Git.WorktreeRev != current.Git.WorktreeRev || previous.Git.Dirty != current.Git.Dirty
 	if projectChanged {
