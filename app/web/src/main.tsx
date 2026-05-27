@@ -30,6 +30,7 @@ import {
 } from './portRelayTargets';
 import { initializePWAFoundation } from './pwa';
 import { DesktopTitleBar } from './shell/DesktopTitleBar';
+import {resolveDesktopChatQuickSwitchContextMenu} from './shell/desktop/chatQuickSwitchContextMenu';
 import { submitDesktopRemoteWebCandidate } from './shell/desktop/webSource';
 import { ResponsiveShell } from './shell/ResponsiveShell';
 import {
@@ -49,6 +50,7 @@ import {
   type ChatSessionKey,
 } from './chat/chatSessionKey';
 import {buildMobileChatQuickSwitchSections} from './chat/mobileChatQuickSwitch';
+import {ChatQuickSwitchMenu} from './chat/ChatQuickSwitchMenu';
 import { resolveChatSessionTitle } from './chat/chatSessionTitle';
 import {decodeSessionTurnToMessage, normalizeSessionMessagePayload} from './chat/chatWire';
 import {
@@ -263,6 +265,9 @@ type ProjectSessionActionMenuState = {
   sessionId: string;
   popover?: WideProjectActionPopoverPlacement | null;
 };
+type ChatQuickSwitchMenuPlacement =
+  | {kind: 'mobile'}
+  | {kind: 'desktop'; style: React.CSSProperties};
 type RenameSessionTarget = {
   projectId: string;
   sessionId: string;
@@ -3345,6 +3350,7 @@ function App() {
   const [chatHubMenuOpen, setChatHubMenuOpen] = useState(false);
   const chatHubMenuRef = useRef<HTMLDivElement | null>(null);
   const [chatQuickSwitchMenuOpen, setChatQuickSwitchMenuOpen] = useState(false);
+  const [chatQuickSwitchMenuPlacement, setChatQuickSwitchMenuPlacement] = useState<ChatQuickSwitchMenuPlacement>({kind: 'mobile'});
   const chatQuickSwitchMenuRef = useRef<HTMLDivElement | null>(null);
   const [chatSlashActiveIndex, setChatSlashActiveIndex] = useState(0);
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
@@ -3651,7 +3657,10 @@ function App() {
     });
     chatAutoScrollFollowRef.current = visibility.atBottom;
     setChatShowScrollToBottom(visibility.showScrollToBottom);
-  }, []);
+    if (chatQuickSwitchMenuPlacement.kind === 'desktop') {
+      setChatQuickSwitchMenuOpen(false);
+    }
+  }, [chatQuickSwitchMenuPlacement.kind]);
 
   const scrollChatToBottom = useCallback((force = false) => {
     if (!shouldAutoscrollChat(force)) {
@@ -4294,9 +4303,12 @@ function App() {
     }),
     [projectSessionsByProjectId, sortedProjectItems],
   );
-  const chatQuickSwitchMenuStyle = useMemo<React.CSSProperties>(() => ({
+  const mobileChatQuickSwitchMenuStyle = useMemo<React.CSSProperties>(() => ({
     top: portRelayReady && portRelayFrameUrl ? 56 : 0,
   }), [portRelayFrameUrl, portRelayReady]);
+  const chatQuickSwitchMenuStyle = chatQuickSwitchMenuPlacement.kind === 'desktop'
+    ? chatQuickSwitchMenuPlacement.style
+    : mobileChatQuickSwitchMenuStyle;
 
   useEffect(() => {
     projectIdRef.current = projectId;
@@ -5687,6 +5699,7 @@ function App() {
       return;
     }
     setPortRelayTargetMenuOpen(false);
+    setChatQuickSwitchMenuPlacement({kind: 'mobile'});
     if (tab !== 'chat' || sidebarSettingsOpen) {
       setChatQuickSwitchMenuOpen(false);
       setTab('chat');
@@ -10279,6 +10292,25 @@ function App() {
     await selectProjectChatSession(targetProjectId, session.sessionId, {closeMobileDrawer: true});
   }, [selectProjectChatSession, setDrawerOpen, setSidebarSettingsOpen, setTab]);
 
+  const handleChatQuickSwitchContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const result = resolveDesktopChatQuickSwitchContextMenu({
+      desktopLayout: isWide,
+      target: event.target,
+      selectedText: window.getSelection()?.toString() ?? '',
+      clientX: event.clientX,
+      clientY: event.clientY,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    });
+    if (!result.open) {
+      return;
+    }
+    event.preventDefault();
+    setPortRelayTargetMenuOpen(false);
+    setChatQuickSwitchMenuPlacement({kind: 'desktop', style: result.style});
+    setChatQuickSwitchMenuOpen(true);
+  }, [isWide]);
+
   const handleProjectCreateSession = async (
     targetProjectId: string,
     agentType: string,
@@ -14209,6 +14241,7 @@ function App() {
               ref={chatScrollRef}
               className="scroll-panel chat-block"
               onScroll={handleChatScroll}
+              onContextMenu={handleChatQuickSwitchContextMenu}
               onWheel={event => { if (event.deltaY < 0) { markChatUserScrollIntent(); } }}
               onPointerDown={() => { chatPointerScrollingRef.current = true; }}
               onPointerUp={() => { chatPointerScrollingRef.current = false; }}
@@ -15090,58 +15123,19 @@ function App() {
   ) : null;
 
   const chatQuickSwitchMenu = chatQuickSwitchMenuOpen && tab === 'chat' && !sidebarSettingsOpen && !mobilePortRelayFrameOpen ? (
-    <div
+    <ChatQuickSwitchMenu
       ref={chatQuickSwitchMenuRef}
-      className="chat-quick-switch-menu"
+      sections={mobileChatQuickSwitchSections}
+      placement={chatQuickSwitchMenuPlacement.kind}
       style={chatQuickSwitchMenuStyle}
-      role="menu"
-      aria-label="Recent chats"
-      onPointerDown={event => event.stopPropagation()}
-    >
-      {mobileChatQuickSwitchSections.length === 0 ? (
-        <div className="chat-quick-switch-empty">No chats</div>
-      ) : (
-        mobileChatQuickSwitchSections.map(section => (
-          <div key={`chat-quick-switch-project:${section.projectId}`} className="chat-quick-switch-project">
-            <div className="chat-quick-switch-project-heading" title={`${section.projectName} - ${section.projectHubLabel}`}>
-              <span className="chat-quick-switch-project-name">
-                {section.projectName}
-              </span>
-              <span className="chat-quick-switch-project-hub">
-                {section.projectHubLabel}
-              </span>
-            </div>
-            <div className="chat-quick-switch-session-list">
-              {section.sessions.map(session => {
-                const selected = selectedChatEncodedKey === buildChatRuntimeKey(section.projectId, session.sessionId);
-                const unreadCount = session.unreadCount ?? 0;
-                return (
-                  <button
-                    key={`chat-quick-switch-session:${section.projectId}:${session.sessionId}`}
-                    type="button"
-                    className="chat-quick-switch-item"
-                    data-selected={selected}
-                    role="menuitem"
-                    onClick={() => handleMobileChatQuickSwitchSelect(section.projectId, session).catch(() => undefined)}
-                  >
-                    {renderSessionStateMarker(session, section.projectId)}
-                    <span className="chat-quick-switch-title">
-                      {resolveSessionDisplayTitle(session) || session.sessionId}
-                    </span>
-                    <span className="chat-quick-switch-time" title={session.updatedAt || ''}>
-                      {formatCompactRelativeAge(session.updatedAt)}
-                    </span>
-                    {unreadCount > 0 ? (
-                      <span className="chat-quick-switch-unread">{Math.min(99, unreadCount)}</span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))
-      )}
-    </div>
+      isSessionSelected={(targetProjectId, session) =>
+        selectedChatEncodedKey === buildChatRuntimeKey(targetProjectId, session.sessionId)
+      }
+      renderSessionStateMarker={renderSessionStateMarker}
+      resolveSessionTitle={resolveSessionDisplayTitle}
+      formatSessionAge={formatCompactRelativeAge}
+      onSelectSession={handleMobileChatQuickSwitchSelect}
+    />
   ) : null;
 
   const floatingControlStack = !isWide ? (
@@ -15213,7 +15207,7 @@ function App() {
           </button>
         ) : null}
         {portRelayTargetMenu}
-        {chatQuickSwitchMenu}
+        {chatQuickSwitchMenuPlacement.kind === 'mobile' ? chatQuickSwitchMenu : null}
         {mobilePortRelayFrameOpen ? null : gestureNavigation ? (
           <div
             className="gesture-nav-control"
@@ -15747,6 +15741,7 @@ function App() {
         drawerOpen={mobilePortRelayFrameOpen ? false : drawerOpen}
         onCloseDrawer={() => setDrawerOpen(false)}
       />
+      {chatQuickSwitchMenuPlacement.kind === 'desktop' ? chatQuickSwitchMenu : null}
       {portRelayMobileFrameOverlay}
       {registryDebugPanel}
       {markdownImageExportRequest ? (

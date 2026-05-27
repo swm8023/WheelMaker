@@ -2388,6 +2388,11 @@ body,
   z-index: 2;
 }
 
+.chat-quick-switch-menu[data-placement='desktop'] {
+  right: auto;
+  overflow: auto;
+}
+
 .chat-quick-switch-project + .chat-quick-switch-project {
   margin-top: 5px;
   padding-top: 5px;
