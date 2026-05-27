@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 )
 
 // AppConfig is the top-level config.json structure.
@@ -45,39 +44,10 @@ type ProjectConfig struct {
 	Feishu *FeishuConfig `json:"feishu,omitempty"`
 }
 
-// FeishuConfig describes Feishu transport config.
+// FeishuConfig is accepted only for parse-only legacy config compatibility.
 type FeishuConfig struct {
 	AppID     string `json:"app_id,omitempty"`
 	AppSecret string `json:"app_secret,omitempty"`
-}
-
-type rawFeishuConfig struct {
-	AppIDLegacy     string `json:"appID,omitempty"`
-	AppSecretLegacy string `json:"appSecret,omitempty"`
-	AppIDSnake      string `json:"app_id,omitempty"`
-	AppSecretSnake  string `json:"app_secret,omitempty"`
-	AppSecretTypo   string `json:"app_secrect,omitempty"`
-}
-
-func (c *FeishuConfig) UnmarshalJSON(data []byte) error {
-	var raw rawFeishuConfig
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	c.AppID = firstNonEmpty(raw.AppIDSnake, raw.AppIDLegacy)
-	c.AppSecret = firstNonEmpty(raw.AppSecretSnake, raw.AppSecretTypo, raw.AppSecretLegacy)
-	return nil
-}
-
-func (p ProjectConfig) IMType() string {
-	if p.HasFeishu() {
-		return "feishu"
-	}
-	return "app"
-}
-
-func (p ProjectConfig) HasFeishu() bool {
-	return p.Feishu != nil && strings.TrimSpace(p.Feishu.AppID) != "" && strings.TrimSpace(p.Feishu.AppSecret) != ""
 }
 
 // MonitorConfig configures the wheelmaker-monitor web dashboard.
@@ -114,9 +84,6 @@ func LoadConfig(path string) (*AppConfig, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
-	if err := validateFeishuConfig(path, cfg.Projects); err != nil {
-		return nil, err
-	}
 	return &cfg, nil
 }
 
@@ -140,37 +107,14 @@ func validateRemovedLegacyFields(path string, data []byte) error {
 			if err := json.Unmarshal(project.IM, &legacyIM); err == nil && len(legacyIM.Version) != 0 {
 				return fmt.Errorf("parse config %s: im.version has been removed; IM is the only supported runtime", path)
 			}
-			return fmt.Errorf("parse config %s: projects[].im has been removed; use projects[].feishu instead", path)
+			return fmt.Errorf("parse config %s: projects[].im has been removed; configure App sessions through registry settings", path)
 		}
 		if len(project.Client) != 0 {
 			return fmt.Errorf("parse config %s: projects[].client has been removed; provider is auto-detected", path)
 		}
 		if len(project.IMFilter) != 0 {
-			return fmt.Errorf("parse config %s: projects[].imFilter has been removed; Feishu now uses built-in defaults", path)
+			return fmt.Errorf("parse config %s: projects[].imFilter has been removed", path)
 		}
 	}
 	return nil
-}
-
-func validateFeishuConfig(path string, projects []ProjectConfig) error {
-	for _, project := range projects {
-		if project.Feishu == nil {
-			continue
-		}
-		appID := strings.TrimSpace(project.Feishu.AppID)
-		appSecret := strings.TrimSpace(project.Feishu.AppSecret)
-		if appID == "" || appSecret == "" {
-			return fmt.Errorf("parse config %s: projects[].feishu requires both app_id and app_secret", path)
-		}
-	}
-	return nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }

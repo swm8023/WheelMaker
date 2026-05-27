@@ -51,7 +51,7 @@ func (h *Hub) Start(ctx context.Context) error {
 		return fmt.Errorf("hub db schema check: %w", err)
 	}
 	for _, pc := range h.cfg.Projects {
-		hubLogger(pc.Name).Info("build client im=%s", pc.IMType())
+		hubLogger(pc.Name).Info("build client runtime=app")
 		c, err := h.buildClient(ctx, pc)
 		if err != nil {
 			hubLogger(pc.Name).Error("build client failed err=%v", err)
@@ -217,7 +217,7 @@ func (h *Hub) collectProjectInfo(cfgProject logger.ProjectConfig) ProjectInfo {
 		Path:   path,
 		Online: true,
 		Agent:  "auto",
-		IMType: cfgProject.IMType(),
+		IMType: "app",
 	}
 	if preferred := strings.TrimSpace(agent.DefaultACPFactory().PreferredName()); preferred != "" {
 		info.Agent = preferred

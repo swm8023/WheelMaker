@@ -238,7 +238,7 @@ func (m *Monitor) localProjectsByHub(hubID string) ([]RegistryProject, error) {
 			Path:      p.Path,
 			Online:    true,
 			Agent:     "unknown",
-			IMType:    p.IMType(),
+			IMType:    "app",
 		})
 	}
 	return items, nil
