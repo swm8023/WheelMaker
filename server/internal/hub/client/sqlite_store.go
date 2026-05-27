@@ -86,9 +86,6 @@ func normalizeAgentType(agentType string) string {
 }
 
 type Store interface {
-	LoadRouteBindings(ctx context.Context, projectName string) (map[string]string, error)
-	SaveRouteBinding(ctx context.Context, projectName, routeKey, sessionID string) error
-	DeleteRouteBinding(ctx context.Context, projectName, routeKey string) error
 	LoadProjectDefaultAgent(ctx context.Context, projectName string) (string, error)
 	SaveProjectDefaultAgent(ctx context.Context, projectName, agentType string) error
 
@@ -294,69 +291,6 @@ func joinSortedColumns(columns []string) string {
 
 func normalizeStoreSchemaName(v string) string {
 	return strings.ToLower(strings.TrimSpace(v))
-}
-
-func (s *sqliteStore) LoadRouteBindings(ctx context.Context, projectName string) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT route_key, session_id
-		FROM route_bindings
-		WHERE project_name = ?
-	`, strings.TrimSpace(projectName))
-	if err != nil {
-		return nil, fmt.Errorf("load route bindings: %w", err)
-	}
-	defer rows.Close()
-
-	out := map[string]string{}
-	for rows.Next() {
-		var routeKey string
-		var sessionID string
-		if err := rows.Scan(&routeKey, &sessionID); err != nil {
-			return nil, fmt.Errorf("scan route binding: %w", err)
-		}
-		out[routeKey] = sessionID
-	}
-	return out, rows.Err()
-}
-
-func (s *sqliteStore) SaveRouteBinding(ctx context.Context, projectName, routeKey, sessionID string) error {
-	projectName = strings.TrimSpace(projectName)
-	sessionID = strings.TrimSpace(sessionID)
-	if projectName == "" {
-		return fmt.Errorf("project name is required")
-	}
-	if sessionID == "" {
-		return fmt.Errorf("session id is required")
-	}
-	if err := validateRouteKey(routeKey); err != nil {
-		return err
-	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO route_bindings (project_name, route_key, session_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(project_name, route_key) DO UPDATE SET
-			session_id=excluded.session_id,
-			updated_at=excluded.updated_at
-	`, projectName, strings.TrimSpace(routeKey), sessionID, now, now)
-	if err != nil {
-		return fmt.Errorf("save route binding: %w", err)
-	}
-	return nil
-}
-
-func (s *sqliteStore) DeleteRouteBinding(ctx context.Context, projectName, routeKey string) error {
-	if err := validateRouteKey(routeKey); err != nil {
-		return err
-	}
-	_, err := s.db.ExecContext(ctx, `
-		DELETE FROM route_bindings
-		WHERE project_name = ? AND route_key = ?
-	`, strings.TrimSpace(projectName), strings.TrimSpace(routeKey))
-	if err != nil {
-		return fmt.Errorf("delete route binding: %w", err)
-	}
-	return nil
 }
 
 func (s *sqliteStore) LoadProjectDefaultAgent(ctx context.Context, projectName string) (string, error) {
@@ -611,12 +545,6 @@ func (s *sqliteStore) DeleteSession(ctx context.Context, projectName, sessionID 
 	}()
 
 	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM route_bindings
-		WHERE project_name = ? AND session_id = ?
-	`, projectName, sessionID); err != nil {
-		return fmt.Errorf("delete session route bindings: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM sessions
 		WHERE project_name = ? AND id = ?
 	`, projectName, sessionID); err != nil {
@@ -643,13 +571,6 @@ func normalizeJSONDoc(raw string, fallback string) string {
 		return fallback
 	}
 	return raw
-}
-
-func validateRouteKey(routeKey string) error {
-	if strings.TrimSpace(routeKey) == "" {
-		return fmt.Errorf("route key is required")
-	}
-	return nil
 }
 
 func maxInt64(v int64, fallback int64) int64 {

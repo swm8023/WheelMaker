@@ -231,11 +231,6 @@ var _ agent.Instance = (*testInjectedInstance)(nil)
 
 type noopStore struct{}
 
-func (s *noopStore) LoadRouteBindings(context.Context, string) (map[string]string, error) {
-	return map[string]string{}, nil
-}
-func (s *noopStore) SaveRouteBinding(context.Context, string, string, string) error { return nil }
-func (s *noopStore) DeleteRouteBinding(context.Context, string, string) error       { return nil }
 func (s *noopStore) LoadProjectDefaultAgent(context.Context, string) (string, error) {
 	return "", nil
 }
@@ -1321,45 +1316,6 @@ func TestEnsureReady_SessionLoadSuccess_AgentCommandsOverrideCachedCommands(t *t
 	}
 	if got := state.Commands[0].Name; got != "/agent" {
 		t.Fatalf("command = %q, want /agent", got)
-	}
-}
-
-func TestPromptToSession_LeavesRouteBindingsUnchanged(t *testing.T) {
-	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	defer store.Close()
-
-	c := New(store, "proj1", "/tmp")
-	c.registry = agent.DefaultACPFactory().Clone()
-	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
-		return &testInjectedInstance{name: "claude", sessionID: "acp-route-test", alive: true}, nil
-	})
-	if err := store.SaveRouteBinding(context.Background(), "proj1", "route:test", "legacy-session"); err != nil {
-		t.Fatalf("SaveRouteBinding: %v", err)
-	}
-	sess, err := c.CreateSession(context.Background(), "claude", "")
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	before, err := store.LoadRouteBindings(context.Background(), "proj1")
-	if err != nil {
-		t.Fatalf("LoadRouteBindings before: %v", err)
-	}
-
-	err = c.PromptToSession(context.Background(), sess.acpSessionID, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}})
-	if err != nil {
-		t.Fatalf("PromptToSession: %v", err)
-	}
-
-	after, err := store.LoadRouteBindings(context.Background(), "proj1")
-	if err != nil {
-		t.Fatalf("LoadRouteBindings after: %v", err)
-	}
-	if !reflect.DeepEqual(after, before) {
-		t.Fatalf("route bindings changed: before=%v after=%v", before, after)
 	}
 }
 
@@ -6407,101 +6363,6 @@ func TestStart_CreatesProjectRowWhenMissing(t *testing.T) {
 	}
 	if got != "" {
 		t.Fatalf("default agent = %q, want empty", got)
-	}
-}
-
-func TestSQLiteStore_ProjectRouteAndSessionRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "db", "client.sqlite3")
-
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	defer store.Close()
-
-	ctx := context.Background()
-	if err := store.SaveRouteBinding(ctx, "proj-a", "im:feishu:chat-1", "sess-1"); err != nil {
-		t.Fatalf("SaveRouteBinding() error = %v", err)
-	}
-	if err := store.SaveSession(ctx, &SessionRecord{
-		ID:           "sess-1",
-		ProjectName:  "proj-a",
-		Status:       SessionSuspended,
-		AgentType:    "claude",
-		AgentJSON:    `{"title":"Persisted","commands":[{"name":"/status"}]}`,
-		Title:        "Persisted",
-		CreatedAt:    time.Unix(10, 0).UTC(),
-		LastActiveAt: time.Unix(20, 0).UTC(),
-	}); err != nil {
-		t.Fatalf("SaveSession() error = %v", err)
-	}
-	if err := store.SaveAgentPreference(ctx, AgentPreferenceRecord{
-		ProjectName:    "proj-a",
-		AgentType:      "claude",
-		PreferenceJSON: `{"configOptions":[{"id":"mode","currentValue":"code"}]}`,
-	}); err != nil {
-		t.Fatalf("SaveAgentPreference() error = %v", err)
-	}
-
-	bindings, err := store.LoadRouteBindings(ctx, "proj-a")
-	if err != nil {
-		t.Fatalf("LoadRouteBindings() error = %v", err)
-	}
-	if got := bindings["im:feishu:chat-1"]; got != "sess-1" {
-		t.Fatalf("binding = %q, want sess-1", got)
-	}
-
-	rec, err := store.LoadSession(ctx, "proj-a", "sess-1")
-	if err != nil {
-		t.Fatalf("LoadSession() error = %v", err)
-	}
-	if rec == nil || rec.ID != "sess-1" {
-		t.Fatalf("LoadSession() = %+v, want sess-1", rec)
-	}
-	if rec.AgentType != "claude" {
-		t.Fatalf("LoadSession().AgentType = %q, want claude", rec.AgentType)
-	}
-	if strings.Contains(rec.AgentJSON, "acpSessionId") {
-		t.Fatalf("LoadSession().AgentJSON = %q, should not contain acpSessionId", rec.AgentJSON)
-	}
-
-	pref, err := store.LoadAgentPreference(ctx, "proj-a", "claude")
-	if err != nil {
-		t.Fatalf("LoadAgentPreference() error = %v", err)
-	}
-	if pref == nil || !strings.Contains(pref.PreferenceJSON, `"mode"`) {
-		t.Fatalf("LoadAgentPreference() = %+v, want mode config", pref)
-	}
-
-	entries, err := store.ListSessions(ctx, "proj-a")
-	if err != nil {
-		t.Fatalf("ListSessions() error = %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("ListSessions() len = %d, want 1", len(entries))
-	}
-	if entries[0].Agent != "claude" {
-		t.Fatalf("ListSessions()[0].Agent = %q, want claude", entries[0].Agent)
-	}
-	if entries[0].Title != "Persisted" {
-		t.Fatalf("ListSessions()[0].Title = %q, want Persisted", entries[0].Title)
-	}
-}
-
-func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "db", "client.sqlite3")
-
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	defer store.Close()
-
-	err = store.SaveRouteBinding(context.Background(), "proj-a", "", "sess-1")
-	if err == nil {
-		t.Fatal("SaveRouteBinding() should reject empty route keys")
 	}
 }
 
