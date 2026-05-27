@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -39,18 +38,6 @@ type promptStreamEvent struct {
 	err    error
 }
 
-type IMRouter interface {
-	Bind(ctx context.Context, chat im.ChatRef, sessionID string, opts im.BindOptions) error
-	PublishSessionUpdate(ctx context.Context, target im.SendTarget, params acp.SessionUpdateParams) error
-	PublishPromptResult(ctx context.Context, target im.SendTarget, result acp.SessionPromptResult) error
-	SystemNotify(ctx context.Context, target im.SendTarget, payload im.SystemPayload) error
-	Run(ctx context.Context) error
-}
-
-type IMSessionMessageRouter interface {
-	PublishSessionMessage(ctx context.Context, target im.SendTarget, message acp.IMTurnMessage) error
-}
-
 // Client is the top-level coordinator for a single WheelMaker project.
 // Agent initialization is lazy: the first incoming message triggers ensureInstance(),
 // which connects the active agent and creates the ACP forwarder.
@@ -60,8 +47,7 @@ type Client struct {
 
 	registry *agent.ACPFactory
 
-	store    Store
-	imRouter IMRouter
+	store Store
 
 	mu sync.Mutex
 
@@ -149,13 +135,10 @@ func (c *Client) Start(ctx context.Context) error {
 	return nil
 }
 
-// Run blocks until ctx is cancelled, delegating to the IM router's Run loop.
-// Returns an error if no IM router is configured.
+// Run blocks until ctx is cancelled.
 func (c *Client) Run(ctx context.Context) error {
-	if c.imRouter != nil {
-		return c.imRouter.Run(ctx)
-	}
-	return errors.New("no IM router configured")
+	<-ctx.Done()
+	return nil
 }
 
 // Close persists all in-memory sessions and shuts down active agents.
@@ -453,21 +436,6 @@ func cloneJSON[T any](value T) T {
 		panic(fmt.Errorf("clone JSON: %w", err))
 	}
 	return out
-}
-
-func (c *Client) SetIMRouter(router IMRouter) {
-	c.mu.Lock()
-	c.imRouter = router
-	for _, sess := range c.sessions {
-		sess.imRouter = router
-	}
-	c.mu.Unlock()
-}
-
-func (c *Client) HasIMRouter() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.imRouter != nil
 }
 
 func (c *Client) SetSessionViewSink(sink SessionViewSink) {
@@ -821,26 +789,17 @@ func (c *Client) HandleIMInbound(ctx context.Context, event im.InboundEvent) err
 }
 
 func (c *Client) bindIM(ctx context.Context, source im.ChatRef, sessionID string) error {
-	c.mu.Lock()
-	router := c.imRouter
-	c.mu.Unlock()
-	if router == nil {
-		return nil
-	}
-	return router.Bind(ctx, source, sessionID, im.BindOptions{})
+	_ = ctx
+	_ = source
+	_ = sessionID
+	return nil
 }
 
 func (c *Client) sendIMDirect(ctx context.Context, source im.ChatRef, text string) error {
-	c.mu.Lock()
-	router := c.imRouter
-	c.mu.Unlock()
-	if router == nil {
-		return nil
-	}
-	return router.SystemNotify(ctx, im.SendTarget{ChannelID: source.ChannelID, ChatID: source.ChatID}, im.SystemPayload{
-		Kind: "message",
-		Body: text,
-	})
+	_ = ctx
+	_ = source
+	_ = text
+	return nil
 }
 
 func (c *Client) loadSessionForIM(ctx context.Context, source im.ChatRef, routeKey, args string) (*Session, error) {
@@ -916,7 +875,6 @@ func (c *Client) handleIMPromptBlocks(ctx context.Context, source im.ChatRef, bl
 	if sess == nil {
 		return nil
 	}
-	sess.setIMSource(source)
 	sess.handlePromptBlocks(blocks)
 	return nil
 }
@@ -955,7 +913,6 @@ func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, ar
 		if err := c.bindIM(ctx, source, sess.acpSessionID); err != nil {
 			return err
 		}
-		sess.setIMSource(source)
 		sess.reply(fmt.Sprintf("Created new session: %s", sess.acpSessionID))
 		return nil
 	}
@@ -964,7 +921,6 @@ func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, ar
 		if err != nil {
 			return c.sendIMDirect(ctx, source, fmt.Sprintf("Load error: %v", err))
 		}
-		loaded.setIMSource(source)
 		loaded.reply(fmt.Sprintf("Loaded session: %s", loaded.acpSessionID))
 		return nil
 	}
@@ -981,7 +937,6 @@ func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, ar
 	if sess == nil {
 		return nil
 	}
-	sess.setIMSource(source)
 	c.handleCommand(sess, routeKey, cmd, args)
 	return nil
 }
@@ -1028,20 +983,12 @@ func parseHelpArgs(args string) (menuID string, page int) {
 }
 
 func (c *Client) sendHelpCard(ctx context.Context, source im.ChatRef, model im.HelpModel, menuID string, page int) error {
-	c.mu.Lock()
-	router := c.imRouter
-	c.mu.Unlock()
-	if router == nil {
-		return nil
-	}
-	return router.SystemNotify(ctx, im.SendTarget{ChannelID: source.ChannelID, ChatID: source.ChatID}, im.SystemPayload{
-		Kind: "help_card",
-		HelpCard: &im.HelpCardPayload{
-			Model:  model,
-			MenuID: menuID,
-			Page:   page,
-		},
-	})
+	_ = ctx
+	_ = source
+	_ = model
+	_ = menuID
+	_ = page
+	return nil
 }
 
 // --- internal ---
@@ -1101,7 +1048,6 @@ func (c *Client) helpModelForRoute(ctx context.Context, source im.ChatRef, route
 		if err != nil {
 			return HelpModel{}, nil, err
 		}
-		sess.setIMSource(source)
 		model, err := sess.resolveHelpModel(ctx, source.ChatID)
 		return model, sess, err
 	}
@@ -1177,7 +1123,6 @@ func (c *Client) newWiredSession(id, agentType string) (*Session, error) {
 func (c *Client) wireSession(sess *Session) {
 	sess.projectName = c.projectName
 	sess.registry = c.registry
-	sess.imRouter = c.imRouter
 	sess.viewSink = c.viewSink
 	sess.store = c.store
 }

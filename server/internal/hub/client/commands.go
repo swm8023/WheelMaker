@@ -77,17 +77,6 @@ func (c *Client) handleCommand(sess *Session, routeKey, cmd, args string) {
 func (c *Client) handleNewCommand(sess *Session, routeKey, args string) {
 	agentType := strings.TrimSpace(args)
 	if agentType == "" {
-		if _, source, ok := sess.imContext(); ok {
-			model, err := sess.resolveHelpModel(context.Background(), source.ChatID)
-			if err != nil {
-				sess.reply(fmt.Sprintf("New error: %v", err))
-				return
-			}
-			if err := c.sendHelpCard(context.Background(), source, model, "menu:new", 0); err != nil {
-				sess.reply(fmt.Sprintf("New error: %v", err))
-			}
-			return
-		}
 		sess.reply("Usage: /new <agent-name>")
 		return
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
-	logger "github.com/swm8023/wheelmaker/internal/shared"
 	"io"
 	_ "modernc.org/sqlite"
 	"net/url"
@@ -56,36 +55,6 @@ type testInjectedInstance struct {
 	skillsErr   error
 }
 
-type fakeIMRouter struct {
-	binds   []fakeIMBind
-	updates []fakeIMUpdate
-	systems []fakeIMSystem
-}
-
-type fakeIMBind struct {
-	chat      im.ChatRef
-	sessionID string
-	opts      im.BindOptions
-}
-
-type fakeIMUpdate struct {
-	target im.SendTarget
-	params acp.SessionUpdateParams
-}
-
-type fakeIMSystem struct {
-	target  im.SendTarget
-	payload im.SystemPayload
-}
-
-type TestCaptureRouter struct {
-	mu          sync.Mutex
-	Messages    []string
-	ChatIDs     []string
-	CardCount   int
-	textBuffers map[string]string
-}
-
 func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(context.Context, string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error), cancelFn func() error) {
 	name := strings.TrimSpace(agentName)
 	if name == "" {
@@ -120,16 +89,11 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 }
 
 func (c *Client) HandleMessage(msg Message) {
-	channelID := strings.TrimSpace(msg.ChannelID)
-	if channelID == "" {
-		channelID = "test"
-	}
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {
 		return
 	}
 
-	source := im.ChatRef{ChannelID: channelID, ChatID: strings.TrimSpace(msg.ChatID)}
 	routeKey := testRouteKey
 
 	if cmd, args, ok := parseCommand(text); ok {
@@ -142,9 +106,6 @@ func (c *Client) HandleMessage(msg Message) {
 			sess, err := c.ClientNewSession(routeKey, agentType)
 			if err != nil {
 				return
-			}
-			if source.ChatID != "" {
-				sess.setIMSource(source)
 			}
 			sess.reply("Created new session: " + sess.acpSessionID)
 			return
@@ -163,9 +124,6 @@ func (c *Client) HandleMessage(msg Message) {
 				}
 				return
 			}
-			if source.ChatID != "" {
-				loaded.setIMSource(source)
-			}
 			loaded.reply("Loaded session: " + loaded.acpSessionID)
 			return
 		}
@@ -174,9 +132,6 @@ func (c *Client) HandleMessage(msg Message) {
 	sess, err := c.resolveSession(routeKey)
 	if err != nil {
 		return
-	}
-	if source.ChatID != "" {
-		sess.setIMSource(source)
 	}
 	if cmd, args, ok := parseCommand(text); ok {
 		c.handleCommand(sess, routeKey, cmd, args)
@@ -219,97 +174,6 @@ func (c *Client) HasSessionInMemoryForTest(sessionID string) bool {
 func (c *Client) ResolveSessionForTest(routeKey string) (*Session, error) {
 	return c.resolveSession(routeKey)
 }
-
-func (f *fakeIMRouter) Bind(_ context.Context, chat im.ChatRef, sessionID string, opts im.BindOptions) error {
-	f.binds = append(f.binds, fakeIMBind{chat: chat, sessionID: sessionID, opts: opts})
-	return nil
-}
-
-func (f *fakeIMRouter) PublishSessionUpdate(_ context.Context, target im.SendTarget, params acp.SessionUpdateParams) error {
-	f.updates = append(f.updates, fakeIMUpdate{target: target, params: params})
-	return nil
-}
-
-func (f *fakeIMRouter) PublishPromptResult(context.Context, im.SendTarget, acp.SessionPromptResult) error {
-	return nil
-}
-
-func (f *fakeIMRouter) SystemNotify(_ context.Context, target im.SendTarget, payload im.SystemPayload) error {
-	f.systems = append(f.systems, fakeIMSystem{target: target, payload: payload})
-	return nil
-}
-
-func (f *fakeIMRouter) Run(context.Context) error { return nil }
-
-func NewTestCaptureRouter() *TestCaptureRouter {
-	return &TestCaptureRouter{textBuffers: map[string]string{}}
-}
-
-func (r *TestCaptureRouter) Bind(context.Context, im.ChatRef, string, im.BindOptions) error {
-	return nil
-}
-
-func (r *TestCaptureRouter) PublishSessionUpdate(_ context.Context, target im.SendTarget, params acp.SessionUpdateParams) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	chatID := target.ChatID
-	if target.Source != nil && strings.TrimSpace(target.Source.ChatID) != "" {
-		chatID = strings.TrimSpace(target.Source.ChatID)
-	}
-	switch params.Update.SessionUpdate {
-	case acp.SessionUpdateAgentMessageChunk:
-		var content acp.ContentBlock
-		if len(params.Update.Content) > 0 && json.Unmarshal(params.Update.Content, &content) == nil {
-			key := strings.TrimSpace(target.SessionID)
-			if key == "" {
-				key = chatID
-			}
-			r.textBuffers[key] += content.Text
-		}
-	case acp.SessionUpdateConfigOptionUpdate:
-		r.Messages = append(r.Messages, formatConfigOptionUpdateMessage(mustJSON(params.Update)))
-		r.ChatIDs = append(r.ChatIDs, chatID)
-	default:
-		if strings.HasPrefix(params.Update.SessionUpdate, acp.SessionUpdateToolCall) {
-			r.CardCount++
-		}
-	}
-	return nil
-}
-
-func (r *TestCaptureRouter) PublishPromptResult(_ context.Context, target im.SendTarget, _ acp.SessionPromptResult) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	chatID := target.ChatID
-	if target.Source != nil && strings.TrimSpace(target.Source.ChatID) != "" {
-		chatID = strings.TrimSpace(target.Source.ChatID)
-	}
-	key := strings.TrimSpace(target.SessionID)
-	if key == "" {
-		key = chatID
-	}
-	if text := r.textBuffers[key]; text != "" {
-		r.Messages = append(r.Messages, text)
-		r.ChatIDs = append(r.ChatIDs, chatID)
-		delete(r.textBuffers, key)
-	}
-	return nil
-}
-func (r *TestCaptureRouter) SystemNotify(_ context.Context, target im.SendTarget, payload im.SystemPayload) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	chatID := target.ChatID
-	if target.Source != nil && strings.TrimSpace(target.Source.ChatID) != "" {
-		chatID = strings.TrimSpace(target.Source.ChatID)
-	}
-	r.Messages = append(r.Messages, payload.Body)
-	r.ChatIDs = append(r.ChatIDs, chatID)
-	return nil
-}
-
-func (r *TestCaptureRouter) Run(context.Context) error { return nil }
 
 func mustJSON(v any) []byte {
 	raw, _ := json.Marshal(v)
@@ -433,7 +297,6 @@ func (i *testInjectedInstance) ListSkills(context.Context, string) ([]agent.Skil
 func (i *testInjectedInstance) Close() error { return nil }
 
 var _ agent.Instance = (*testInjectedInstance)(nil)
-var _ IMRouter = (*TestCaptureRouter)(nil)
 
 type noopStore struct{}
 
@@ -544,94 +407,6 @@ func TestSessionInfoLine_UsesPrimaryAgentStateWithoutLegacyAgentMap(t *testing.T
 	}
 }
 
-func TestHandleIMInbound_ListDirectDoesNotBind(t *testing.T) {
-	c := New(&noopStore{}, "test", "/tmp")
-	fake := &fakeIMRouter{}
-	c.SetIMRouter(fake)
-	if err := c.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "/list"}); err != nil {
-		t.Fatalf("HandleIMInbound: %v", err)
-	}
-	if len(fake.binds) != 0 {
-		t.Fatalf("binds=%+v, want none", fake.binds)
-	}
-	if len(fake.systems) != 1 {
-		t.Fatalf("systems=%+v, want direct /list response", fake.systems)
-	}
-}
-
-func TestHandleIMInbound_NewWithoutAgentOpensHelpCardAndDoesNotBind(t *testing.T) {
-	c := New(&noopStore{}, "test", "/tmp")
-	fake := &fakeIMRouter{}
-	c.SetIMRouter(fake)
-	if err := c.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "/new"}); err != nil {
-		t.Fatalf("HandleIMInbound: %v", err)
-	}
-
-	if len(fake.binds) != 0 {
-		t.Fatalf("binds=%+v, want none", fake.binds)
-	}
-	if got := c.RouteSessionIDForTest("im:feishu:chat-a"); got != "" {
-		t.Fatalf("route session = %q, want empty", got)
-	}
-	if len(fake.systems) != 1 {
-		t.Fatalf("systems=%+v, want one help card", fake.systems)
-	}
-	system := fake.systems[0]
-	if system.payload.Kind != "help_card" || system.payload.HelpCard == nil {
-		t.Fatalf("system payload = %+v, want help card", system.payload)
-	}
-	if system.payload.HelpCard.MenuID != "menu:new" {
-		t.Fatalf("help menu id = %q, want menu:new", system.payload.HelpCard.MenuID)
-	}
-}
-
-func TestHandleIMInbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
-	c := New(&noopStore{}, "test", "/tmp")
-	fake := &fakeIMRouter{}
-	c.SetIMRouter(fake)
-	factory := func(context.Context, string) (agent.Instance, error) {
-		return &testInjectedInstance{
-			name:      "claude",
-			sessionID: "acp-1",
-			promptFn: func(context.Context, string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error) {
-				ch := make(chan acp.SessionUpdateParams, 1)
-				content, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello back"})
-				ch <- acp.SessionUpdateParams{Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content}}
-				close(ch)
-				return ch, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}, nil
-			},
-		}, nil
-	}
-	c.InjectAgentFactory(acp.ACPProviderClaude, factory)
-	c.InjectAgentFactory(acp.ACPProviderCodex, factory)
-	if err := c.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "hello"}); err != nil {
-		t.Fatalf("HandleIMInbound: %v", err)
-	}
-	if len(fake.binds) != 1 {
-		t.Fatalf("binds=%+v, want one bind", fake.binds)
-	}
-	foundACP := false
-	for _, update := range fake.updates {
-		if update.params.Update.SessionUpdate == acp.SessionUpdateAgentMessageChunk {
-			foundACP = true
-			break
-		}
-	}
-	if !foundACP {
-		t.Fatalf("updates=%+v, want ACP session/update emission", fake.updates)
-	}
-}
-
 func TestResolveOrCreateIMSessionUsesStoredDefaultAndFallbackDoesNotRewrite(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
@@ -663,61 +438,6 @@ func TestResolveOrCreateIMSessionUsesStoredDefaultAndFallbackDoesNotRewrite(t *t
 	}
 }
 
-func TestHandleIMInbound_ViewSinkFailureDoesNotBlockIMUpdates(t *testing.T) {
-	c := New(&noopStore{}, "test", "/tmp")
-	fake := &fakeIMRouter{}
-	c.SetIMRouter(fake)
-	c.SetSessionViewSink(&failingSessionViewSink{})
-	factory := func(context.Context, string) (agent.Instance, error) {
-		return &testInjectedInstance{
-			name:      "claude",
-			sessionID: "acp-1",
-			promptFn: func(context.Context, string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error) {
-				ch := make(chan acp.SessionUpdateParams, 1)
-				content, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello back"})
-				ch <- acp.SessionUpdateParams{Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content}}
-				close(ch)
-				return ch, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}, nil
-			},
-		}, nil
-	}
-	c.InjectAgentFactory(acp.ACPProviderClaude, factory)
-	c.InjectAgentFactory(acp.ACPProviderCodex, factory)
-	if err := c.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "hello"}); err != nil {
-		t.Fatalf("HandleIMInbound: %v", err)
-	}
-
-	foundACP := false
-	for _, update := range fake.updates {
-		if update.params.Update.SessionUpdate == acp.SessionUpdateAgentMessageChunk {
-			foundACP = true
-			break
-		}
-	}
-	if !foundACP {
-		t.Fatalf("updates=%+v, want ACP session/update emission even when view sink fails", fake.updates)
-	}
-}
-
-type failingPermissionIMRouter struct{}
-
-func (f *failingPermissionIMRouter) Bind(context.Context, im.ChatRef, string, im.BindOptions) error {
-	return nil
-}
-func (f *failingPermissionIMRouter) PublishSessionUpdate(context.Context, im.SendTarget, acp.SessionUpdateParams) error {
-	return nil
-}
-func (f *failingPermissionIMRouter) PublishPromptResult(context.Context, im.SendTarget, acp.SessionPromptResult) error {
-	return nil
-}
-func (f *failingPermissionIMRouter) SystemNotify(context.Context, im.SendTarget, im.SystemPayload) error {
-	return nil
-}
-func (f *failingPermissionIMRouter) Run(context.Context) error { return nil }
-
 type failingSessionViewSink struct{}
 
 func (f *failingSessionViewSink) RecordEvent(context.Context, SessionViewEvent) error {
@@ -733,30 +453,14 @@ func (s *recordingSessionViewSink) RecordEvent(_ context.Context, event SessionV
 	return nil
 }
 
-func TestSessionRequestPermissionAutoAllowsWithoutIMRoundTrip(t *testing.T) {
-	var buf bytes.Buffer
-	if err := logger.Setup(logger.LoggerConfig{Level: logger.LevelWarn}); err != nil {
-		t.Fatalf("setup logger: %v", err)
+func recordedSystemContents(events []SessionViewEvent) []string {
+	out := make([]string, 0, len(events))
+	for _, event := range events {
+		if event.Type == SessionViewEventTypeSystem {
+			out = append(out, event.Content)
+		}
 	}
-	defer logger.Close()
-	logger.SetOutput(&buf)
-	defer logger.SetOutput(os.Stderr)
-
-	s := mustNewSession(t, "sess-1", "/tmp", "claude")
-	s.imRouter = &failingPermissionIMRouter{}
-	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
-	result, err := s.SessionRequestPermission(context.Background(), 1, acp.PermissionRequestParams{
-		Options: []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
-	})
-	if err != nil {
-		t.Fatalf("SessionRequestPermission: %v", err)
-	}
-	if result.Outcome != "selected" || result.OptionID != "allow" {
-		t.Fatalf("permission result = %+v, want selected allow", result)
-	}
-	if got := buf.String(); strings.Contains(got, "permission publish failed") {
-		t.Fatalf("unexpected permission publish failure log: %q", got)
-	}
+	return out
 }
 
 func TestSessionRequestPermissionRecognizesLegacyOnceKind(t *testing.T) {
@@ -776,13 +480,10 @@ func TestSessionRequestPermissionRecognizesLegacyOnceKind(t *testing.T) {
 	}
 }
 
-func TestReplyWithTitleRecordsLegacySystemEvent(t *testing.T) {
-	router := &fakeIMRouter{}
+func TestReplyWithTitleRecordsSystemEventThroughViewSink(t *testing.T) {
 	sink := &recordingSessionViewSink{}
 	s := mustNewSession(t, "sess-1", "/tmp", "claude")
-	s.imRouter = router
 	s.viewSink = sink
-	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
 
 	s.replyWithTitle("Switched", "session: sess-1")
 
@@ -799,28 +500,15 @@ func TestReplyWithTitleRecordsLegacySystemEvent(t *testing.T) {
 	if strings.TrimSpace(event.Content) != "Switched\nsession: sess-1" {
 		t.Fatalf("event.Content = %q, want %q", event.Content, "Switched\nsession: sess-1")
 	}
-	if strings.TrimSpace(event.SourceChannel) != "app" || strings.TrimSpace(event.SourceChatID) != "chat-1" {
-		t.Fatalf("event source = (%q, %q), want (%q, %q)", event.SourceChannel, event.SourceChatID, "app", "chat-1")
-	}
-
-	if len(router.systems) != 1 {
-		t.Fatalf("router system notifications len = %d, want 1", len(router.systems))
-	}
-	if strings.TrimSpace(router.systems[0].payload.Title) != "Switched" {
-		t.Fatalf("system payload title = %q, want %q", router.systems[0].payload.Title, "Switched")
-	}
-	if strings.TrimSpace(router.systems[0].payload.Body) != "session: sess-1" {
-		t.Fatalf("system payload body = %q, want %q", router.systems[0].payload.Body, "session: sess-1")
+	if event.SourceChannel != "" || event.SourceChatID != "" {
+		t.Fatalf("event source = (%q, %q), want empty source", event.SourceChannel, event.SourceChatID)
 	}
 }
 
-func TestReportTimeoutError_RecordsSystemEvent(t *testing.T) {
-	router := &fakeIMRouter{}
+func TestReportTimeoutErrorRecordsSystemEventThroughViewSink(t *testing.T) {
 	sink := &recordingSessionViewSink{}
 	s := mustNewSession(t, "sess-1", "/tmp", "claude")
-	s.imRouter = router
 	s.viewSink = sink
-	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
 
 	s.reportTimeoutError("stream", "silence")
 
@@ -834,12 +522,8 @@ func TestReportTimeoutError_RecordsSystemEvent(t *testing.T) {
 	if !strings.Contains(event.Content, "category=timeout stage=stream") {
 		t.Fatalf("event.Content = %q, want timeout payload", event.Content)
 	}
-
-	if len(router.systems) != 1 {
-		t.Fatalf("router system notifications len = %d, want 1", len(router.systems))
-	}
-	if got := strings.TrimSpace(router.systems[0].payload.Body); !strings.Contains(got, "category=timeout stage=stream") {
-		t.Fatalf("system payload body = %q, want timeout payload", got)
+	if event.SourceChannel != "" || event.SourceChatID != "" {
+		t.Fatalf("event source = (%q, %q), want empty source", event.SourceChannel, event.SourceChatID)
 	}
 }
 
@@ -1099,9 +783,8 @@ func TestEnsureReady_FailsWhenAgentDoesNotSupportLoadSession(t *testing.T) {
 func TestEnsureReadyAndNotify_DoesNotEmitReadySystemPrompt(t *testing.T) {
 	s := mustNewSession(t, "acp-1", "/tmp", "claude")
 	s.projectName = "proj1"
-	router := &fakeIMRouter{}
-	s.imRouter = router
-	s.imSource = &im.ChatRef{ChannelID: "feishu", ChatID: "chat-1"}
+	sink := &recordingSessionViewSink{}
+	s.viewSink = sink
 	s.registry = agent.DefaultACPFactory().Clone()
 	s.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
 		return &testInjectedInstance{
@@ -1121,15 +804,15 @@ func TestEnsureReadyAndNotify_DoesNotEmitReadySystemPrompt(t *testing.T) {
 	if err := s.ensureReadyAndNotify(context.Background()); err != nil {
 		t.Fatalf("ensureReadyAndNotify(first): %v", err)
 	}
-	if got := len(router.systems); got != 0 {
-		t.Fatalf("system notify count after first ensureReadyAndNotify = %d, want 0", got)
+	if got := len(sink.events); got != 0 {
+		t.Fatalf("session view events count after first ensureReadyAndNotify = %d, want 0", got)
 	}
 
 	if err := s.ensureReadyAndNotify(context.Background()); err != nil {
 		t.Fatalf("ensureReadyAndNotify(second): %v", err)
 	}
-	if got := len(router.systems); got != 0 {
-		t.Fatalf("system notify count after second ensureReadyAndNotify = %d, want 0", got)
+	if got := len(sink.events); got != 0 {
+		t.Fatalf("session view events count after second ensureReadyAndNotify = %d, want 0", got)
 	}
 }
 
@@ -7005,12 +6688,6 @@ func base64ForTest(data []byte) string {
 	return b.String()
 }
 
-func captureReplies(c *Client) *[]string {
-	router := NewTestCaptureRouter()
-	c.SetIMRouter(router)
-	return &router.Messages
-}
-
 func TestStart_LoadsRouteBindingsWithoutRestoringSessions(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "db", "client.sqlite3")
@@ -7098,29 +6775,33 @@ func TestResolveSession_RejectsEmptyRouteKey(t *testing.T) {
 func TestHandleMessage_Cancel(t *testing.T) {
 	mock := &mockSession{agentName: "claude", sessionID: "sess-1"}
 	c := newTestClient(t, mock)
-	msgs := captureReplies(c)
+	sink := &recordingSessionViewSink{}
+	c.SetSessionViewSink(sink)
 
 	c.HandleMessage(Message{ChatID: "chat1", Text: "/cancel"})
 
 	if mock.cancelCalls != 1 {
 		t.Fatalf("Cancel called %d times, want 1", mock.cancelCalls)
 	}
-	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "Cancelled") {
-		t.Fatalf("reply = %v, want Cancelled", *msgs)
+	msgs := recordedSystemContents(sink.events)
+	if len(msgs) == 0 || !strings.Contains(msgs[0], "Cancelled") {
+		t.Fatalf("reply = %v, want Cancelled", msgs)
 	}
 }
 
 func TestHandleMessage_Status(t *testing.T) {
 	mock := &mockSession{agentName: "codex", sessionID: "sess-abc"}
 	c := newTestClient(t, mock)
-	msgs := captureReplies(c)
+	sink := &recordingSessionViewSink{}
+	c.SetSessionViewSink(sink)
 
 	c.HandleMessage(Message{ChatID: "chat1", Text: "/status"})
 
-	if len(*msgs) == 0 {
+	msgs := recordedSystemContents(sink.events)
+	if len(msgs) == 0 {
 		t.Fatal("no reply received")
 	}
-	reply := (*msgs)[0]
+	reply := msgs[0]
 	if !strings.Contains(reply, "codex") {
 		t.Fatalf("status reply %q missing agent name", reply)
 	}
@@ -7144,23 +6825,25 @@ func TestHandleMessage_PromptTextStreaming(t *testing.T) {
 		},
 	}
 	c := newTestClient(t, mock)
-	msgs := captureReplies(c)
+	sink := &recordingSessionViewSink{}
+	c.SetSessionViewSink(sink)
 
 	c.HandleMessage(Message{ChatID: "chat1", Text: "hi there"})
 
 	if len(mock.promptCalls) != 1 || mock.promptCalls[0] != "hi there" {
 		t.Fatalf("Prompt called with %v, want [hi there]", mock.promptCalls)
 	}
+	msgs := recordedSystemContents(sink.events)
 	// msgs[0] is the session-info system message; the streamed text follows.
 	found := false
-	for _, m := range *msgs {
+	for _, m := range msgs {
 		if m == "hello world" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("reply = %v, want a message containing 'hello world'", *msgs)
+		t.Fatalf("reply = %v, want a message containing 'hello world'", msgs)
 	}
 }
 
@@ -7261,7 +6944,8 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 func TestHandleMessage_Skills(t *testing.T) {
 	mock := &mockSession{agentName: "codex", sessionID: "sess-skills"}
 	c := newTestClient(t, mock)
-	msgs := captureReplies(c)
+	sink := &recordingSessionViewSink{}
+	c.SetSessionViewSink(sink)
 
 	sess, err := c.resolveSession(testRouteKey)
 	if err != nil {
@@ -7275,10 +6959,11 @@ func TestHandleMessage_Skills(t *testing.T) {
 
 	c.HandleMessage(Message{ChatID: "chat1", Text: "/skills"})
 
-	if len(*msgs) == 0 {
+	msgs := recordedSystemContents(sink.events)
+	if len(msgs) == 0 {
 		t.Fatal("no reply received")
 	}
-	reply := strings.Join(*msgs, "\n")
+	reply := strings.Join(msgs, "\n")
 	if !strings.Contains(reply, "Skills (1):") {
 		t.Fatalf("skills reply missing header: %q", reply)
 	}
