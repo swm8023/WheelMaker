@@ -24,15 +24,6 @@ import (
 	"time"
 )
 
-const testRouteKey = "test:local"
-
-type Message struct {
-	ChannelID string
-	ChatID    string
-	Text      string
-	SessionID string
-}
-
 type testInjectedInstance struct {
 	name        string
 	sessionID   string
@@ -60,7 +51,7 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 		name = string(acp.ACPProviderClaude)
 	}
 	c.mu.Lock()
-	sess := c.sessions[c.routeMap[testRouteKey]]
+	sess := c.sessions[sessionID]
 	if sess == nil {
 		var err error
 		sess, err = c.newWiredSession(sessionID, name)
@@ -68,7 +59,6 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 			panic(err)
 		}
 		c.sessions[sessionID] = sess
-		c.routeMap[testRouteKey] = sessionID
 	}
 	c.mu.Unlock()
 
@@ -85,58 +75,6 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 	sess.acpSessionID = sessionID
 	sess.ready = true
 	sess.mu.Unlock()
-}
-
-func (c *Client) HandleMessage(msg Message) {
-	text := strings.TrimSpace(msg.Text)
-	if text == "" {
-		return
-	}
-
-	routeKey := testRouteKey
-
-	if cmd, args, ok := parseCommand(text); ok {
-		switch cmd {
-		case "/new":
-			agentType := strings.TrimSpace(args)
-			if agentType == "" {
-				return
-			}
-			sess, err := c.ClientNewSession(routeKey, agentType)
-			if err != nil {
-				return
-			}
-			sess.reply("Created new session: " + sess.acpSessionID)
-			return
-		case "/load":
-			idx, err := parsePositiveIndex(args)
-			if err != nil {
-				if sess, resolveErr := c.resolveSession(routeKey); resolveErr == nil {
-					sess.reply("Load error: " + err.Error())
-				}
-				return
-			}
-			loaded, err := c.ClientLoadSession(routeKey, idx)
-			if err != nil {
-				if sess, resolveErr := c.resolveSession(routeKey); resolveErr == nil {
-					sess.reply("Load error: " + err.Error())
-				}
-				return
-			}
-			loaded.reply("Loaded session: " + loaded.acpSessionID)
-			return
-		}
-	}
-
-	sess, err := c.resolveSession(routeKey)
-	if err != nil {
-		return
-	}
-	if cmd, args, ok := parseCommand(text); ok {
-		c.handleCommand(sess, routeKey, cmd, args)
-		return
-	}
-	sess.handlePrompt(text)
 }
 
 func (c *Client) InjectAgentFactory(provider acp.ACPProvider, creator agent.InstanceCreator) {
@@ -157,12 +95,6 @@ func (c *Client) InjectAgentFactory(provider acp.ACPProvider, creator agent.Inst
 	registry.Register(provider, creator)
 }
 
-func (c *Client) RouteSessionIDForTest(routeKey string) string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.routeMap[routeKey]
-}
-
 func (c *Client) HasSessionInMemoryForTest(sessionID string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -170,8 +102,8 @@ func (c *Client) HasSessionInMemoryForTest(sessionID string) bool {
 	return ok
 }
 
-func (c *Client) ResolveSessionForTest(routeKey string) (*Session, error) {
-	return c.resolveSession(routeKey)
+func (c *Client) SessionForTest(sessionID string) (*Session, error) {
+	return c.SessionByID(context.Background(), sessionID)
 }
 
 func mustJSON(v any) []byte {
@@ -343,48 +275,6 @@ func TestIsAgentExitError_TLSHandshakeEOFFalse(t *testing.T) {
 	}
 }
 
-func TestResolveConfigArg_ValidatesOptionValue(t *testing.T) {
-	st := &SessionAgentState{
-		ConfigOptions: []acp.ConfigOption{{
-			ID: "theme",
-			Options: []acp.ConfigOptionValue{
-				{Name: "Dark", Value: "dark"},
-				{Name: "Light", Value: "light"},
-			},
-		}},
-	}
-	id, value, err := resolveConfigArg("theme Dark", st)
-	if err != nil {
-		t.Fatalf("resolveConfigArg returned error: %v", err)
-	}
-	if id != "theme" || value != "dark" {
-		t.Fatalf("resolveConfigArg = (%q,%q), want (%q,%q)", id, value, "theme", "dark")
-	}
-	if _, _, err := resolveConfigArg("theme blue", st); err == nil {
-		t.Fatalf("expected unknown config value error")
-	}
-}
-
-func TestResolveConfigArg_ResolvesCategoryAlias(t *testing.T) {
-	st := &SessionAgentState{
-		ConfigOptions: []acp.ConfigOption{{
-			ID:       acp.ConfigOptionIDReasoningEffort,
-			Category: acp.ConfigOptionCategoryThoughtLv,
-			Options: []acp.ConfigOptionValue{
-				{Name: "High", Value: "high"},
-				{Name: "Medium", Value: "medium"},
-			},
-		}},
-	}
-	id, value, err := resolveConfigArg("thought_level High", st)
-	if err != nil {
-		t.Fatalf("resolveConfigArg returned error: %v", err)
-	}
-	if id != acp.ConfigOptionIDReasoningEffort || value != "high" {
-		t.Fatalf("resolveConfigArg = (%q,%q), want (%q,%q)", id, value, acp.ConfigOptionIDReasoningEffort, "high")
-	}
-}
-
 func TestSessionInfoLine_UsesPrimaryAgentStateWithoutLegacyAgentMap(t *testing.T) {
 	s := mustNewSession(t, "sess-1", "/tmp", "claude")
 	s.mu.Lock()
@@ -519,7 +409,7 @@ func TestCurrentAgentNameLocked_PrefersSessionAgentType(t *testing.T) {
 	}
 }
 
-func TestClientLoadSession_RestoresFromStore(t *testing.T) {
+func TestSessionByID_RestoresFromStore(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
 		t.Fatalf("new store: %v", err)
@@ -538,16 +428,13 @@ func TestClientLoadSession_RestoresFromStore(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save session: %v", err)
 	}
-	if err := store.SaveRouteBinding(ctx, "proj1", "route-1", "restore-me"); err != nil {
-		t.Fatalf("save route binding: %v", err)
-	}
 	if err := c.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
-	sess, err := c.resolveSession("route-1")
+	sess, err := c.SessionByID(ctx, "restore-me")
 	if err != nil {
-		t.Fatalf("resolveSession: %v", err)
+		t.Fatalf("SessionByID: %v", err)
 	}
 	if sess.acpSessionID != "restore-me" {
 		t.Fatalf("resolved session ID = %q, want restore-me", sess.acpSessionID)
@@ -1176,7 +1063,7 @@ func TestSQLiteStoreSkipsCodexAppMigrationWhenUserVersionIsCurrent(t *testing.T)
 	}
 }
 
-func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
+func TestCreateSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
@@ -1210,15 +1097,10 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	}
 	c.registry = agent.DefaultACPFactory().Clone()
 	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) { return inst, nil })
-	c.mu.Lock()
-	oldSess := mustNewWiredSession(t, c, "sess-old", "claude")
-	c.sessions[oldSess.acpSessionID] = oldSess
-	c.routeMap["route-1"] = oldSess.acpSessionID
-	c.mu.Unlock()
 
-	sess, err := c.ClientNewSession("route-1", "claude")
+	sess, err := c.CreateSession(context.Background(), "claude", "")
 	if err != nil {
-		t.Fatalf("ClientNewSession: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 	if err := sess.ensureInstance(context.Background()); err != nil {
 		t.Fatalf("ensureInstance: %v", err)
@@ -1231,30 +1113,6 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 		t.Fatalf("set calls = %d, want 3", got)
 	}
 
-}
-
-func TestClientNewSessionPersistsProjectDefaultAgent(t *testing.T) {
-	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	defer store.Close()
-
-	c := New(store, "proj1", "/tmp")
-	inst := &testInjectedInstance{name: "claude", initResult: acp.InitializeResult{ProtocolVersion: "0.1"}, newResult: &acp.SessionNewResult{SessionID: "sess-new"}}
-	c.registry = agent.DefaultACPFactory().Clone()
-	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) { return inst, nil })
-
-	if _, err := c.ClientNewSession("route-1", "claude"); err != nil {
-		t.Fatalf("ClientNewSession: %v", err)
-	}
-	got, err := store.LoadProjectDefaultAgent(context.Background(), "proj1")
-	if err != nil {
-		t.Fatalf("LoadProjectDefaultAgent: %v", err)
-	}
-	if got != "claude" {
-		t.Fatalf("default agent = %q, want claude", got)
-	}
 }
 
 func TestEnsureReady_SessionLoadSuccess_ReplaysStoredConfigValuesByID(t *testing.T) {
@@ -1462,9 +1320,12 @@ func TestPromptToSession_LeavesRouteBindingsUnchanged(t *testing.T) {
 	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
 		return &testInjectedInstance{name: "claude", sessionID: "acp-route-test", alive: true}, nil
 	})
-	sess, err := c.ClientNewSession("route:test", "claude")
+	if err := store.SaveRouteBinding(context.Background(), "proj1", "route:test", "legacy-session"); err != nil {
+		t.Fatalf("SaveRouteBinding: %v", err)
+	}
+	sess, err := c.CreateSession(context.Background(), "claude", "")
 	if err != nil {
-		t.Fatalf("ClientNewSession: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	before, err := store.LoadRouteBindings(context.Background(), "proj1")
@@ -1483,95 +1344,6 @@ func TestPromptToSession_LeavesRouteBindingsUnchanged(t *testing.T) {
 	}
 	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("route bindings changed: before=%v after=%v", before, after)
-	}
-}
-
-func TestResolveHelpModelRefreshesSessionMenuFromRuntimeList(t *testing.T) {
-	s := mustNewSession(t, "sess-local", ".", "claude")
-	inst := &testInjectedInstance{
-		name:      string(acp.ACPProviderClaude),
-		sessionID: "sess-current",
-		alive:     true,
-		listResult: acp.SessionListResult{
-			Sessions: []acp.SessionInfo{
-				{SessionID: "sess-older", Title: "Older Session"},
-				{SessionID: "sess-current", Title: "Current Session"},
-			},
-		},
-	}
-
-	s.mu.Lock()
-	s.instance = inst
-	s.agentType = inst.name
-	s.ready = true
-	state := &s.agentState
-	state.AgentCapabilities = acp.AgentCapabilities{
-		LoadSession: true,
-		SessionCapabilities: &acp.SessionCapabilities{
-			List: &acp.SessionListCapability{},
-		},
-	}
-	s.mu.Unlock()
-
-	model, err := s.resolveHelpModel(context.Background(), "")
-	if err != nil {
-		t.Fatalf("resolveHelpModel() err = %v", err)
-	}
-
-	sessionMenu, ok := model.Menus["menu:sessions"]
-	if !ok {
-		t.Fatalf("session menu not found")
-	}
-	if len(sessionMenu.Options) != 1 {
-		t.Fatalf("session menu options len = %d, want 1", len(sessionMenu.Options))
-	}
-	if sessionMenu.Options[0].Command != "/list" {
-		t.Fatalf("session menu option[0] = %#v, want /list", sessionMenu.Options[0])
-	}
-	if !strings.Contains(sessionMenu.Body, "/list") {
-		t.Fatalf("session menu body = %q, want usage hint about /list", sessionMenu.Body)
-	}
-}
-
-func TestResolveHelpModel_RootStartsWithNewConversationMenu(t *testing.T) {
-	s := mustNewSession(t, "sess-help", "/tmp", "claude")
-	s.registry = agent.DefaultACPFactory().Clone()
-	s.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
-		return &testInjectedInstance{name: "claude", alive: true}, nil
-	})
-	s.registry.Register(acp.ACPProviderCodex, func(context.Context, string) (agent.Instance, error) {
-		return &testInjectedInstance{name: "codex", alive: true}, nil
-	})
-	s.mu.Lock()
-	s.instance = &testInjectedInstance{name: "claude", alive: true}
-	s.ready = true
-	s.mu.Unlock()
-
-	model, err := s.resolveHelpModel(context.Background(), "")
-	if err != nil {
-		t.Fatalf("resolveHelpModel: %v", err)
-	}
-	if len(model.Options) == 0 || model.Options[0].Label != "New Conversation" {
-		t.Fatalf("root option[0] = %+v, want New Conversation", model.Options)
-	}
-	newMenu, ok := model.Menus["menu:new"]
-	if !ok {
-		t.Fatalf("menus = %+v, want menu:new", model.Menus)
-	}
-	for _, opt := range model.Options {
-		if strings.Contains(opt.Label, "Switch Agent") || opt.Command == "/use" {
-			t.Fatalf("unexpected switch-agent option: %+v", opt)
-		}
-	}
-	seenAgents := map[string]bool{}
-	for _, opt := range newMenu.Options {
-		if opt.Command != "/new" {
-			t.Fatalf("new menu option = %+v, want /new", opt)
-		}
-		seenAgents[strings.TrimPrefix(opt.Label, "Agent: ")] = true
-	}
-	if !seenAgents["claude"] || !seenAgents["codex"] {
-		t.Fatalf("new menu options = %+v, want claude and codex", newMenu.Options)
 	}
 }
 
@@ -1737,55 +1509,6 @@ func TestApplyStoredConfigOptions_ReplaysByCategoryAlias(t *testing.T) {
 	}
 	if got := findCurrentValue(updated, acp.ConfigOptionIDReasoningEffort); got != "high" {
 		t.Fatalf("updated reasoning_effort = %q, want high", got)
-	}
-}
-
-func TestResolveHelpModel_UsesRawConfigOptionName(t *testing.T) {
-	s := mustNewSession(t, "sess-help-reasoning", "/tmp", "copilot")
-	s.registry = agent.DefaultACPFactory().Clone()
-	s.registry.Register(acp.ACPProviderCopilot, func(context.Context, string) (agent.Instance, error) {
-		return &testInjectedInstance{name: "copilot", alive: true}, nil
-	})
-	s.mu.Lock()
-	s.instance = &testInjectedInstance{name: "copilot", alive: true}
-	s.ready = true
-	s.agentState.ConfigOptions = []acp.ConfigOption{
-		{
-			ID:           "reasoning_effort",
-			Name:         "Reasoning Effort",
-			CurrentValue: "medium",
-			Options: []acp.ConfigOptionValue{
-				{Name: "Low", Value: "low"},
-				{Name: "Medium", Value: "medium"},
-				{Name: "High", Value: "high"},
-			},
-		},
-	}
-	s.mu.Unlock()
-
-	model, err := s.resolveHelpModel(context.Background(), "")
-	if err != nil {
-		t.Fatalf("resolveHelpModel: %v", err)
-	}
-	found := false
-	for _, opt := range model.Options {
-		if opt.MenuID == "menu:config:reasoning_effort" {
-			if !strings.HasPrefix(opt.Label, "Config: Reasoning Effort") {
-				t.Fatalf("config option label = %q, want Reasoning Effort", opt.Label)
-			}
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("did not find config option menu for reasoning_effort")
-	}
-	menu, ok := model.Menus["menu:config:reasoning_effort"]
-	if !ok {
-		t.Fatal("missing config menu for reasoning_effort")
-	}
-	if menu.Title != "Config: Reasoning Effort" {
-		t.Fatalf("config menu title = %q, want %q", menu.Title, "Config: Reasoning Effort")
 	}
 }
 
@@ -5476,9 +5199,6 @@ func TestHandleSessionRequestSessionDeleteRemovesActiveSession(t *testing.T) {
 
 	now := time.Now().UTC()
 	addRuntimeSession(c, "sess-1", "Delete Target", "claude", now, now)
-	c.mu.Lock()
-	c.routeMap["im:app:delete"] = "sess-1"
-	c.mu.Unlock()
 	if err := c.store.SaveSession(ctx, &SessionRecord{
 		ID:              "sess-1",
 		ProjectName:     "proj1",
@@ -5511,10 +5231,9 @@ func TestHandleSessionRequestSessionDeleteRemovesActiveSession(t *testing.T) {
 	}
 	c.mu.Lock()
 	_, inMemory := c.sessions["sess-1"]
-	_, routeMapped := c.routeMap["im:app:delete"]
 	c.mu.Unlock()
-	if inMemory || routeMapped {
-		t.Fatalf("session still active after delete inMemory=%v routeMapped=%v", inMemory, routeMapped)
+	if inMemory {
+		t.Fatal("session still active after delete")
 	}
 	if len(cleanupCalls) != 1 || cleanupCalls[0].projectName != "proj1" || cleanupCalls[0].agentType != "claude" || cleanupCalls[0].sessionID != "sess-1" {
 		t.Fatalf("cleanup calls=%#v, want claude session cleanup", cleanupCalls)
@@ -5537,9 +5256,6 @@ func TestHandleSessionRequestSessionArchiveShortSessionDeletesWithoutArchive(t *
 
 	now := time.Date(2026, 5, 17, 10, 15, 0, 0, time.UTC)
 	addRuntimeSession(c, "sess-short", "Short Archive Target", "codex", now, now)
-	c.mu.Lock()
-	c.routeMap["im:app:short"] = "sess-short"
-	c.mu.Unlock()
 
 	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-short", "Short Archive Target")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
@@ -5572,10 +5288,9 @@ func TestHandleSessionRequestSessionArchiveShortSessionDeletesWithoutArchive(t *
 	}
 	c.mu.Lock()
 	_, inMemory := c.sessions["sess-short"]
-	_, routeMapped := c.routeMap["im:app:short"]
 	c.mu.Unlock()
-	if inMemory || routeMapped {
-		t.Fatalf("short session still active after archive inMemory=%v routeMapped=%v", inMemory, routeMapped)
+	if inMemory {
+		t.Fatal("short session still active after archive")
 	}
 	if len(cleanupCalls) != 1 || cleanupCalls[0].projectName != "proj1" || cleanupCalls[0].agentType != "codex" || cleanupCalls[0].sessionID != "sess-short" {
 		t.Fatalf("cleanup calls=%#v, want codex short session cleanup", cleanupCalls)
@@ -5590,9 +5305,6 @@ func TestHandleSessionRequestSessionArchiveWritesPackAndDeletesActiveSession(t *
 
 	now := time.Date(2026, 5, 17, 10, 30, 0, 0, time.UTC)
 	addRuntimeSession(c, "sess-archive", "Archive Target", "claude", now, now)
-	c.mu.Lock()
-	c.routeMap["im:app:archive"] = "sess-archive"
-	c.mu.Unlock()
 
 	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-archive", "Archive Target")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
@@ -5636,13 +5348,9 @@ func TestHandleSessionRequestSessionArchiveWritesPackAndDeletesActiveSession(t *
 	}
 	c.mu.Lock()
 	_, inMemory := c.sessions["sess-archive"]
-	_, routeMapped := c.routeMap["im:app:archive"]
 	c.mu.Unlock()
 	if inMemory {
 		t.Fatal("session still present in memory after archive")
-	}
-	if routeMapped {
-		t.Fatal("route binding still present after archive")
 	}
 	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
 		t.Fatalf("source session dir stat err = %v, want not exist", err)
@@ -6652,43 +6360,6 @@ func base64ForTest(data []byte) string {
 	return b.String()
 }
 
-func TestStart_LoadsRouteBindingsWithoutRestoringSessions(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "db", "client.sqlite3")
-
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	defer store.Close()
-
-	ctx := context.Background()
-	if err := store.SaveRouteBinding(ctx, "proj-a", "im:feishu:chat-1", "sess-1"); err != nil {
-		t.Fatalf("SaveRouteBinding() error = %v", err)
-	}
-	if err := store.SaveSession(ctx, &SessionRecord{
-		ID:          "sess-1",
-		ProjectName: "proj-a",
-		Status:      SessionPersisted,
-		AgentType:   "claude",
-		AgentJSON:   `{"title":"Persisted"}`,
-	}); err != nil {
-		t.Fatalf("SaveSession() error = %v", err)
-	}
-
-	c := New(store, "proj-a", dir)
-	if err := c.Start(ctx); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-
-	if got := c.RouteSessionIDForTest("im:feishu:chat-1"); got != "sess-1" {
-		t.Fatalf("route binding = %q, want sess-1", got)
-	}
-	if c.HasSessionInMemoryForTest("sess-1") {
-		t.Fatal("persisted session should not be eagerly restored during Start()")
-	}
-}
-
 func TestStart_CreatesProjectRowWhenMissing(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
@@ -6720,94 +6391,6 @@ func TestStart_CreatesProjectRowWhenMissing(t *testing.T) {
 	}
 	if got != "" {
 		t.Fatalf("default agent = %q, want empty", got)
-	}
-}
-
-func TestResolveSession_RejectsEmptyRouteKey(t *testing.T) {
-	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	defer store.Close()
-
-	c := New(store, "proj-a", t.TempDir())
-	if _, err := c.ResolveSessionForTest(""); err == nil {
-		t.Fatal(`ResolveSessionForTest("") should fail`)
-	}
-}
-
-func TestHandleMessage_Cancel(t *testing.T) {
-	mock := &mockSession{agentName: "claude", sessionID: "sess-1"}
-	c := newTestClient(t, mock)
-	sink := &recordingSessionViewSink{}
-	c.SetSessionViewSink(sink)
-
-	c.HandleMessage(Message{ChatID: "chat1", Text: "/cancel"})
-
-	if mock.cancelCalls != 1 {
-		t.Fatalf("Cancel called %d times, want 1", mock.cancelCalls)
-	}
-	msgs := recordedSystemContents(sink.events)
-	if len(msgs) == 0 || !strings.Contains(msgs[0], "Cancelled") {
-		t.Fatalf("reply = %v, want Cancelled", msgs)
-	}
-}
-
-func TestHandleMessage_Status(t *testing.T) {
-	mock := &mockSession{agentName: "codex", sessionID: "sess-abc"}
-	c := newTestClient(t, mock)
-	sink := &recordingSessionViewSink{}
-	c.SetSessionViewSink(sink)
-
-	c.HandleMessage(Message{ChatID: "chat1", Text: "/status"})
-
-	msgs := recordedSystemContents(sink.events)
-	if len(msgs) == 0 {
-		t.Fatal("no reply received")
-	}
-	reply := msgs[0]
-	if !strings.Contains(reply, "codex") {
-		t.Fatalf("status reply %q missing agent name", reply)
-	}
-	if !strings.Contains(reply, "session:") {
-		t.Fatalf("status reply %q missing session field", reply)
-	}
-}
-
-func TestHandleMessage_PromptTextStreaming(t *testing.T) {
-	mock := &mockSession{
-		agentName: "codex",
-		sessionID: "sess-1",
-		promptFn: func(_ string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error) {
-			ch := make(chan acp.SessionUpdateParams, 2)
-			content1, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello "})
-			content2, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"})
-			ch <- acp.SessionUpdateParams{Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content1}}
-			ch <- acp.SessionUpdateParams{Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content2}}
-			close(ch)
-			return ch, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}, nil
-		},
-	}
-	c := newTestClient(t, mock)
-	sink := &recordingSessionViewSink{}
-	c.SetSessionViewSink(sink)
-
-	c.HandleMessage(Message{ChatID: "chat1", Text: "hi there"})
-
-	if len(mock.promptCalls) != 1 || mock.promptCalls[0] != "hi there" {
-		t.Fatalf("Prompt called with %v, want [hi there]", mock.promptCalls)
-	}
-	msgs := recordedSystemContents(sink.events)
-	// msgs[0] is the session-info system message; the streamed text follows.
-	found := false
-	for _, m := range msgs {
-		if m == "hello world" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("reply = %v, want a message containing 'hello world'", msgs)
 	}
 }
 
@@ -6905,36 +6488,7 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 		t.Fatal("SaveRouteBinding() should reject empty route keys")
 	}
 }
-func TestHandleMessage_Skills(t *testing.T) {
-	mock := &mockSession{agentName: "codex", sessionID: "sess-skills"}
-	c := newTestClient(t, mock)
-	sink := &recordingSessionViewSink{}
-	c.SetSessionViewSink(sink)
 
-	sess, err := c.resolveSession(testRouteKey)
-	if err != nil {
-		t.Fatalf("resolveSession: %v", err)
-	}
-	inst, ok := sess.instance.(*testInjectedInstance)
-	if !ok {
-		t.Fatalf("instance type = %T", sess.instance)
-	}
-	inst.skills = []agent.SkillDescriptor{{Name: "frontend-design", Path: "D:/repo/.agents/skills/frontend-design/SKILL.md"}}
-
-	c.HandleMessage(Message{ChatID: "chat1", Text: "/skills"})
-
-	msgs := recordedSystemContents(sink.events)
-	if len(msgs) == 0 {
-		t.Fatal("no reply received")
-	}
-	reply := strings.Join(msgs, "\n")
-	if !strings.Contains(reply, "Skills (1):") {
-		t.Fatalf("skills reply missing header: %q", reply)
-	}
-	if !strings.Contains(reply, "frontend-design") {
-		t.Fatalf("skills reply missing skill name: %q", reply)
-	}
-}
 func TestHandleSessionRequestSessionSendSlashTextIsPrompt(t *testing.T) {
 	mock := &mockSession{agentName: "codex", sessionID: "sess-send-slash"}
 	c := newTestClient(t, mock)
@@ -7005,9 +6559,9 @@ func TestSessionSendConvertsUploadedImageResourceLinkForImageCapableACPAgent(t *
 	imageBytes := []byte("hello")
 	block := uploadSessionAttachmentForTest(t, c, "sess-send-image", "pixel.png", "image/png", imageBytes)
 
-	sess, err := c.resolveSession(testRouteKey)
+	sess, err := c.SessionForTest("sess-send-image")
 	if err != nil {
-		t.Fatalf("resolveSession: %v", err)
+		t.Fatalf("SessionForTest: %v", err)
 	}
 	sess.mu.Lock()
 	sess.agentState.AgentCapabilities.PromptCapabilities = &acp.PromptCapabilities{Image: true}
@@ -7154,9 +6708,9 @@ func TestSessionSendAcceptsUploadedAttachmentBlock(t *testing.T) {
 	if body["ok"] != true {
 		t.Fatalf("send response=%#v, want ok", body)
 	}
-	sess, err := c.resolveSession(testRouteKey)
+	sess, err := c.SessionForTest("sess-send-attachment")
 	if err != nil {
-		t.Fatalf("resolveSession: %v", err)
+		t.Fatalf("SessionForTest: %v", err)
 	}
 	inst := sess.instance.(*testInjectedInstance)
 	if len(inst.lastPrompt) != 2 || inst.lastPrompt[1].URI != block.URI || inst.lastPrompt[1].Data != "" {

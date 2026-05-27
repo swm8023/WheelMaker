@@ -15,8 +15,6 @@ import (
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
-const commandTimeout = 30 * time.Second
-
 const acpClientProtocolVersion = 1
 
 var acpClientInfo = &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
@@ -52,10 +50,6 @@ type Client struct {
 	// sessions maps session IDs to Session objects.
 	sessions map[string]*Session
 
-	// routeMap maps IM routing keys to Session IDs.
-	// Multiple routes can point to the same Session.
-	routeMap map[string]string
-
 	// suspendTimeout is how long a Suspended session stays in memory before
 	// being persisted to SQLite and evicted. Default: 5 minutes.
 	suspendTimeout time.Duration
@@ -76,7 +70,6 @@ func New(store Store, projectName string, cwd string) *Client {
 		registry:       agent.DefaultACPFactory(),
 		store:          store,
 		sessions:       make(map[string]*Session),
-		routeMap:       make(map[string]string),
 		suspendTimeout: 5 * time.Minute,
 		stopPersistCh:  make(chan struct{}),
 		attachments:    newAttachmentManager(),
@@ -122,13 +115,6 @@ func (c *Client) Start(ctx context.Context) error {
 	if err := c.store.SaveProjectDefaultAgent(ctx, c.projectName, ""); err != nil {
 		return fmt.Errorf("client: ensure project row: %w", err)
 	}
-	bindings, err := c.store.LoadRouteBindings(ctx, c.projectName)
-	if err != nil {
-		return fmt.Errorf("client: load route bindings: %w", err)
-	}
-	c.mu.Lock()
-	c.routeMap = bindings
-	c.mu.Unlock()
 	go c.persistLoop()
 	return nil
 }
@@ -764,47 +750,6 @@ func (c *Client) sessionConfigOptions(ctx context.Context, sessionID string) []a
 
 // --- internal ---
 
-// resolveSession finds or creates the Session for a given route key.
-// If no session exists for the route, a new one is created.
-func (c *Client) resolveSession(routeKey string) (*Session, error) {
-	routeKey, err := normalizeRouteKey(routeKey)
-	if err != nil {
-		return nil, err
-	}
-
-	c.mu.Lock()
-	sessID := c.routeMap[routeKey]
-	if sessID != "" {
-		if sess := c.sessions[sessID]; sess != nil {
-			c.mu.Unlock()
-			return sess, nil
-		}
-	}
-	store := c.store
-	c.mu.Unlock()
-	if sessID != "" {
-		rec, err := store.LoadSession(context.Background(), c.projectName, sessID)
-		if err != nil {
-			return nil, fmt.Errorf("load session %q: %w", sessID, err)
-		}
-		if rec == nil {
-			return nil, fmt.Errorf("bound session %q for route %q not found", sessID, routeKey)
-		}
-		restored, err := sessionFromRecord(rec, c.cwd)
-		if err != nil {
-			return nil, err
-		}
-		c.wireSession(restored)
-		restored.Status = SessionActive
-		c.mu.Lock()
-		c.sessions[restored.acpSessionID] = restored
-		c.mu.Unlock()
-		return restored, nil
-	}
-
-	return nil, fmt.Errorf("route %q is not bound to a session", routeKey)
-}
-
 // newWiredSession creates a Session with all Client back-references wired.
 // Does NOT add it to c.sessions. Caller may hold c.mu.
 func (c *Client) newWiredSession(id, agentType string) (*Session, error) {
@@ -821,180 +766,6 @@ func (c *Client) wireSession(sess *Session) {
 	sess.registry = c.registry
 	sess.viewSink = c.viewSink
 	sess.store = c.store
-}
-
-func (c *Client) preferredAvailableAgent() string {
-	if c.registry == nil {
-		return ""
-	}
-	return strings.TrimSpace(c.registry.PreferredName())
-}
-
-func (c *Client) preferredAgentForAutoCreate() string {
-	if c.store != nil {
-		agentType, err := c.store.LoadProjectDefaultAgent(context.Background(), c.projectName)
-		if err != nil {
-			hubLogger(c.projectName).Warn("load project default agent failed err=%v", err)
-		} else if agentType != "" && c.registry != nil && c.registry.CreatorByName(agentType) != nil {
-			return agentType
-		}
-	}
-	return c.preferredAvailableAgent()
-}
-
-func (c *Client) persistBoundSession(routeKey string, sess *Session) error {
-	if err := sess.persistSession(context.Background()); err != nil {
-		hubLogger(c.projectName).Error("save session failed route=%s session=%s err=%v",
-			routeKey, sess.acpSessionID, err)
-		return fmt.Errorf("save session: %w", err)
-	}
-	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, sess.acpSessionID); err != nil {
-		hubLogger(c.projectName).Error("save route binding failed route=%s session=%s err=%v",
-			routeKey, sess.acpSessionID, err)
-		return fmt.Errorf("save route binding: %w", err)
-	}
-	return nil
-}
-
-// ClientNewSession suspends the current session for the given route,
-// creates a new session, and rebinds the route. Returns the new session.
-func (c *Client) ClientNewSession(routeKey, agentType string) (*Session, error) {
-	return c.clientNewSessionWithOptions(routeKey, agentType, true)
-}
-
-func (c *Client) clientNewSessionWithOptions(routeKey, agentType string, persistDefault bool) (*Session, error) {
-	routeKey, err := normalizeRouteKey(routeKey)
-	if err != nil {
-		return nil, err
-	}
-	agentType = normalizeAgentType(agentType)
-	if agentType == "" {
-		return nil, fmt.Errorf("agent type is required")
-	}
-	c.mu.Lock()
-	oldSessID := c.routeMap[routeKey]
-	oldSess := c.sessions[oldSessID]
-	c.mu.Unlock()
-
-	if oldSess != nil {
-		oldSess.mu.Lock()
-		hasInst := oldSess.instance != nil
-		oldSess.mu.Unlock()
-		if hasInst {
-			if err := oldSess.Suspend(context.Background()); err != nil {
-				hubLogger(c.projectName).Warn("suspend old session failed session=%s err=%v", oldSessID, err)
-			}
-		}
-		oldSess.mu.Lock()
-		oldSess.Status = SessionSuspended
-		oldSess.mu.Unlock()
-	}
-
-	sess, err := c.CreateSession(context.Background(), agentType, "")
-	if err != nil {
-		return nil, err
-	}
-	if persistDefault && c.store != nil {
-		if err := c.store.SaveProjectDefaultAgent(context.Background(), c.projectName, agentType); err != nil {
-			hubLogger(c.projectName).Warn("save project default agent failed agent=%s err=%v", agentType, err)
-		}
-	}
-	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, sess.acpSessionID); err != nil {
-		return nil, fmt.Errorf("save route binding: %w", err)
-	}
-	c.mu.Lock()
-	c.routeMap[routeKey] = sess.acpSessionID
-	c.mu.Unlock()
-	return sess, nil
-}
-
-// ClientLoadSession restores a session by index from the merged list of
-// in-memory + persisted sessions. Binds the loaded session to the given route.
-func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error) {
-	routeKey, err := normalizeRouteKey(routeKey)
-	if err != nil {
-		return nil, err
-	}
-	entries, err := c.clientListSessions()
-	if err != nil {
-		return nil, err
-	}
-	if index < 1 || index > len(entries) {
-		return nil, fmt.Errorf("index out of range (1-%d)", len(entries))
-	}
-	target := entries[index-1]
-
-	// Check if session is already in memory.
-	c.mu.Lock()
-	if sess := c.sessions[target.ID]; sess != nil {
-		// Already in memory — just rebind the route.
-		oldSessID := c.routeMap[routeKey]
-		oldSess := c.sessions[oldSessID]
-		c.mu.Unlock()
-
-		// Suspend old if different from target.
-		if oldSess != nil && oldSess.acpSessionID != target.ID {
-			oldSess.mu.Lock()
-			hasInst := oldSess.instance != nil
-			oldSess.mu.Unlock()
-			if hasInst {
-				_ = oldSess.Suspend(context.Background())
-			}
-			oldSess.mu.Lock()
-			oldSess.Status = SessionSuspended
-			oldSess.mu.Unlock()
-		}
-
-		c.mu.Lock()
-		c.routeMap[routeKey] = target.ID
-		sess.Status = SessionActive
-		c.mu.Unlock()
-		if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, target.ID); err != nil {
-			return nil, fmt.Errorf("save route binding: %w", err)
-		}
-		return sess, nil
-	}
-	c.mu.Unlock()
-
-	rec, err := c.store.LoadSession(context.Background(), c.projectName, target.ID)
-	if err != nil {
-		return nil, fmt.Errorf("load session %q: %w", target.ID, err)
-	}
-	if rec == nil {
-		return nil, fmt.Errorf("session %q not found in session store", target.ID)
-	}
-
-	// Suspend old session.
-	c.mu.Lock()
-	oldSessID := c.routeMap[routeKey]
-	oldSess := c.sessions[oldSessID]
-	c.mu.Unlock()
-	if oldSess != nil && oldSess.acpSessionID != target.ID {
-		oldSess.mu.Lock()
-		hasInst := oldSess.instance != nil
-		oldSess.mu.Unlock()
-		if hasInst {
-			_ = oldSess.Suspend(context.Background())
-		}
-		oldSess.mu.Lock()
-		oldSess.Status = SessionSuspended
-		oldSess.mu.Unlock()
-	}
-
-	restored, err := sessionFromRecord(rec, c.cwd)
-	if err != nil {
-		return nil, err
-	}
-	c.wireSession(restored)
-	c.mu.Lock()
-	restored.Status = SessionActive
-	c.sessions[restored.acpSessionID] = restored
-	c.routeMap[routeKey] = restored.acpSessionID
-	c.mu.Unlock()
-	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, restored.acpSessionID); err != nil {
-		return nil, fmt.Errorf("save route binding: %w", err)
-	}
-	return restored, nil
 }
 
 // clientListSessions returns a merged list of in-memory and persisted sessions,
@@ -1090,11 +861,6 @@ func (c *Client) deleteActiveSession(ctx context.Context, sessionID string, reje
 
 	c.mu.Lock()
 	sess := c.sessions[sessionID]
-	for routeKey, mappedSessionID := range c.routeMap {
-		if strings.TrimSpace(mappedSessionID) == sessionID {
-			delete(c.routeMap, routeKey)
-		}
-	}
 	delete(c.sessions, sessionID)
 	store := c.store
 	c.mu.Unlock()
@@ -1238,8 +1004,6 @@ func (c *Client) evictSuspendedSessions() {
 		sess.Status = SessionPersisted
 		sess.mu.Unlock()
 
-		// Remove from sessions map but keep route mapping pointing to the ID
-		// so we can look it up later for restoration.
 		delete(c.sessions, sess.acpSessionID)
 		c.mu.Unlock()
 
@@ -1247,31 +1011,46 @@ func (c *Client) evictSuspendedSessions() {
 	}
 }
 
-// parseCommand checks whether text is a recognized WheelMaker command.
-// Only exact first-word matches (/cancel, /status, /mode, /model, /config, /list, /new, /load, /skills) are treated as commands;
-// all other "/" lines fall through to the agent (fixing the "code starting with /" bug).
-func parseCommand(text string) (cmd, args string, ok bool) {
-	parts := strings.Fields(text)
-	if len(parts) == 0 {
-		return
-	}
-	switch parts[0] {
-	case "/cancel", "/status", "/mode", "/model", "/config", "/list", "/new", "/load", "/skills":
-		return parts[0], strings.Join(parts[1:], " "), true
-	}
-	return
-}
-func normalizeRouteKey(routeKey string) (string, error) {
-	routeKey = strings.TrimSpace(routeKey)
-	if routeKey == "" {
-		return "", fmt.Errorf("route key is required")
-	}
-	return routeKey, nil
-}
-
 func decodeSessionRequestPayload(raw json.RawMessage, out any) error {
 	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "" {
 		return nil
 	}
 	return json.Unmarshal(raw, out)
+}
+
+func firstNonEmpty(v ...string) string {
+	for _, s := range v {
+		if strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
+}
+
+func formatConfigOptionUpdateMessage(raw []byte) string {
+	if len(raw) == 0 {
+		return "Config options updated."
+	}
+	var u acp.SessionUpdate
+	var opts []acp.ConfigOption
+	if err := json.Unmarshal(raw, &u); err == nil {
+		opts = u.ConfigOptions
+	}
+	if len(opts) == 0 {
+		return "Config options updated."
+	}
+	mode := ""
+	model := ""
+	for _, opt := range opts {
+		if mode == "" && (opt.ID == acp.ConfigOptionIDMode || strings.EqualFold(opt.Category, acp.ConfigOptionCategoryMode)) {
+			mode = strings.TrimSpace(opt.CurrentValue)
+		}
+		if model == "" && (opt.ID == acp.ConfigOptionIDModel || strings.EqualFold(opt.Category, acp.ConfigOptionCategoryModel)) {
+			model = strings.TrimSpace(opt.CurrentValue)
+		}
+	}
+	if mode == "" && model == "" {
+		return "Config options updated."
+	}
+	return fmt.Sprintf("Config options updated: mode=%s model=%s", renderUnknown(mode), renderUnknown(model))
 }
