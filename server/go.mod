@@ -3,17 +3,14 @@ module github.com/swm8023/wheelmaker
 go 1.26.1
 
 require (
-	github.com/go-lark/lark v1.16.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
-	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
 	golang.org/x/sys v0.42.0
 	modernc.org/sqlite v1.48.0
 )
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
