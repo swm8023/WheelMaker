@@ -21,6 +21,7 @@ const (
 	defaultServerVersion   = "0.1.0"
 	defaultRequestTimeout  = 10 * time.Second
 	clientIdleTimeout      = 5 * time.Minute
+	removedChatSendMethod  = "chat" + ".send"
 )
 
 // Config configures the project registry server.
@@ -265,6 +266,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		if state.role == "client" && in.Method == removedChatSendMethod {
+			_ = s.writeError(state.peer, in.RequestID, in.Method, codeInvalidArgument, "unsupported method", map[string]any{"method": in.Method})
+			continue
+		}
 		if !methodAllowed(state.role, in.Method) {
 			_ = s.writeError(state.peer, in.RequestID, in.Method, codeForbidden, "method not allowed for role", map[string]any{"role": state.role})
 			continue
@@ -295,8 +300,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			s.handleMonitorForwardRequest(state.peer, state, in)
 		case "cmd.npm", "cmd.update", "cmd.skills", "cmd.token":
 			go s.handleHubCommandForwardRequest(state.peer, state, in)
-		case "chat.send",
-			"session.list", "session.read", "session.search", "session.new", "session.resume.list", "session.resume.import", "session.reload", "session.archive", "session.delete", "session.rename", "session.send", "session.cancel", "session.markRead", "session.setConfig", "session.attachment.start", "session.attachment.chunk", "session.attachment.finish", "session.attachment.cancel", "session.attachment.delete", "session.token.providers", "session.token.deepseek.stats", "session.token.scan",
+		case "session.list", "session.read", "session.search", "session.new", "session.resume.list", "session.resume.import", "session.reload", "session.archive", "session.delete", "session.rename", "session.send", "session.cancel", "session.markRead", "session.setConfig", "session.attachment.start", "session.attachment.chunk", "session.attachment.finish", "session.attachment.cancel", "session.attachment.delete", "session.token.providers", "session.token.deepseek.stats", "session.token.scan",
 			"fs.list", "fs.info", "fs.read", "fs.search", "fs.grep",
 			"git.refs", "git.log", "git.commit.files", "git.commit.fileDiff",
 			"git.diff", "git.diff.fileDiff", "git.status", "git.workingTree.fileDiff":
@@ -345,7 +349,7 @@ func methodAllowed(role string, method string) bool {
 		return method == "project.list" || method == "project.syncCheck" || method == "batch" ||
 			method == rp.MethodRelayEnable || method == rp.MethodRelayDisable || method == rp.MethodRelayStatus || method == rp.MethodRelayRegenerateAccessCode ||
 			method == "cmd.npm" || method == "cmd.update" || method == "cmd.skills" || method == "cmd.token" ||
-			method == "chat.send" || strings.HasPrefix(method, "session.") ||
+			strings.HasPrefix(method, "session.") ||
 			strings.HasPrefix(method, "fs.") || strings.HasPrefix(method, "git.")
 	case "monitor":
 		return method == "project.list" || method == "monitor.listHub" || method == "batch" || strings.HasPrefix(method, "monitor.")

@@ -47,10 +47,6 @@ type errorPayload = rp.ErrorPayload
 type monitorActionPayload = rp.MonitorActionPayload
 type monitorLogPayload = rp.MonitorLogPayload
 
-type ChatHandler interface {
-	HandleChatRequest(ctx context.Context, method string, projectID string, payload json.RawMessage) (any, error)
-}
-
 type SessionHandler interface {
 	HandleSessionRequest(ctx context.Context, method string, projectID string, payload json.RawMessage) (any, error)
 }
@@ -84,7 +80,6 @@ type Reporter struct {
 	mu           sync.RWMutex
 	projects     []ProjectInfo
 	projectsByID map[string]ProjectInfo
-	chatByID     map[string]ChatHandler
 	sessionByID  map[string]SessionHandler
 	conn         *websocket.Conn
 	pending      map[int64]chan envelope
@@ -144,7 +139,6 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		cfg:          cfg,
 		projects:     cp,
 		projectsByID: byID,
-		chatByID:     make(map[string]ChatHandler),
 		sessionByID:  make(map[string]SessionHandler),
 		pending:      make(map[int64]chan envelope),
 		monitorCore:  NewMonitorCore(monitorBase),
@@ -270,20 +264,6 @@ func (r *Reporter) SetMonitorResetSessionPromptState(reset func()) {
 		return
 	}
 	r.monitorCore.ResetSessionPromptState = reset
-}
-
-func (r *Reporter) RegisterChatHandler(projectID string, handler ChatHandler) {
-	projectID = strings.TrimSpace(projectID)
-	if projectID == "" {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if handler == nil {
-		delete(r.chatByID, projectID)
-		return
-	}
-	r.chatByID[projectID] = handler
 }
 
 func (r *Reporter) RegisterSessionHandler(projectID string, handler SessionHandler) {
@@ -435,8 +415,6 @@ func (r *Reporter) runSession(ctx context.Context) error {
 
 func (r *Reporter) handleRegistryRequest(conn *websocket.Conn, in envelope) {
 	switch in.Method {
-	case "chat.send":
-		r.replyChat(conn, in)
 	case "session.list", "session.read", "session.search", "session.new", "session.resume.list", "session.resume.import", "session.reload", "session.archive", "session.delete", "session.rename", "session.send", "session.cancel", "session.markRead", "session.setConfig", "session.attachment.start", "session.attachment.chunk", "session.attachment.finish", "session.attachment.cancel", "session.attachment.delete", "session.token.providers", "session.token.deepseek.stats", "session.token.scan":
 		r.replySession(conn, in)
 	case "monitor.status":
@@ -1163,36 +1141,6 @@ func (r *Reporter) ensureToolHandler() toolCommandHandler {
 		MonitorBaseDir: r.cfg.MonitorBaseDir,
 	})
 	return r.toolHandler
-}
-
-func (r *Reporter) replyChat(conn *websocket.Conn, req envelope) {
-	projectID := strings.TrimSpace(req.ProjectID)
-	if projectID == "" {
-		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "projectId is required")
-		return
-	}
-
-	r.mu.RLock()
-	handler := r.chatByID[projectID]
-	r.mu.RUnlock()
-	if handler == nil {
-		_ = r.writeError(conn, req.RequestID, codeNotFound, "chat unavailable for project")
-		return
-	}
-
-	payload, err := handler.HandleChatRequest(context.Background(), req.Method, projectID, req.Payload)
-	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
-		return
-	}
-
-	_ = r.writeJSON(conn, "->", envelope{
-		RequestID: req.RequestID,
-		Type:      "response",
-		Method:    req.Method,
-		ProjectID: projectID,
-		Payload:   rp.MustRaw(payload),
-	})
 }
 
 func (r *Reporter) replySession(conn *websocket.Conn, req envelope) {

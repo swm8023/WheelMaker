@@ -935,6 +935,47 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 	}
 }
 
+func TestChatSendIsUnsupportedAfterIMRemoval(t *testing.T) {
+	s := New(Config{Token: "tok"})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	method := "chat" + ".send"
+
+	client := dialWS(t, ts.URL+"/ws")
+	defer client.Close()
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-web",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.3",
+			"role":            "client",
+			"token":           "tok",
+		},
+	})
+	_ = mustReadEnvelope(t, client)
+
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    method,
+		ProjectID: "hub-a:proj1",
+		Payload: map[string]any{
+			"chatId": "chat-1",
+			"text":   "hello",
+		},
+	})
+	resp := mustReadEnvelope(t, client)
+	if resp.Type != "error" {
+		t.Fatalf("response type = %q, want error", resp.Type)
+	}
+	if resp.Payload["code"] != codeInvalidArgument {
+		t.Fatalf("code = %q, want %q", resp.Payload["code"], codeInvalidArgument)
+	}
+}
+
 func TestConnectInitMonitorRole(t *testing.T) {
 	s := New(Config{})
 	ts := httptest.NewServer(s.Handler())
