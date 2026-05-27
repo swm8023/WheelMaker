@@ -380,8 +380,24 @@ func TestReportTimeoutErrorRecordsSystemEventThroughViewSink(t *testing.T) {
 	if !strings.Contains(event.Content, "category=timeout stage=stream") {
 		t.Fatalf("event.Content = %q, want timeout payload", event.Content)
 	}
+	if strings.Contains(event.Content, "/status") {
+		t.Fatalf("event.Content = %q, want no stale slash-command hint", event.Content)
+	}
 	if event.SourceChannel != "" || event.SourceChatID != "" {
 		t.Fatalf("event source = (%q, %q), want empty source", event.SourceChannel, event.SourceChatID)
+	}
+}
+
+func TestConnectHintUsesAppSessionUIAction(t *testing.T) {
+	s := mustNewSession(t, "sess-1", "/tmp", "claude")
+
+	got := s.connectHint()
+
+	if strings.Contains(got, "/new") {
+		t.Fatalf("connectHint() = %q, want app/session UI action without slash command", got)
+	}
+	if !strings.Contains(got, "app") {
+		t.Fatalf("connectHint() = %q, want app/session UI action", got)
 	}
 }
 

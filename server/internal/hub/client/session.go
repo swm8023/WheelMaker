@@ -1141,7 +1141,7 @@ func (s *Session) reportTimeoutError(stage string, kind string) {
 		return
 	}
 	body := fmt.Sprintf(
-		"category=timeout stage=%s agent=%s sessionID=%s action=check /status then retry",
+		"category=timeout stage=%s agent=%s sessionID=%s action=check session status in the app, then retry",
 		stage,
 		renderUnknown(agent),
 		renderUnknown(sid),
@@ -1160,12 +1160,12 @@ func (s *Session) connectHint() string {
 		if s.registry != nil {
 			names := s.registry.Names()
 			if len(names) > 0 {
-				return fmt.Sprintf("Run `/new <agent>` to connect. Available: %s", strings.Join(names, ", "))
+				return fmt.Sprintf("Create a session in the app to connect an agent. Available: %s", strings.Join(names, ", "))
 			}
 		}
 		return "No available ACP provider. Check environment and restart wheelmaker."
 	}
-	return fmt.Sprintf("Run `%s` to connect.", "/new "+agentName)
+	return fmt.Sprintf("Create or select a session in the app to connect agent %s.", agentName)
 }
 
 type instanceLivenessProbe interface {

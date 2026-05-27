@@ -110,7 +110,7 @@ func (c *Client) SetSessionHistoryRoot(root string) {
 }
 
 // Start loads persisted state.
-// Agent initialization is deferred until the first incoming IM event (lazy init).
+// Agent initialization is deferred until a session prompt needs an agent (lazy init).
 func (c *Client) Start(ctx context.Context) error {
 	if err := c.store.SaveProjectDefaultAgent(ctx, c.projectName, ""); err != nil {
 		return fmt.Errorf("client: ensure project row: %w", err)
