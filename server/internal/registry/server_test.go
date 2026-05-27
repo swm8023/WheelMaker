@@ -1093,6 +1093,146 @@ func TestBatchChatSendIsUnsupportedAfterIMRemoval(t *testing.T) {
 	}
 }
 
+func TestMonitorBatchRejectsClientForwardMethods(t *testing.T) {
+	tests := []struct {
+		name    string
+		method  string
+		payload map[string]any
+	}{
+		{
+			name:    "session list",
+			method:  "session.list",
+			payload: map[string]any{},
+		},
+		{
+			name:   "fs read",
+			method: "fs.read",
+			payload: map[string]any{
+				"path": "README.md",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if methodAllowed("monitor", tt.method) {
+				t.Fatalf("monitor direct methodAllowed(%q)=true, want false", tt.method)
+			}
+
+			s := New(Config{})
+			ts := httptest.NewServer(s.Handler())
+			t.Cleanup(ts.Close)
+
+			hub := dialWS(t, ts.URL+"/ws")
+			defer hub.Close()
+			mustWriteJSON(t, hub, testEnvelope{
+				RequestID: 1,
+				Type:      "request",
+				Method:    "connect.init",
+				Payload: map[string]any{
+					"clientName":      "wm-hub",
+					"clientVersion":   "0.1.0",
+					"protocolVersion": "2.3",
+					"role":            "hub",
+					"hubId":           "hub-a",
+				},
+			})
+			initResp := mustReadEnvelope(t, hub)
+			principal, _ := initResp.Payload["principal"].(map[string]any)
+			connectionEpoch, _ := principal["connectionEpoch"].(float64)
+			mustWriteJSON(t, hub, testEnvelope{
+				RequestID: 2,
+				Type:      "request",
+				Method:    "registry.reportProjects",
+				Payload: map[string]any{
+					"hubId":           "hub-a",
+					"connectionEpoch": int64(connectionEpoch),
+					"projects": []map[string]any{
+						{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
+					},
+				},
+			})
+			_ = mustReadEnvelope(t, hub)
+
+			monitor := dialWS(t, ts.URL+"/ws")
+			defer monitor.Close()
+			mustWriteJSON(t, monitor, testEnvelope{
+				RequestID: 1,
+				Type:      "request",
+				Method:    "connect.init",
+				Payload: map[string]any{
+					"clientName":      "wm-monitor",
+					"clientVersion":   "0.1.0",
+					"protocolVersion": "2.3",
+					"role":            "monitor",
+				},
+			})
+			_ = mustReadEnvelope(t, monitor)
+
+			forwardedCh := make(chan testEnvelope, 1)
+			forwardWriteErrCh := make(chan error, 1)
+			go func() {
+				_ = hub.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+				var forwarded testEnvelope
+				if err := hub.ReadJSON(&forwarded); err != nil {
+					return
+				}
+				forwardedCh <- forwarded
+				forwardWriteErrCh <- hub.WriteJSON(testEnvelope{
+					RequestID: forwarded.RequestID,
+					Type:      "response",
+					Method:    forwarded.Method,
+					ProjectID: forwarded.ProjectID,
+					Payload: map[string]any{
+						"ok": true,
+					},
+				})
+			}()
+
+			mustWriteJSON(t, monitor, testEnvelope{
+				RequestID: 2,
+				Type:      "request",
+				Method:    "batch",
+				Payload: map[string]any{
+					"requests": []map[string]any{
+						{
+							"method":    tt.method,
+							"projectId": "hub-a:server",
+							"payload":   tt.payload,
+						},
+					},
+				},
+			})
+
+			select {
+			case forwarded := <-forwardedCh:
+				if err := <-forwardWriteErrCh; err != nil {
+					t.Fatalf("write forwarded response: %v", err)
+				}
+				t.Fatalf("monitor batch subrequest was forwarded to hub: %#v", forwarded)
+			case <-time.After(200 * time.Millisecond):
+			}
+
+			resp := mustReadEnvelope(t, monitor)
+			if resp.Type != "response" || resp.Method != "batch" {
+				t.Fatalf("batch response=%#v, want response", resp)
+			}
+			responses, _ := resp.Payload["responses"].([]any)
+			if len(responses) != 1 {
+				t.Fatalf("responses=%#v, want one response", resp.Payload["responses"])
+			}
+			item, _ := responses[0].(map[string]any)
+			if item["type"] != "error" {
+				t.Fatalf("batch item=%#v, want error", item)
+			}
+			payload, _ := item["payload"].(map[string]any)
+			if payload["code"] != codeForbidden {
+				t.Fatalf("batch item code=%v, want %s", payload["code"], codeForbidden)
+			}
+		})
+	}
+}
+
 func TestConnectInitMonitorRole(t *testing.T) {
 	s := New(Config{})
 	ts := httptest.NewServer(s.Handler())

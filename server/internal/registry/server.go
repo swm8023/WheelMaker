@@ -889,6 +889,9 @@ func (s *Server) executeBatchRequest(state *connectionState, in envelope) envelo
 	if state.role == "client" && isRemovedClientRequestMethod(in.Method) {
 		return s.errorEnvelope(in.Method, codeInvalidArgument, "unsupported method", map[string]any{"method": in.Method})
 	}
+	if !methodAllowed(state.role, in.Method) {
+		return s.errorEnvelope(in.Method, codeForbidden, "method not allowed for role", map[string]any{"role": state.role})
+	}
 
 	switch in.Method {
 	case "project.list":
