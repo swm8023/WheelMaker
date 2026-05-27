@@ -14715,12 +14715,7 @@ function App() {
                     title={selectedChatPromptRunning ? 'Cancel prompt' : 'No prompt running'}
                     aria-label="Cancel prompt"
                   >
-                    <span
-                      className={`chat-stop-glyph${selectedChatPromptRunning ? ' active' : ''}${selectedChatPromptCancelling ? ' cancelling' : ''}`}
-                      aria-hidden="true"
-                    >
-                      <span className="chat-stop-square" />
-                    </span>
+                    <span className="codicon codicon-debug-stop" aria-hidden="true" />
                   </button>
                 </div>
                 <div className="chat-composer-toolbar-actions">

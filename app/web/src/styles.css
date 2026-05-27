@@ -7133,7 +7133,7 @@ body,
   height: 24px;
   flex: 0 0 auto;
   border: none;
-  border-radius: 999px;
+  border-radius: 8px;
   background: transparent;
   color: color-mix(in srgb, var(--muted) 82%, var(--text));
   opacity: 0.42;
@@ -7165,56 +7165,35 @@ body,
   background: transparent;
 }
 
-.chat-stop-glyph {
-  position: relative;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
+.chat-composer-stop-trigger .codicon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  transform-origin: center;
 }
 
-.chat-stop-glyph::before {
-  content: '';
-  position: absolute;
-  inset: 1px;
-  border-radius: inherit;
-  background: conic-gradient(from 0deg, currentColor 0deg 252deg, transparent 252deg 360deg);
-  opacity: 0.5;
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+.chat-composer-stop-trigger.active .codicon {
+  animation: chatStopBreath 1.55s ease-in-out infinite;
 }
 
-.chat-stop-glyph.active::before {
-  animation: chatStopRingSpin 1.1s linear infinite;
-  opacity: 0.95;
-}
-
-.chat-stop-glyph.cancelling::before {
-  animation-duration: 0.72s;
-}
-
-.chat-stop-square {
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-  background: currentColor;
-  opacity: 0.72;
-}
-
-.chat-stop-glyph.active .chat-stop-square {
-  opacity: 1;
-}
-
-@keyframes chatStopRingSpin {
-  to {
-    transform: rotate(360deg);
+@keyframes chatStopBreath {
+  0%,
+  100% {
+    opacity: 0.82;
+    transform: scale(1);
+    text-shadow: 0 0 0 rgba(248, 81, 73, 0);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+    text-shadow: 0 0 9px rgba(248, 81, 73, 0.34);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-stop-glyph.active::before {
+  .chat-composer-stop-trigger.active .codicon {
     animation: none;
   }
 }
