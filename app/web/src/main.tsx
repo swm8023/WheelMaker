@@ -554,7 +554,6 @@ const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
 const CHAT_CONFIG_INLINE_LIMIT = 3;
 const fileMemoryCacheKey = (activeProjectId: string, path: string) => `${activeProjectId}\n${path}`;
-const WIDE_PROJECT_SESSION_LIMIT = 5;
 const PROJECT_PIN_LONG_PRESS_MS = 450;
 const PROJECT_SESSION_LONG_PRESS_MS = 450;
 const DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO = 0.45;
@@ -3241,7 +3240,6 @@ function App() {
   const chatConfigOptionsRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOverflowRef = useRef<HTMLDivElement | null>(null);
   const wideProjectActionMenuRef = useRef<HTMLDivElement | null>(null);
-  const projectSessionSentinelRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const chatSelectedIdRef = useRef('');
   const selectedChatKeyRef = useRef<ChatSessionKey | null>(null);
   const chatVisibleRuntimeKeyRef = useRef('');
@@ -3297,7 +3295,6 @@ function App() {
     }
     return labels;
   }, [projectSessionsByProjectId, projects]);
-  const [wideProjectVisibleCounts, setWideProjectVisibleCounts] = useState<Record<string, number>>({});
   const [wideProjectActionMenu, setWideProjectActionMenu] = useState<WideProjectActionMenuState | null>(null);
   const [mobileProjectActionMenu, setMobileProjectActionMenu] = useState<MobileProjectActionMenuState | null>(null);
   const [projectSessionActionMenu, setProjectSessionActionMenu] = useState<ProjectSessionActionMenuState | null>(null);
@@ -4295,54 +4292,6 @@ function App() {
   const chatQuickSwitchMenuStyle = useMemo<React.CSSProperties>(() => ({
     top: portRelayReady && portRelayFrameUrl ? 56 : 0,
   }), [portRelayFrameUrl, portRelayReady]);
-  const projectSessionCountKey = useMemo(
-    () => Object.entries(projectSessionsByProjectId)
-      .map(([entryProjectId, sessions]) => `${entryProjectId}:${sessions.length}`)
-      .sort()
-      .join('|'),
-    [projectSessionsByProjectId],
-  );
-
-  const expandProjectSessionVisibleCount = useCallback((targetProjectId: string) => {
-    const total = projectSessionsByProjectIdRef.current[targetProjectId]?.length ?? 0;
-    if (total <= 0) {
-      return;
-    }
-    setWideProjectVisibleCounts(prev => {
-      const current = prev[targetProjectId] ?? WIDE_PROJECT_SESSION_LIMIT;
-      if (current >= total) {
-        return prev;
-      }
-      return {
-        ...prev,
-        [targetProjectId]: Math.min(total, current + WIDE_PROJECT_SESSION_LIMIT),
-      };
-    });
-  }, []);
-
-  useEffect(() => {
-    if (typeof IntersectionObserver === 'undefined') {
-      return;
-    }
-    const observer = new IntersectionObserver(
-      entries => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) {
-            continue;
-          }
-          const targetProjectId = (entry.target as HTMLElement).dataset.projectId || '';
-          expandProjectSessionVisibleCount(targetProjectId);
-        }
-      },
-      {root: null, rootMargin: '180px 0px'},
-    );
-    for (const element of Object.values(projectSessionSentinelRefs.current)) {
-      if (element) {
-        observer.observe(element);
-      }
-    }
-    return () => observer.disconnect();
-  }, [expandProjectSessionVisibleCount, projectIdListKey, projectSessionCountKey, wideProjectVisibleCounts]);
 
   useEffect(() => {
     projectIdRef.current = projectId;
@@ -12871,9 +12820,6 @@ function App() {
           {sortedProjectItems.map(projectItem => {
             const targetProjectId = projectItem.projectId;
             const projectSessions = projectSessionsByProjectId[targetProjectId] ?? [];
-            const visibleCount =
-              wideProjectVisibleCounts[targetProjectId] ?? WIDE_PROJECT_SESSION_LIMIT;
-            const visibleSessions = projectSessions.slice(0, visibleCount);
             const collapsed = collapsedProjectIds.includes(targetProjectId);
             const pinnedProject = pinnedProjectIds.includes(targetProjectId);
             const projectHub = projectItem.hubId || 'local';
@@ -12966,7 +12912,7 @@ function App() {
                 ) : null}
                 {!collapsed ? (
                   <div className="wide-project-session-list mobile-project-session-list">
-                    {visibleSessions.map(session => {
+                    {projectSessions.map(session => {
                       const sessionAgent = (session.agentType || '').trim();
                       const displaySessionAgent = normalizeAgentTypeName(sessionAgent);
                       const sessionActionsOpen =
@@ -13017,16 +12963,6 @@ function App() {
                         </div>
                       );
                     })}
-                    {projectSessions.length > visibleSessions.length ? (
-                      <div
-                        ref={node => {
-                          projectSessionSentinelRefs.current[targetProjectId] = node;
-                        }}
-                        className="wide-project-session-sentinel"
-                        data-project-id={targetProjectId}
-                        aria-hidden="true"
-                      />
-                    ) : null}
                     {projectSessions.length === 0 ? (
                       <div className="wide-project-empty">No sessions yet.</div>
                     ) : null}
@@ -13181,9 +13117,6 @@ function App() {
         {sessionSearchActive ? renderSessionSearchResults(false) : sortedProjectItems.map(projectItem => {
           const targetProjectId = projectItem.projectId;
           const projectSessions = projectSessionsByProjectId[targetProjectId] ?? [];
-          const visibleCount =
-            wideProjectVisibleCounts[targetProjectId] ?? WIDE_PROJECT_SESSION_LIMIT;
-          const visibleSessions = projectSessions.slice(0, visibleCount);
           const collapsed = collapsedProjectIds.includes(targetProjectId);
           const pinnedProject = pinnedProjectIds.includes(targetProjectId);
           const agents = getWideProjectAgents(projectItem, projectSessions);
@@ -13384,7 +13317,7 @@ function App() {
               </div>
               {!collapsed ? (
                 <div className="wide-project-session-list">
-                  {visibleSessions.map(session => {
+                  {projectSessions.map(session => {
                     const sessionAgent = (session.agentType || '').trim();
                     const displaySessionAgent = normalizeAgentTypeName(sessionAgent);
                     const sessionActionsOpen =
@@ -13434,16 +13367,6 @@ function App() {
                       </div>
                     );
                   })}
-                  {projectSessions.length > visibleSessions.length ? (
-                    <div
-                      ref={node => {
-                        projectSessionSentinelRefs.current[targetProjectId] = node;
-                      }}
-                      className="wide-project-session-sentinel"
-                      data-project-id={targetProjectId}
-                      aria-hidden="true"
-                    />
-                  ) : null}
                   {projectSessions.length === 0 ? (
                     <div className="wide-project-empty">No sessions yet.</div>
                   ) : null}
@@ -15847,8 +15770,6 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
-
-
 
 
 

@@ -1001,7 +1001,7 @@ describe('web chat integration', () => {
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
-    expect(mainTsx).toContain('const WIDE_PROJECT_SESSION_LIMIT = 5;');
+    expect(mainTsx).not.toContain('WIDE_PROJECT_SESSION_LIMIT');
     expect(mainTsx).toContain('const PROJECT_PIN_LONG_PRESS_MS = 450;');
     expect(mainTsx).toContain('function tagVariantClass(prefix: string, value: string): string {');
     expect(mainTsx).toContain('const sortedProjectItems = useMemo(() => sortProjectsByPin(projects, pinnedProjectIds), [projects, pinnedProjectIds]);');
