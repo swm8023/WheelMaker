@@ -7111,8 +7111,8 @@ body,
 }
 
 .chat-composer-skill-trigger {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   border: none;
   border-radius: 8px;
@@ -7124,8 +7124,8 @@ body,
 }
 
 .chat-composer-stop-trigger {
-  width: 32px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
   border: none;
   border-radius: 8px;
@@ -7279,6 +7279,7 @@ body,
 .chat-composer-action-column {
   flex: 0 0 auto;
   width: 32px;
+  height: 32px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -7317,6 +7318,16 @@ body,
   min-width: 0;
 }
 
+.chat-composer-toolbar-actions {
+  min-width: 0;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+
 .chat-composer-tools {
   display: inline-flex;
   align-items: center;
@@ -7325,7 +7336,7 @@ body,
 }
 
 .chat-tool-button {
-  width: 24px;
+  width: 30px;
   height: 24px;
   border: none;
   border-radius: 7px;
@@ -7359,12 +7370,9 @@ body,
   line-height: 1;
 }
 
-.chat-attach-button {
-  color: color-mix(in srgb, #4db6ac 72%, var(--text));
-}
-
+.chat-attach-button,
 .chat-image-attach-button {
-  color: color-mix(in srgb, #7aa2ff 74%, var(--text));
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
 }
 
 .chat-tool-button:hover {
@@ -7515,7 +7523,6 @@ body,
 
 .chat-config-options-wrap {
   position: relative;
-  margin-left: auto;
   min-width: 0;
   max-width: calc(100% - 76px);
 }
@@ -8051,13 +8058,20 @@ body,
 }
 
 .narrow-shell[data-floating-control-side='left'] .drawer {
-  left: var(--mobile-floating-control-lane);
+  inset: 0 0 0 auto;
   width: min(440px, calc(100vw - var(--mobile-floating-control-lane) - env(safe-area-inset-left, 0px)));
+  border-right: none;
+  border-left: 1px solid var(--border);
+  transform: translateX(100%);
 }
 
 .drawer.show {
   transform: translateX(0);
   box-shadow: 8px 0 28px rgba(0, 0, 0, 0.38);
+}
+
+.narrow-shell[data-floating-control-side='left'] .drawer.show {
+  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.38);
 }
 
 .narrow-shell .body {

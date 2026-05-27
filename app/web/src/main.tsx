@@ -14555,20 +14555,6 @@ function App() {
                   >
                     <span className="codicon codicon-send" />
                   </button>
-                  <button
-                    type="button"
-                    className={`chat-composer-stop-trigger${selectedChatPromptRunning ? ' active' : ''}`}
-                    onPointerDown={event => event.preventDefault()}
-                    onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}
-                    disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}
-                    title={selectedChatPromptRunning ? 'Cancel prompt' : 'No prompt running'}
-                    aria-label="Cancel prompt"
-                  >
-                    <span
-                      className={`codicon ${selectedChatPromptCancelling ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-stop'}`}
-                      aria-hidden="true"
-                    />
-                  </button>
                 </div>
               </div>
               {chatFileMentionMenuOpen ? (
@@ -14648,80 +14634,96 @@ function App() {
                     <span className="codicon codicon-file-media" />
                   </button>
                 </div>
-                {selectedChatConfigOptions.length > 0 ? (
-                  <div className="chat-config-options-wrap">
-                    <div className="chat-config-options-shell">
-                      <div ref={chatConfigOptionsRef} className="chat-config-options">
-                        {chatConfigOptions.map(option => renderChatConfigPill(option))}
-                      </div>
-                      {chatConfigOverflowOptions.length > 0 ? (
-                        <div ref={chatConfigOverflowRef} className="chat-config-overflow-anchor">
-                          <button
-                            type="button"
-                            className="chat-config-overflow-button"
-                            aria-label={`Show ${chatConfigOverflowOptions.length} more config options`}
-                            aria-expanded={chatConfigOverflowOpen}
-                            title="More config options"
-                            onClick={() => {
-                              setChatPromptMenuOpen(false);
-                              setChatFileMentionMenuOpen(false);
-                              setChatConfigMenuOptionId('');
-                              setChatConfigOverflowOpen(prev => !prev);
-                            }}
-                          >
-                            <span className="codicon codicon-ellipsis" aria-hidden="true" />
-                            <span className="codicon codicon-chevron-down" aria-hidden="true" />
-                          </button>
-                          {chatConfigOverflowOpen ? (
-                            <div className="chat-config-overflow-menu" aria-label="More config options">
-                              {chatConfigOverflowOptions.map(option => {
-                                const optionValues = option.options ?? [];
-                                const currentValue = chatConfigCurrentValue(option);
-                                const updating =
-                                  chatConfigUpdatingKey ===
-                                  `${selectedChatSession?.sessionId ?? ''}:${option.id}`;
-                                const optionLabel = option.name || option.id;
-                                return (
-                                  <div key={`overflow:${option.id}`} className="chat-config-overflow-group">
-                                    <div className="chat-config-item-label" title={optionLabel}>
-                                      {optionLabel}
-                                    </div>
-                                    <div className="chat-config-overflow-values">
-                                      {optionValues.map(item => {
-                                        const selected = item.value === currentValue;
-                                        return (
-                                          <button
-                                            key={`overflow:${option.id}:${item.value}`}
-                                            type="button"
-                                            className={`chat-config-value-option${selected ? ' selected' : ''}`}
-                                            disabled={updating}
-                                            aria-pressed={selected}
-                                            onClick={() => {
-                                              setChatConfigOverflowOpen(false);
-                                              handleChatConfigOptionChange(
-                                                option,
-                                                item.value,
-                                              ).catch(() => undefined);
-                                            }}
-                                          >
-                                            <span className="chat-config-value-label">{item.name || item.value}</span>
-                                            {selected ? (
-                                              <span className="codicon codicon-check" aria-hidden="true" />
-                                            ) : null}
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : null}
+                <div className="chat-composer-toolbar-actions">
+                  {selectedChatConfigOptions.length > 0 ? (
+                    <div className="chat-config-options-wrap">
+                      <div className="chat-config-options-shell">
+                        <div ref={chatConfigOptionsRef} className="chat-config-options">
+                          {chatConfigOptions.map(option => renderChatConfigPill(option))}
                         </div>
-                      ) : null}
+                        {chatConfigOverflowOptions.length > 0 ? (
+                          <div ref={chatConfigOverflowRef} className="chat-config-overflow-anchor">
+                            <button
+                              type="button"
+                              className="chat-config-overflow-button"
+                              aria-label={`Show ${chatConfigOverflowOptions.length} more config options`}
+                              aria-expanded={chatConfigOverflowOpen}
+                              title="More config options"
+                              onClick={() => {
+                                setChatPromptMenuOpen(false);
+                                setChatFileMentionMenuOpen(false);
+                                setChatConfigMenuOptionId('');
+                                setChatConfigOverflowOpen(prev => !prev);
+                              }}
+                            >
+                              <span className="codicon codicon-ellipsis" aria-hidden="true" />
+                              <span className="codicon codicon-chevron-down" aria-hidden="true" />
+                            </button>
+                            {chatConfigOverflowOpen ? (
+                              <div className="chat-config-overflow-menu" aria-label="More config options">
+                                {chatConfigOverflowOptions.map(option => {
+                                  const optionValues = option.options ?? [];
+                                  const currentValue = chatConfigCurrentValue(option);
+                                  const updating =
+                                    chatConfigUpdatingKey ===
+                                    `${selectedChatSession?.sessionId ?? ''}:${option.id}`;
+                                  const optionLabel = option.name || option.id;
+                                  return (
+                                    <div key={`overflow:${option.id}`} className="chat-config-overflow-group">
+                                      <div className="chat-config-item-label" title={optionLabel}>
+                                        {optionLabel}
+                                      </div>
+                                      <div className="chat-config-overflow-values">
+                                        {optionValues.map(item => {
+                                          const selected = item.value === currentValue;
+                                          return (
+                                            <button
+                                              key={`overflow:${option.id}:${item.value}`}
+                                              type="button"
+                                              className={`chat-config-value-option${selected ? ' selected' : ''}`}
+                                              disabled={updating}
+                                              aria-pressed={selected}
+                                              onClick={() => {
+                                                setChatConfigOverflowOpen(false);
+                                                handleChatConfigOptionChange(
+                                                  option,
+                                                  item.value,
+                                                ).catch(() => undefined);
+                                              }}
+                                            >
+                                              <span className="chat-config-value-label">{item.name || item.value}</span>
+                                              {selected ? (
+                                                <span className="codicon codicon-check" aria-hidden="true" />
+                                              ) : null}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                ) : null}
+                  ) : null}
+                  <button
+                    type="button"
+                    className={`chat-composer-stop-trigger${selectedChatPromptRunning ? ' active' : ''}`}
+                    onPointerDown={event => event.preventDefault()}
+                    onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}
+                    disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}
+                    title={selectedChatPromptRunning ? 'Cancel prompt' : 'No prompt running'}
+                    aria-label="Cancel prompt"
+                  >
+                    <span
+                      className={`codicon ${selectedChatPromptCancelling ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-stop'}`}
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
               </div>
             </div>
           </div>

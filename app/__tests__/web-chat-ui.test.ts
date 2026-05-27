@@ -637,6 +637,7 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('if (chatComposerText.length > 0) {');
     expect(mainTsx).toContain('className="chat-composer-toolbar"');
     expect(mainTsx).toContain('className="chat-composer-action-column"');
+    expect(mainTsx).toContain('className="chat-composer-toolbar-actions"');
     expect(mainTsx).not.toContain('className={`chat-cancel-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
     expect(mainTsx).toContain('title={selectedChatPromptRunning ? \'Cancel prompt\' : \'No prompt running\'}');
     expect(mainTsx).toContain('aria-label="Cancel prompt"');
@@ -735,6 +736,7 @@ describe('web chat integration', () => {
     expect(toolsBlock.indexOf('chat-mention-button')).toBeGreaterThanOrEqual(0);
     expect(toolsBlock.indexOf('chat-attach-button')).toBeGreaterThan(toolsBlock.indexOf('chat-mention-button'));
     expect(toolsBlock).not.toContain('chat-stop-button');
+    expect(toolsBlock).not.toContain('chat-composer-stop-trigger');
 
     const configPillStart = mainTsx.indexOf('const renderChatConfigPill = (option: RegistrySessionConfigOption) => {');
     const configPillEnd = mainTsx.indexOf('if (tab === \'chat\')', configPillStart);
@@ -784,9 +786,10 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toContain('.chat-composer-skill-trigger {');
     expect(stylesCss).toContain('.chat-composer-action-column {');
+    expect(stylesCss).toContain('.chat-composer-toolbar-actions {');
     expect(stylesCss).toContain('.chat-composer-stop-trigger {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-stop-trigger \{[\s\S]*width: 32px;[\s\S]*height: 26px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
+      /\.chat-composer-stop-trigger \{[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-stop-trigger.active {');
     expect(stylesCss).not.toContain('.chat-composer-quick-trigger {');
@@ -842,7 +845,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-composer-tools {');
     expect(stylesCss).toContain('.chat-tool-button {');
     expect(stylesCss).toMatch(
-      /\.chat-tool-button \{[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*\}/,
+      /\.chat-tool-button \{[\s\S]*width: 30px;[\s\S]*height: 24px;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.chat-tool-button \{[\s\S]*border: none;[\s\S]*background: transparent;/,
@@ -857,7 +860,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-mention-symbol {');
     expect(stylesCss).not.toContain('.chat-skill-button {');
     expect(stylesCss).toMatch(
-      /\.chat-attach-button \{[\s\S]*color: color-mix\(in srgb, #4db6ac 72%, var\(--text\)\);[\s\S]*\}/,
+      /\.chat-attach-button,\s*\.chat-image-attach-button \{[\s\S]*color: color-mix\(in srgb, var\(--accent\) 72%, var\(--text\)\);[\s\S]*\}/,
     );
     expect(stylesCss).not.toContain('.chat-stop-button {');
     expect(stylesCss).not.toContain('.chat-stop-button.active {');
@@ -882,7 +885,7 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.chat-config-feedback {');
   });
 
-  test('places skills beside the composer input and stacks send above cancel on the right', () => {
+  test('keeps skills aligned with the text row and cancel in the bottom-right toolbar', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
@@ -898,16 +901,26 @@ describe('web chat integration', () => {
     expect(inputRow.indexOf('chat-composer-skill-trigger')).toBeLessThan(inputRow.indexOf('className="chat-composer-input-shell"'));
     expect(inputRow).toContain('className="chat-composer-action-column"');
     expect(inputRow).toContain('className="chat-send-button"');
-    expect(inputRow).toContain("className={`chat-composer-stop-trigger${selectedChatPromptRunning ? ' active' : ''}`}");
-    expect(inputRow.indexOf('chat-send-button')).toBeLessThan(inputRow.indexOf('chat-composer-stop-trigger'));
+    expect(inputRow).not.toContain('chat-composer-stop-trigger');
 
     const toolsStart = mainTsx.indexOf('className="chat-composer-tools"');
     const toolsEnd = mainTsx.indexOf('className="chat-config-options-wrap"', toolsStart);
     const toolsBlock = mainTsx.slice(toolsStart, toolsEnd);
     expect(toolsBlock).not.toContain('chat-slash-button');
 
+    const toolbarStart = mainTsx.indexOf('className="chat-composer-toolbar"');
+    const toolbarActionsStart = mainTsx.indexOf('className="chat-composer-toolbar-actions"', toolbarStart);
+    const toolbarConfigStart = mainTsx.indexOf('className="chat-config-options-wrap"', toolbarActionsStart);
+    const toolbarStopStart = mainTsx.indexOf("className={`chat-composer-stop-trigger${selectedChatPromptRunning ? ' active' : ''}`}", toolbarActionsStart);
+    expect(toolbarActionsStart).toBeGreaterThan(toolbarStart);
+    expect(toolbarConfigStart).toBeGreaterThan(toolbarActionsStart);
+    expect(toolbarStopStart).toBeGreaterThan(toolbarConfigStart);
+
     expect(stylesCss).toMatch(/\.chat-composer-input-row \{[\s\S]*align-items: flex-end;[\s\S]*\}/);
-    expect(stylesCss).toContain('.chat-composer-action-column');
+    expect(stylesCss).toMatch(/\.chat-composer-skill-trigger \{[\s\S]*width: 30px;[\s\S]*height: 30px;[\s\S]*\}/);
+    expect(stylesCss).toMatch(/\.chat-tool-button \{[\s\S]*width: 30px;[\s\S]*height: 24px;[\s\S]*\}/);
+    expect(stylesCss).toContain('.chat-composer-toolbar-actions');
+    expect(stylesCss).toMatch(/\.chat-composer-action-column \{[\s\S]*height: 32px;[\s\S]*\}/);
   });
 
   test('adds a dedicated multi-image attachment picker that reuses chat attachment enqueueing', () => {
@@ -935,7 +948,9 @@ describe('web chat integration', () => {
     const toolsBlock = mainTsx.slice(toolsStart, toolsEnd);
     expect(toolsBlock.indexOf('chat-attach-button')).toBeLessThan(toolsBlock.indexOf('chat-image-attach-button'));
 
-    expect(stylesCss).toContain('.chat-image-attach-button');
+    expect(stylesCss).toMatch(
+      /\.chat-attach-button,\s*\.chat-image-attach-button \{[\s\S]*color: color-mix\(in srgb, var\(--accent\) 72%, var\(--text\)\);[\s\S]*\}/,
+    );
   });
 
   test('uses mobile Enter as send while keeping modified Enter and IME composition from sending', () => {
@@ -971,6 +986,12 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toMatch(
       /\.drawer \{[\s\S]*position: fixed;[\s\S]*width: min\(440px, calc\(100vw - var\(--mobile-floating-control-lane\) - env\(safe-area-inset-right, 0px\)\)\);[\s\S]*z-index: 50;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.narrow-shell\[data-floating-control-side='left'\] \.drawer \{[\s\S]*inset: 0 0 0 auto;[\s\S]*width: min\(440px, calc\(100vw - var\(--mobile-floating-control-lane\) - env\(safe-area-inset-left, 0px\)\)\);[\s\S]*border-left: 1px solid var\(--border\);[\s\S]*transform: translateX\(100%\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.narrow-shell\[data-floating-control-side='left'\] \.drawer\.show \{[\s\S]*box-shadow: -8px 0 28px rgba\(0, 0, 0, 0\.38\);[\s\S]*\}/,
     );
   });
 
