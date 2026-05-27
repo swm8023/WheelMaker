@@ -2967,8 +2967,10 @@ function App() {
   const floatingIgnoreLostCaptureRef = useRef(false);
   const floatingControlStackRef = useRef<HTMLDivElement | null>(null);
   const [floatingBackdropTone, setFloatingBackdropTone] = useState<FloatingBackdropTone>('dark');
+  const [floatingSidePulse, setFloatingSidePulse] = useState<PersistedFloatingControlSide | ''>('');
   const floatingBackdropToneRef = useRef<FloatingBackdropTone>('dark');
   const floatingControlSideRef = useRef(floatingControlSide);
+  const floatingSidePulseTimerRef = useRef<number | null>(null);
   const floatingBackdropToneMeasuredAtRef = useRef(0);
   const floatingBackdropToneRafRef = useRef<number | null>(null);
   const floatingBackdropToneTimerRef = useRef<number | null>(null);
@@ -5583,6 +5585,24 @@ function App() {
       floatingCooldownTimerRef.current = null;
     }
   }, []);
+  const clearFloatingSidePulseTimer = useCallback(() => {
+    if (floatingSidePulseTimerRef.current !== null) {
+      window.clearTimeout(floatingSidePulseTimerRef.current);
+      floatingSidePulseTimerRef.current = null;
+    }
+  }, []);
+  const pulseFloatingControlSide = useCallback(
+    (side: PersistedFloatingControlSide) => {
+      clearFloatingSidePulseTimer();
+      setFloatingSidePulse(side);
+      floatingSidePulseTimerRef.current = window.setTimeout(() => {
+        setFloatingSidePulse('');
+        floatingSidePulseTimerRef.current = null;
+      }, 160);
+    },
+    [clearFloatingSidePulseTimer],
+  );
+  useEffect(() => clearFloatingSidePulseTimer, [clearFloatingSidePulseTimer]);
   const clearFloatingCooldownState = useCallback((cooldownUntil: number) => {
     clearFloatingCooldownTimer();
     const remaining = cooldownUntil - Date.now();
@@ -5729,6 +5749,7 @@ function App() {
         }
         closeMobileDrawerCompanionOverlays();
         triggerMobileHaptic();
+        pulseFloatingControlSide(nextSide);
       }
       setFloatingDragState({
         ...current,
@@ -5746,6 +5767,7 @@ function App() {
       clearFloatingLongPressTimer,
       floatingBounds.maxTop,
       floatingBounds.minTop,
+      pulseFloatingControlSide,
       setFloatingControlSide,
       windowWidth,
     ],
@@ -15364,7 +15386,15 @@ function App() {
   ) : null;
 
   const floatingControlStack = !isWide ? (
-    <div className="floating-control-stack-layer">
+    <div
+      className="floating-control-stack-layer"
+      data-drag-state={floatingDragVisualState}
+      data-side={floatingControlSide}
+      data-side-pulse={floatingSidePulse}
+    >
+      <div className="floating-control-drag-backdrop" aria-hidden="true" />
+      <div className="floating-control-dock-rail left" aria-hidden="true" />
+      <div className="floating-control-dock-rail right" aria-hidden="true" />
       <div
         ref={floatingControlStackRef}
         className="floating-control-stack"

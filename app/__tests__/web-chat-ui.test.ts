@@ -367,6 +367,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="drawer-toggle-bubble"');
     expect(mainTsx).toContain('const floatingControlSideRef = useRef(floatingControlSide);');
     expect(mainTsx).toContain('floatingControlSideRef.current = floatingControlSide;');
+    expect(mainTsx).toContain("const [floatingSidePulse, setFloatingSidePulse] = useState<PersistedFloatingControlSide | ''>('');");
+    expect(mainTsx).toContain('const floatingSidePulseTimerRef = useRef<number | null>(null);');
+    expect(mainTsx).toContain('const pulseFloatingControlSide = useCallback(');
     expect(mainTsx).toContain('const closeMobileDrawerCompanionOverlays = useCallback(() => {');
     expect(mainTsx).toContain('const handleMobileBreadcrumbProjectClick = useCallback(() => {');
     expect(mainTsx).toContain('closeMobileDrawerCompanionOverlays();');
@@ -410,6 +413,7 @@ describe('web chat integration', () => {
     expect(floatingMoveBlock).toContain('setFloatingControlSide(nextSide);');
     expect(floatingMoveBlock).toContain('window.localStorage.setItem(PORT_RELAY_FLOATING_SIDE_STORAGE_KEY, nextSide);');
     expect(floatingMoveBlock).toContain('triggerMobileHaptic();');
+    expect(floatingMoveBlock).toContain('pulseFloatingControlSide(nextSide);');
     expect(floatingMoveBlock).toContain('closeMobileDrawerCompanionOverlays();');
     expect(mainTsx).not.toContain('style={narrowContentInsetStyle}');
     expect(mainTsx).toContain('className="breadcrumb-title"');
@@ -417,6 +421,10 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('No Selected Session');
     expect(mainTsx).toContain('No Selected Diff');
     expect(mainTsx).toContain('data-active={drawerOpen}');
+    expect(mainTsx).toContain('data-side-pulse={floatingSidePulse}');
+    expect(mainTsx).toContain('className="floating-control-drag-backdrop"');
+    expect(mainTsx).toContain('className="floating-control-dock-rail left"');
+    expect(mainTsx).toContain('className="floating-control-dock-rail right"');
     expect(mainTsx).toContain("CHAT - {selectedChatDisplayTitle || 'New Session'}");
     expect(mainTsx).toContain("{selectedFile || 'Select a file'}");
     expect(mainTsx).toContain("{selectedDiff || 'Select a changed file'}");
@@ -513,6 +521,21 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toContain('padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;');
     expect(stylesCss).toContain('.floating-control-stack {');
+    expect(stylesCss).toContain('.floating-control-drag-backdrop {');
+    expect(stylesCss).toContain('.floating-control-dock-rail {');
+    expect(stylesCss).toMatch(
+      /\.floating-control-drag-backdrop \{[\s\S]*background: rgba\(0, 0, 0, 0\.13\);[\s\S]*backdrop-filter: blur\(2px\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.floating-control-stack-layer\[data-drag-state='dragging'\] \.floating-control-drag-backdrop \{[\s\S]*opacity: 1;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.floating-control-stack\[data-drag-state='dragging'\] \{[\s\S]*transform: scale\(1\.06\);[\s\S]*filter: drop-shadow\(0 14px 30px rgba\(0, 0, 0, 0\.28\)\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.floating-control-stack-layer\[data-side-pulse='left'\] \.floating-control-dock-rail\.left,[\s\S]*\.floating-control-stack-layer\[data-side-pulse='right'\] \.floating-control-dock-rail\.right \{[\s\S]*animation: floatingDockRailPulse 160ms ease-out;[\s\S]*\}/,
+    );
+    expect(stylesCss).toContain('@keyframes floatingDockRailPulse');
     expect(stylesCss).toContain('.floating-nav-group {');
     expect(stylesCss).toMatch(
       /\.floating-nav-group \{[\s\S]*width: 50px;[\s\S]*grid-template-rows: repeat\(3, 40px\);[\s\S]*padding: 4px;[\s\S]*\}/,
