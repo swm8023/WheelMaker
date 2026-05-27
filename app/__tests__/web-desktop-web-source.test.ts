@@ -12,9 +12,16 @@ describe('desktop web source', () => {
     });
   });
 
-  test('does not infer remote web URL for local or insecure registry addresses', () => {
+  test('infers public plain http remote web root from registry websocket URL', () => {
+    expect(inferDesktopRemoteWebCandidate('ws://47.86.63.26:28800/ws')).toEqual({
+      source: 'registry',
+      registryAddress: 'ws://47.86.63.26:28800/ws',
+      remoteWebUrl: 'http://47.86.63.26:28800/',
+    });
+  });
+
+  test('does not infer remote web URL for local or schemeless registry addresses', () => {
     expect(inferDesktopRemoteWebCandidate('ws://127.0.0.1:9630/ws')).toBeNull();
-    expect(inferDesktopRemoteWebCandidate('ws://workspace.example.com/ws')).toBeNull();
     expect(inferDesktopRemoteWebCandidate('workspace.example.com:9630')).toBeNull();
   });
 

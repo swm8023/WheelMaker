@@ -264,6 +264,31 @@ func TestDesktopWebSourceCandidateReplacesRemoteForSecureRegistry(t *testing.T) 
 	}
 }
 
+func TestDesktopWebSourceCandidateAcceptsPublicPlainHTTPRegistry(t *testing.T) {
+	store := &memoryDesktopWebSourceConfigStore{config: desktopWebSourceConfig{
+		WebSourcePreference: desktopWebSourcePreferenceAuto,
+	}}
+	runtime := newDesktopWebSourceRuntime(store, nil)
+
+	state, err := runtime.SetRemoteCandidate(desktopRemoteWebCandidate{
+		RegistryAddress: "ws://47.86.63.26:28800/ws",
+		RemoteWebURL:    "http://47.86.63.26:28800/",
+	})
+	if err != nil {
+		t.Fatalf("SetRemoteCandidate: %v", err)
+	}
+
+	if store.saved.RemoteWebURL != "http://47.86.63.26:28800/" {
+		t.Fatalf("RemoteWebURL=%q", store.saved.RemoteWebURL)
+	}
+	if store.saved.RemoteWebRegistryOrigin != "ws://47.86.63.26:28800" {
+		t.Fatalf("RemoteWebRegistryOrigin=%q", store.saved.RemoteWebRegistryOrigin)
+	}
+	if state.RemoteHost != "47.86.63.26:28800" {
+		t.Fatalf("RemoteHost=%q", state.RemoteHost)
+	}
+}
+
 func TestDesktopAssetHandlerDoesNotUseNewRemoteCandidateUntilActualSourceChanges(t *testing.T) {
 	remoteHits := 0
 	remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
