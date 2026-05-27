@@ -66,4 +66,19 @@ describe('web markdown preview mode', () => {
     expect(stylesCss).toContain('.mermaid-block {');
     expect(stylesCss).toContain('.mermaid-error {');
   });
+
+  test('lets HTML preview fill the file scroll panel on mobile instead of using viewport math', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    const htmlPreviewBlock = stylesCss.match(/\.html-preview \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(htmlPreviewBlock).toContain('height: 100%;');
+    expect(htmlPreviewBlock).toContain('display: flex;');
+    expect(htmlPreviewBlock).toContain('overflow: hidden;');
+
+    const htmlPreviewFrameBlock = stylesCss.match(/\.html-preview-frame \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(htmlPreviewFrameBlock).toContain('flex: 1 1 auto;');
+    expect(htmlPreviewFrameBlock).toContain('height: 100%;');
+    expect(htmlPreviewFrameBlock).not.toContain('min-height: calc(100vh - 170px);');
+  });
 });
