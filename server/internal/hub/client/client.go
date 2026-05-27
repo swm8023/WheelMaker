@@ -451,7 +451,7 @@ func (c *Client) RecordEvent(ctx context.Context, event SessionViewEvent) error 
 
 func (c *Client) HandleSessionRequest(ctx context.Context, method string, projectID string, payload json.RawMessage) (any, error) {
 	switch strings.TrimSpace(method) {
-	case "session.list":
+	case acp.RegistryMethodSessionList:
 		sessions, err := c.sessionRecorder.ListSessionViews(ctx)
 		if err != nil {
 			return nil, err
@@ -460,7 +460,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			sessions[i].ConfigOptions = c.sessionConfigOptions(ctx, sessions[i].SessionID)
 		}
 		return map[string]any{"sessions": sessions}, nil
-	case "session.read":
+	case acp.RegistryMethodSessionRead:
 		var req struct {
 			SessionID      string `json:"sessionId"`
 			AfterTurnIndex int64  `json:"afterTurnIndex,omitempty"`
@@ -477,12 +477,12 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			return nil, err
 		}
 		return map[string]any{"sessionId": strings.TrimSpace(req.SessionID), "latestTurnIndex": latestTurnIndex, "session": summary, "turns": turns}, nil
-	case "session.search":
+	case acp.RegistryMethodSessionSearch:
 		if c.sessionSearch == nil {
 			c.sessionSearch = newSessionSearchManager(c)
 		}
 		return c.sessionSearch.Handle(ctx, projectID, payload)
-	case "session.markRead":
+	case acp.RegistryMethodSessionMarkRead:
 		var req struct {
 			SessionID         string `json:"sessionId"`
 			LastReadTurnIndex int64  `json:"lastReadTurnIndex,omitempty"`
@@ -495,7 +495,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			return nil, err
 		}
 		return map[string]any{"ok": true, "session": summary}, nil
-	case "session.rename":
+	case acp.RegistryMethodSessionRename:
 		var req struct {
 			SessionID string `json:"sessionId"`
 			Title     string `json:"title"`
@@ -508,7 +508,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			return nil, err
 		}
 		return map[string]any{"ok": true, "sessionId": summary.SessionID, "session": summary}, nil
-	case "session.new":
+	case acp.RegistryMethodSessionNew:
 		var req struct {
 			AgentType string `json:"agentType"`
 			Title     string `json:"title,omitempty"`
@@ -547,7 +547,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 		}
 		summary.ConfigOptions = sess.CurrentConfigOptions()
 		return map[string]any{"ok": true, "session": summary}, nil
-	case "session.resume.list":
+	case acp.RegistryMethodSessionResumeList:
 		var req struct {
 			AgentType string `json:"agentType"`
 		}
@@ -555,7 +555,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			return nil, fmt.Errorf("invalid session.resume.list payload: %w", err)
 		}
 		return c.recovery().ListResumableSessions(ctx, req.AgentType)
-	case "session.resume.import":
+	case acp.RegistryMethodSessionResumeImport:
 		var req struct {
 			SessionID string `json:"sessionId"`
 			AgentType string `json:"agentType"`
@@ -564,7 +564,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			return nil, fmt.Errorf("invalid session.resume.import payload: %w", err)
 		}
 		return c.recovery().ImportResumableSession(ctx, req.AgentType, req.SessionID)
-	case "session.reload":
+	case acp.RegistryMethodSessionReload:
 		var req struct {
 			SessionID string `json:"sessionId"`
 		}
@@ -572,7 +572,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			return nil, fmt.Errorf("invalid session.reload payload: %w", err)
 		}
 		return c.recovery().ReloadSession(ctx, req.SessionID)
-	case "session.archive":
+	case acp.RegistryMethodSessionArchive:
 		var req struct {
 			SessionID string `json:"sessionId"`
 		}
@@ -583,7 +583,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			return nil, err
 		}
 		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
-	case "session.delete":
+	case acp.RegistryMethodSessionDelete:
 		var req struct {
 			SessionID string `json:"sessionId"`
 		}
@@ -594,17 +594,17 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			return nil, err
 		}
 		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
-	case "session.attachment.start":
+	case acp.RegistryMethodSessionAttachmentStart:
 		return c.handleSessionAttachmentStart(ctx, payload)
-	case "session.attachment.chunk":
+	case acp.RegistryMethodSessionAttachmentChunk:
 		return c.handleSessionAttachmentChunk(ctx, payload)
-	case "session.attachment.finish":
+	case acp.RegistryMethodSessionAttachmentFinish:
 		return c.handleSessionAttachmentFinish(ctx, payload)
-	case "session.attachment.cancel":
+	case acp.RegistryMethodSessionAttachmentCancel:
 		return c.handleSessionAttachmentCancel(ctx, payload)
-	case "session.attachment.delete":
+	case acp.RegistryMethodSessionAttachmentDelete:
 		return c.handleSessionAttachmentDelete(ctx, payload)
-	case "session.token.providers":
+	case acp.RegistryMethodSessionTokenProviders:
 		return map[string]any{
 			"providers": []map[string]any{
 				{"id": "deepseek", "name": "DeepSeek", "authMode": "api_key"},
@@ -612,13 +612,13 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 				{"id": "copilot", "name": "Copilot", "authMode": "github_api"},
 			},
 		}, nil
-	case "session.token.scan":
+	case acp.RegistryMethodSessionTokenScan:
 		stats, err := tools.ScanTokenStats(ctx)
 		if err != nil {
 			return nil, err
 		}
 		return stats, nil
-	case "session.token.deepseek.stats":
+	case acp.RegistryMethodSessionTokenDeepSeekStats:
 		var req struct {
 			APIKey    string `json:"apiKey"`
 			RangeType string `json:"rangeType,omitempty"`
@@ -632,7 +632,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			return nil, err
 		}
 		return stats, nil
-	case "session.setConfig":
+	case acp.RegistryMethodSessionSetConfig:
 		var req struct {
 			SessionID string `json:"sessionId"`
 			ConfigID  string `json:"configId"`
@@ -654,7 +654,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			"sessionId":     sess.acpSessionID,
 			"configOptions": options,
 		}, nil
-	case "session.send":
+	case acp.RegistryMethodSessionSend:
 		var req struct {
 			SessionID string             `json:"sessionId"`
 			Text      string             `json:"text,omitempty"`
@@ -685,7 +685,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 			return nil, err
 		}
 		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
-	case "session.cancel":
+	case acp.RegistryMethodSessionCancel:
 		var req struct {
 			SessionID string `json:"sessionId"`
 		}

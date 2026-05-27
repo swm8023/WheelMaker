@@ -98,18 +98,18 @@ func NewController(cfg ControllerConfig) *Controller {
 
 func (c *Controller) Handle(ctx context.Context, method string, raw json.RawMessage, controlHost string, secure bool) (any, *rp.ErrorPayload) {
 	switch method {
-	case rp.MethodRelayEnable:
+	case rp.RegistryMethodRelayEnable:
 		var payload rp.RelayEnablePayload
 		if err := decodePayload(raw, &payload); err != nil {
 			return nil, relayError(rp.CodeInvalidArgument, "invalid relay.enable payload", nil)
 		}
 		return c.Enable(ctx, payload, controlHost, secure)
-	case rp.MethodRelayDisable:
+	case rp.RegistryMethodRelayDisable:
 		return c.Disable(ctx)
-	case rp.MethodRelayStatus:
+	case rp.RegistryMethodRelayStatus:
 		snapshot := c.Status()
 		return snapshot, nil
-	case rp.MethodRelayRegenerateAccessCode:
+	case rp.RegistryMethodRelayRegenerateAccessCode:
 		var payload rp.RelayRegenerateAccessCodePayload
 		if err := decodePayload(raw, &payload); err != nil {
 			return nil, relayError(rp.CodeInvalidArgument, "invalid relay.regenerateAccessCode payload", nil)
@@ -229,7 +229,7 @@ func (c *Controller) Enable(ctx context.Context, payload rp.RelayEnablePayload, 
 		go c.forwardClose(context.Background(), oldSlot.HubID, oldSlot.RelayID, "replaced")
 	}
 
-	result := c.cfg.ForwardHubRequest(ctx, payload.HubID, rp.MethodRelayOpen, rp.RelayOpenPayload{
+	result := c.cfg.ForwardHubRequest(ctx, payload.HubID, rp.RegistryMethodRelayOpen, rp.RelayOpenPayload{
 		RelayID:    relayID,
 		RelayURL:   tunnelURL,
 		Nonce:      nonce,
@@ -375,7 +375,7 @@ func (c *Controller) forwardClose(ctx context.Context, hubID string, relayID str
 	if c.cfg.ForwardHubRequest == nil {
 		return
 	}
-	_ = c.cfg.ForwardHubRequest(ctx, hubID, rp.MethodRelayClose, rp.RelayClosePayload{RelayID: relayID, Reason: reason})
+	_ = c.cfg.ForwardHubRequest(ctx, hubID, rp.RegistryMethodRelayClose, rp.RelayClosePayload{RelayID: relayID, Reason: reason})
 }
 
 func relayError(code string, message string, details map[string]any) *rp.ErrorPayload {

@@ -647,7 +647,7 @@ func (r *SessionRecorder) publishSessionTurn(turn sessionTurnMessage, updateJSON
 	if publish == nil {
 		return
 	}
-	_ = publish("registry.session.message", map[string]any{
+	_ = publish(acp.RegistryMethodRegistrySessionMessage, map[string]any{
 		"sessionId": turn.sessionID,
 		"turn": map[string]any{
 			"turnIndex": turn.turnIndex,
@@ -740,7 +740,7 @@ func (r *SessionRecorder) publishSessionUpdated(summary sessionViewSummary) {
 	if publish == nil {
 		return
 	}
-	_ = publish("registry.session.updated", map[string]any{"session": summary})
+	_ = publish(acp.RegistryMethodRegistrySessionUpdated, map[string]any{"session": summary})
 }
 
 func buildSessionViewSummary(

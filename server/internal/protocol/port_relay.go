@@ -1,14 +1,5 @@
 package protocol
 
-const (
-	MethodRelayEnable               = "relay.enable"
-	MethodRelayDisable              = "relay.disable"
-	MethodRelayStatus               = "relay.status"
-	MethodRelayRegenerateAccessCode = "relay.regenerateAccessCode"
-	MethodRelayOpen                 = "relay.open"
-	MethodRelayClose                = "relay.close"
-)
-
 type RelayStatus string
 
 const (
