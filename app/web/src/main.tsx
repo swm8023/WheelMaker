@@ -554,7 +554,6 @@ const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
 const CHAT_CONFIG_INLINE_LIMIT = 3;
 const fileMemoryCacheKey = (activeProjectId: string, path: string) => `${activeProjectId}\n${path}`;
-const WIDE_PROJECT_SESSION_LIMIT = 5;
 const PROJECT_PIN_LONG_PRESS_MS = 450;
 const PROJECT_SESSION_LONG_PRESS_MS = 450;
 const DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO = 0.45;
@@ -1151,7 +1150,7 @@ function extractTextFromACPContent(content: unknown): string {
   return chunks.join('\n').trim();
 }
 
-function extractTextFromIMParam(param: unknown): string {
+function extractTextFromSessionTurnParam(param: unknown): string {
   if (typeof param === 'string') {
     return param.trim();
   }
@@ -1192,7 +1191,7 @@ function msgText(method: string, param: Record<string, unknown>): string {
   if (method === 'prompt_done') {
     return typeof param.stopReason === 'string' ? param.stopReason : '';
   }
-  return extractTextFromIMParam(param);
+  return extractTextFromSessionTurnParam(param);
 }
 
 function msgBlocks(
@@ -2831,6 +2830,11 @@ function App() {
       ? persistedGlobal.registryDebug
       : false,
   );
+  const [disableFileCache, setDisableFileCache] = useState(
+    typeof persistedGlobal.disableFileCache === 'boolean'
+      ? persistedGlobal.disableFileCache
+      : false,
+  );
   const [localHubReadEnabled, setLocalHubReadEnabled] = useState(
     typeof persistedGlobal.localHubReadEnabled === 'boolean'
       ? persistedGlobal.localHubReadEnabled
@@ -3241,7 +3245,6 @@ function App() {
   const chatConfigOptionsRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOverflowRef = useRef<HTMLDivElement | null>(null);
   const wideProjectActionMenuRef = useRef<HTMLDivElement | null>(null);
-  const projectSessionSentinelRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const chatSelectedIdRef = useRef('');
   const selectedChatKeyRef = useRef<ChatSessionKey | null>(null);
   const chatVisibleRuntimeKeyRef = useRef('');
@@ -3297,7 +3300,6 @@ function App() {
     }
     return labels;
   }, [projectSessionsByProjectId, projects]);
-  const [wideProjectVisibleCounts, setWideProjectVisibleCounts] = useState<Record<string, number>>({});
   const [wideProjectActionMenu, setWideProjectActionMenu] = useState<WideProjectActionMenuState | null>(null);
   const [mobileProjectActionMenu, setMobileProjectActionMenu] = useState<MobileProjectActionMenuState | null>(null);
   const [projectSessionActionMenu, setProjectSessionActionMenu] = useState<ProjectSessionActionMenuState | null>(null);
@@ -4295,54 +4297,6 @@ function App() {
   const chatQuickSwitchMenuStyle = useMemo<React.CSSProperties>(() => ({
     top: portRelayReady && portRelayFrameUrl ? 56 : 0,
   }), [portRelayFrameUrl, portRelayReady]);
-  const projectSessionCountKey = useMemo(
-    () => Object.entries(projectSessionsByProjectId)
-      .map(([entryProjectId, sessions]) => `${entryProjectId}:${sessions.length}`)
-      .sort()
-      .join('|'),
-    [projectSessionsByProjectId],
-  );
-
-  const expandProjectSessionVisibleCount = useCallback((targetProjectId: string) => {
-    const total = projectSessionsByProjectIdRef.current[targetProjectId]?.length ?? 0;
-    if (total <= 0) {
-      return;
-    }
-    setWideProjectVisibleCounts(prev => {
-      const current = prev[targetProjectId] ?? WIDE_PROJECT_SESSION_LIMIT;
-      if (current >= total) {
-        return prev;
-      }
-      return {
-        ...prev,
-        [targetProjectId]: Math.min(total, current + WIDE_PROJECT_SESSION_LIMIT),
-      };
-    });
-  }, []);
-
-  useEffect(() => {
-    if (typeof IntersectionObserver === 'undefined') {
-      return;
-    }
-    const observer = new IntersectionObserver(
-      entries => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) {
-            continue;
-          }
-          const targetProjectId = (entry.target as HTMLElement).dataset.projectId || '';
-          expandProjectSessionVisibleCount(targetProjectId);
-        }
-      },
-      {root: null, rootMargin: '180px 0px'},
-    );
-    for (const element of Object.values(projectSessionSentinelRefs.current)) {
-      if (element) {
-        observer.observe(element);
-      }
-    }
-    return () => observer.disconnect();
-  }, [expandProjectSessionVisibleCount, projectIdListKey, projectSessionCountKey, wideProjectVisibleCounts]);
 
   useEffect(() => {
     projectIdRef.current = projectId;
@@ -5166,6 +5120,16 @@ function App() {
       setRegistryDebugIncludeMultiSessionRecords(false);
     }
   }, [registryDebug]);
+
+  useEffect(() => {
+    workspaceStore.setDisableFileCache(disableFileCache);
+    if (disableFileCache) {
+      workspaceStore.clearFileCache();
+      dirHashRef.current = {};
+      fileHashRef.current = {};
+      fileCacheRef.current = {};
+    }
+  }, [disableFileCache]);
 
   useEffect(() => {
     service.setLocalHubReadEnabled(localHubReadEnabled);
@@ -6755,16 +6719,17 @@ function App() {
   const loadDirectory = async (path: string, options?: {projectId?: string}) => {
     if (loadingDirs[path]) return;
     const targetProjectId = options?.projectId || projectIdRef.current || projectId;
+    const fileCacheDisabled = disableFileCache === true;
     setLoadingDirs(prev => ({ ...prev, [path]: true }));
     try {
-      const persistedCache = targetProjectId
+      const persistedCache = !fileCacheDisabled && targetProjectId
         ? workspaceStore.getCachedDirectory(targetProjectId, path)
         : null;
-      const knownHash =
+      const knownHash = fileCacheDisabled ? '' :
         dirHashRef.current[path] || persistedCache?.hash || '';
       const result = await service.listDirectory(
         path,
-        knownHash || undefined,
+        fileCacheDisabled ? undefined : knownHash || undefined,
       );
 
       if (result.notModified) {
@@ -6773,8 +6738,10 @@ function App() {
           setDirEntries(prev => ({ ...prev, [path]: sortEntries(cachedEntries) }));
         }
         if (result.hash) {
-          dirHashRef.current[path] = result.hash;
-          if (targetProjectId && Array.isArray(cachedEntries)) {
+          if (!fileCacheDisabled) {
+            dirHashRef.current[path] = result.hash;
+          }
+          if (!fileCacheDisabled && targetProjectId && Array.isArray(cachedEntries)) {
             workspaceStore.cacheDirectory(targetProjectId, path, result.hash, cachedEntries);
           }
         }
@@ -6784,10 +6751,10 @@ function App() {
       const entries = sortEntries(result.entries);
       setDirEntries(prev => ({ ...prev, [path]: entries }));
       const nextHash = result.hash || persistedCache?.hash || '';
-      if (nextHash) {
+      if (!fileCacheDisabled && nextHash) {
         dirHashRef.current[path] = nextHash;
       }
-      if (targetProjectId) {
+      if (!fileCacheDisabled && targetProjectId) {
         workspaceStore.cacheDirectory(targetProjectId, path, nextHash, entries);
       }
     } finally {
@@ -6832,18 +6799,20 @@ function App() {
       if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;
       setFileInfo(info);
       const cacheKey = fileMemoryCacheKey(targetProjectId, path);
-      const persistedFile = workspaceStore.getCachedFile(targetProjectId, path);
+      const fileCacheDisabled = disableFileCache === true;
+      const persistedFile = fileCacheDisabled ? null : workspaceStore.getCachedFile(targetProjectId, path);
       if (
+        !fileCacheDisabled &&
         typeof persistedFile?.content === 'string' &&
         fileCacheRef.current[cacheKey] === undefined
       ) {
         fileCacheRef.current[cacheKey] = persistedFile.content;
       }
-      if (persistedFile?.hash && !fileHashRef.current[cacheKey]) {
+      if (!fileCacheDisabled && persistedFile?.hash && !fileHashRef.current[cacheKey]) {
         fileHashRef.current[cacheKey] = persistedFile.hash;
       }
-      const cachedContent = fileCacheRef.current[cacheKey] ?? persistedFile?.content;
-      const knownHash = typeof cachedContent === 'string'
+      const cachedContent = fileCacheDisabled ? undefined : fileCacheRef.current[cacheKey] ?? persistedFile?.content;
+      const knownHash = !fileCacheDisabled && typeof cachedContent === 'string'
         ? fileHashRef.current[cacheKey] || persistedFile?.hash || ''
         : '';
       const isFirstLoad = !knownHash;
@@ -6858,20 +6827,33 @@ function App() {
         }
       }
       const result = await service.readProjectFile(path, targetProjectId, {
-        knownHash: knownHash || undefined,
+        knownHash: fileCacheDisabled ? undefined : knownHash || undefined,
       });
       if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;
+      if (result.notModified && fileCacheDisabled) {
+        const freshResult = await service.readProjectFile(path, targetProjectId);
+        if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;
+        setFileContent(freshResult.content);
+        if (shouldRestoreScroll) {
+          scheduleRestoreSelectedFileScroll(path);
+        }
+        return;
+      }
       if (result.notModified) {
         if (typeof cachedContent !== 'string') {
           const freshResult = await service.readProjectFile(path, targetProjectId);
           if (requestSeq !== fileReadSeqRef.current || projectIdRef.current !== targetProjectId) return;
           setFileContent(freshResult.content);
-          fileCacheRef.current[cacheKey] = freshResult.content;
+          if (!fileCacheDisabled) {
+            fileCacheRef.current[cacheKey] = freshResult.content;
+          }
           const freshHash = freshResult.hash || knownHash;
-          if (freshHash) {
+          if (!fileCacheDisabled && freshHash) {
             fileHashRef.current[cacheKey] = freshHash;
           }
-          workspaceStore.cacheFile(targetProjectId, path, freshHash, freshResult.content);
+          if (!fileCacheDisabled) {
+            workspaceStore.cacheFile(targetProjectId, path, freshHash, freshResult.content);
+          }
           if (shouldRestoreScroll) {
             scheduleRestoreSelectedFileScroll(path);
           }
@@ -6879,7 +6861,7 @@ function App() {
         }
         setFileContent(cachedContent);
         const nextHash = result.hash || knownHash;
-        if (nextHash) {
+        if (!fileCacheDisabled && nextHash) {
           fileHashRef.current[cacheKey] = nextHash;
           workspaceStore.cacheFile(targetProjectId, path, nextHash, cachedContent);
         }
@@ -6889,12 +6871,16 @@ function App() {
         return;
       }
       setFileContent(result.content);
-      fileCacheRef.current[cacheKey] = result.content;
+      if (!fileCacheDisabled) {
+        fileCacheRef.current[cacheKey] = result.content;
+      }
       const nextHash = result.hash || knownHash;
-      if (nextHash) {
+      if (!fileCacheDisabled && nextHash) {
         fileHashRef.current[cacheKey] = nextHash;
       }
-      workspaceStore.cacheFile(targetProjectId, path, nextHash, result.content);
+      if (!fileCacheDisabled) {
+        workspaceStore.cacheFile(targetProjectId, path, nextHash, result.content);
+      }
       if (shouldRestoreScroll) {
         scheduleRestoreSelectedFileScroll(path);
       }
@@ -8376,7 +8362,7 @@ function App() {
     }
     try {
       const ws = toRegistryWsUrl(nextAddress);
-      const result = await workspaceController.connect(ws, trimmedToken);
+      const result = await workspaceController.connect(ws, trimmedToken, {disableFileCache});
       submitDesktopRemoteWebCandidate(ws);
       const persistedSelectedChatKey = workspaceStore.migrateSelectedChatSessionKey(result.hydrated.projectId);
       const preferredSelectedChatKey =
@@ -8432,6 +8418,7 @@ function App() {
           result.hydrated.projectId,
           result.rootEntries,
           result.hydrated.expandedDirs,
+          {disableFileCache},
         )
         .then(validated => {
           if (projectIdRef.current !== result.hydrated.projectId) return;
@@ -9943,7 +9930,7 @@ function App() {
     }
 
     try {
-      const result = await workspaceController.switchProjectLightweight(nextProjectId);
+      const result = await workspaceController.switchProjectLightweight(nextProjectId, {disableFileCache});
       projectsRef.current = result.projects;
       setProjects(result.projects);
       setRegistryHubs(result.hubs);
@@ -9978,7 +9965,7 @@ function App() {
   const switchProject = async (nextProjectId: string) => {
     setLoadingProject(true);
     try {
-      const result = await workspaceController.switchProject(nextProjectId);
+      const result = await workspaceController.switchProject(nextProjectId, {disableFileCache});
       setProjects(result.projects);
       setHasPendingProjectUpdates(false);
       applyHydratedProjectState(result.hydrated);
@@ -9987,6 +9974,7 @@ function App() {
           result.hydrated.projectId,
           result.rootEntries,
           result.hydrated.expandedDirs,
+          {disableFileCache},
         )
         .then(validated => {
           if (projectIdRef.current !== result.hydrated.projectId) return;
@@ -10612,7 +10600,7 @@ function App() {
       if (needsProjectOrFsRefresh) {
         const validated = await workspaceController.refreshProject(projectId, [
           ...latestExpandedDirs,
-        ]);
+        ], {disableFileCache});
         setDirEntries(validated.dirEntries);
         setExpandedDirs(validated.expandedDirs);
         dirHashRef.current = {};
@@ -12769,6 +12757,17 @@ function App() {
             onChange={event => setRegistryDebug(event.target.checked)}
           />
         </label>
+        <label className="settings-row sidebar-setting-row">
+          <span>
+            <span className="codicon codicon-files settings-row-icon" aria-hidden="true" />
+            Disable File Cache
+          </span>
+          <input
+            type="checkbox"
+            checked={disableFileCache}
+            onChange={event => setDisableFileCache(event.target.checked)}
+          />
+        </label>
         <button
           type="button"
           className="settings-row settings-detail-row"
@@ -12871,9 +12870,6 @@ function App() {
           {sortedProjectItems.map(projectItem => {
             const targetProjectId = projectItem.projectId;
             const projectSessions = projectSessionsByProjectId[targetProjectId] ?? [];
-            const visibleCount =
-              wideProjectVisibleCounts[targetProjectId] ?? WIDE_PROJECT_SESSION_LIMIT;
-            const visibleSessions = projectSessions.slice(0, visibleCount);
             const collapsed = collapsedProjectIds.includes(targetProjectId);
             const pinnedProject = pinnedProjectIds.includes(targetProjectId);
             const projectHub = projectItem.hubId || 'local';
@@ -12966,7 +12962,7 @@ function App() {
                 ) : null}
                 {!collapsed ? (
                   <div className="wide-project-session-list mobile-project-session-list">
-                    {visibleSessions.map(session => {
+                    {projectSessions.map(session => {
                       const sessionAgent = (session.agentType || '').trim();
                       const displaySessionAgent = normalizeAgentTypeName(sessionAgent);
                       const sessionActionsOpen =
@@ -13017,16 +13013,6 @@ function App() {
                         </div>
                       );
                     })}
-                    {projectSessions.length > visibleSessions.length ? (
-                      <div
-                        ref={node => {
-                          projectSessionSentinelRefs.current[targetProjectId] = node;
-                        }}
-                        className="wide-project-session-sentinel"
-                        data-project-id={targetProjectId}
-                        aria-hidden="true"
-                      />
-                    ) : null}
                     {projectSessions.length === 0 ? (
                       <div className="wide-project-empty">No sessions yet.</div>
                     ) : null}
@@ -13181,9 +13167,6 @@ function App() {
         {sessionSearchActive ? renderSessionSearchResults(false) : sortedProjectItems.map(projectItem => {
           const targetProjectId = projectItem.projectId;
           const projectSessions = projectSessionsByProjectId[targetProjectId] ?? [];
-          const visibleCount =
-            wideProjectVisibleCounts[targetProjectId] ?? WIDE_PROJECT_SESSION_LIMIT;
-          const visibleSessions = projectSessions.slice(0, visibleCount);
           const collapsed = collapsedProjectIds.includes(targetProjectId);
           const pinnedProject = pinnedProjectIds.includes(targetProjectId);
           const agents = getWideProjectAgents(projectItem, projectSessions);
@@ -13384,7 +13367,7 @@ function App() {
               </div>
               {!collapsed ? (
                 <div className="wide-project-session-list">
-                  {visibleSessions.map(session => {
+                  {projectSessions.map(session => {
                     const sessionAgent = (session.agentType || '').trim();
                     const displaySessionAgent = normalizeAgentTypeName(sessionAgent);
                     const sessionActionsOpen =
@@ -13434,16 +13417,6 @@ function App() {
                       </div>
                     );
                   })}
-                  {projectSessions.length > visibleSessions.length ? (
-                    <div
-                      ref={node => {
-                        projectSessionSentinelRefs.current[targetProjectId] = node;
-                      }}
-                      className="wide-project-session-sentinel"
-                      data-project-id={targetProjectId}
-                      aria-hidden="true"
-                    />
-                  ) : null}
                   {projectSessions.length === 0 ? (
                     <div className="wide-project-empty">No sessions yet.</div>
                   ) : null}
@@ -15847,10 +15820,3 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
-
-
-
-
-
-
-

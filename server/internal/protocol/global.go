@@ -12,7 +12,6 @@ type Component string
 const (
 	ComponentAgent    Component = "agent"
 	ComponentClient   Component = "client"
-	ComponentIM       Component = "im"
 	ComponentRegistry Component = "registry"
 )
 
@@ -64,7 +63,6 @@ const (
 type SessionOpenPayload struct {
 	ProjectID string `json:"projectId"`
 	Agent     string `json:"agent"`
-	IMType    string `json:"imType"`
 }
 
 type UserMessagePayload struct {

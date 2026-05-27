@@ -281,7 +281,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 	defer r.writeMu.Unlock()
 
 	if parsed.bMessage {
-		return r.handleIMMessage(ctx, parsed)
+		return r.handleSessionTurnMessage(ctx, parsed)
 	}
 
 	switch parsed.acpMethod {
@@ -297,25 +297,25 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 	}
 }
 
-func (r *SessionRecorder) handleIMMessage(ctx context.Context, event parsedSessionViewEvent) error {
+func (r *SessionRecorder) handleSessionTurnMessage(ctx context.Context, event parsedSessionViewEvent) error {
 	method := event.method
 	if method == "" {
 		return nil
 	}
 
 	switch method {
-	case acp.IMMethodPromptRequest:
+	case acp.SessionTurnMethodPromptRequest:
 		if event.payload != nil {
 			return r.handlePromptStartedLocked(ctx, event)
 		}
 		return nil
-	case acp.IMMethodPromptDone:
+	case acp.SessionTurnMethodPromptDone:
 		if event.payload != nil {
 			return r.handlePromptFinishedLocked(ctx, event)
 		}
 		return nil
 
-	case acp.IMMethodSystem, acp.IMMethodAgentThought, acp.IMMethodAgentMessage, acp.SessionUpdateUserMessageChunk, acp.IMMethodAgentPlan, acp.IMMethodToolCall:
+	case acp.SessionTurnMethodSystem, acp.SessionTurnMethodAgentThought, acp.SessionTurnMethodAgentMessage, acp.SessionUpdateUserMessageChunk, acp.SessionTurnMethodAgentPlan, acp.SessionTurnMethodToolCall:
 		return r.handleUpdateMessageLocked(ctx, event)
 	default:
 		return nil
@@ -399,7 +399,7 @@ func (r *SessionRecorder) ReadSessionTurns(ctx context.Context, sessionID string
 			}
 			turns = append(turns, sessionViewTurn{
 				TurnIndex: turn.turnIndex,
-				Content:   buildIMContentJSON(turn.method, turn.payload),
+				Content:   buildSessionTurnContentJSON(turn.method, turn.payload),
 				Finished:  turn.finished,
 			})
 		}
@@ -466,7 +466,7 @@ func (r *SessionRecorder) RenameSessionTitle(ctx context.Context, sessionID stri
 
 func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event parsedSessionViewEvent) error {
 	rawEvent := event.raw
-	request, ok := event.payload.(acp.IMPromptRequest)
+	request, ok := event.payload.(acp.SessionTurnPromptRequest)
 	if !ok {
 		return fmt.Errorf("decode prompt request: unexpected payload type %T", event.payload)
 	}
@@ -519,11 +519,11 @@ func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsed
 
 	mergedTurnIndex := int64(0)
 	switch event.method {
-	case acp.IMMethodToolCall:
+	case acp.SessionTurnMethodToolCall:
 		if event.turnKey != "" {
 			mergedTurnIndex = state.turnIndexByKey[event.turnKey]
 		}
-	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought:
+	case acp.SessionTurnMethodAgentMessage, acp.SessionTurnMethodAgentThought:
 		if len(state.turns) > 0 {
 			if existing := state.turns[len(state.turns)-1]; existing.method == event.method {
 				mergedTurnIndex = existing.turnIndex
@@ -545,7 +545,7 @@ func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsed
 		turn.turnIndex = state.nextTurnIndex
 	}
 
-	updateJSON := buildIMContentJSON(turn.method, turn.payload)
+	updateJSON := buildSessionTurnContentJSON(turn.method, turn.payload)
 	r.publishSessionTurn(turn, updateJSON)
 	state.updateTurn(turn, event.turnKey)
 	return nil
@@ -562,12 +562,12 @@ func (r *SessionRecorder) publishOpenTextTurnDone(state *sessionPromptState) {
 	}
 	turn.finished = true
 	state.turns[idx] = turn
-	r.publishSessionTurn(turn, buildIMContentJSON(turn.method, turn.payload))
+	r.publishSessionTurn(turn, buildSessionTurnContentJSON(turn.method, turn.payload))
 }
 
 func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsedEvent parsedSessionViewEvent) error {
 	event := parsedEvent.raw
-	result, ok := parsedEvent.payload.(acp.IMPromptResult)
+	result, ok := parsedEvent.payload.(acp.SessionTurnPromptResult)
 	if !ok {
 		return fmt.Errorf("decode prompt result: unexpected payload type %T", parsedEvent.payload)
 	}
@@ -604,8 +604,8 @@ func (r *SessionRecorder) finishPromptStateLocked(ctx context.Context, sessionID
 	if needsPromptDone {
 		doneTurn = sessionTurnMessage{
 			sessionID: sessionID,
-			method:    acp.IMMethodPromptDone,
-			payload:   acp.IMPromptResult{StopReason: stopReason, CompletedAt: updatedAt.UTC().Format(time.RFC3339Nano), Message: message},
+			method:    acp.SessionTurnMethodPromptDone,
+			payload:   acp.SessionTurnPromptResult{StopReason: stopReason, CompletedAt: updatedAt.UTC().Format(time.RFC3339Nano), Message: message},
 			turnIndex: state.nextTurnIndex,
 			finished:  true,
 		}
@@ -620,7 +620,7 @@ func (r *SessionRecorder) finishPromptStateLocked(ctx context.Context, sessionID
 		return err
 	}
 	if publishDone && needsPromptDone {
-		r.publishSessionTurn(doneTurn, buildIMContentJSON(doneTurn.method, doneTurn.payload))
+		r.publishSessionTurn(doneTurn, buildSessionTurnContentJSON(doneTurn.method, doneTurn.payload))
 	}
 	r.publishSessionUpdated(summary)
 	r.nextTurnIndex[sessionID] = state.nextTurnIndex
@@ -791,9 +791,9 @@ func (r *SessionRecorder) persistSessionStateTurnsLocked(ctx context.Context, se
 		if startTurnIndex == 0 {
 			startTurnIndex = turn.turnIndex
 		}
-		contents = append(contents, buildIMContentJSON(turn.method, turn.payload))
+		contents = append(contents, buildSessionTurnContentJSON(turn.method, turn.payload))
 		latestTurnIndex = turn.turnIndex
-		if turn.method == acp.IMMethodPromptDone {
+		if turn.method == acp.SessionTurnMethodPromptDone {
 			lastDoneTurnIndex = turn.turnIndex
 			lastDoneSuccess = sessionDoneTurnSuccess(turn)
 		}
@@ -948,7 +948,7 @@ func sessionSyncProjectionJSON(sync sessionSyncProjection) string {
 }
 
 func sessionDoneTurnSuccess(turn sessionTurnMessage) bool {
-	result, ok := turn.payload.(acp.IMPromptResult)
+	result, ok := turn.payload.(acp.SessionTurnPromptResult)
 	if !ok {
 		return true
 	}
@@ -1050,7 +1050,7 @@ func sessionPromptStateTerminal(state *sessionPromptState) bool {
 	if state == nil || len(state.turns) == 0 {
 		return false
 	}
-	return strings.TrimSpace(state.turns[len(state.turns)-1].method) == acp.IMMethodPromptDone
+	return strings.TrimSpace(state.turns[len(state.turns)-1].method) == acp.SessionTurnMethodPromptDone
 }
 
 func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID string) (*sessionPromptState, error) {
@@ -1198,7 +1198,7 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 			promptResult := acp.SessionPromptResult{}
 			ok := jsonDecodeAt(contentRaw, "result", &promptResult)
 			if ok {
-				parsed.setJSONMessage(acp.IMMethodPromptDone, acp.IMPromptResult{
+				parsed.setJSONMessage(acp.SessionTurnMethodPromptDone, acp.SessionTurnPromptResult{
 					StopReason: strings.TrimSpace(promptResult.StopReason),
 					Message:    strings.TrimSpace(promptResult.Message),
 				}, "")
@@ -1206,7 +1206,7 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 			}
 			params := acp.SessionPromptParams{}
 			jsonDecodeAt(contentRaw, "params", &params)
-			parsed.setJSONMessage(acp.IMMethodPromptRequest, acp.IMPromptRequest{ContentBlocks: cloneJSON(params.Prompt)}, "")
+			parsed.setJSONMessage(acp.SessionTurnMethodPromptRequest, acp.SessionTurnPromptRequest{ContentBlocks: cloneJSON(params.Prompt)}, "")
 		case acp.MethodSessionUpdate:
 			params := acp.SessionUpdateParams{}
 			jsonDecodeAt(contentRaw, "params", &params)
@@ -1216,19 +1216,19 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 			}
 			switch method {
 			case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
-				parsed.setJSONMessage(method, acp.IMTextResult{Text: extractUpdateText(params.Update.Content)}, "")
+				parsed.setJSONMessage(method, acp.SessionTurnTextResult{Text: extractUpdateText(params.Update.Content)}, "")
 			case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-				parsed.setJSONMessage(acp.IMMethodToolCall, acp.IMToolResult{
+				parsed.setJSONMessage(acp.SessionTurnMethodToolCall, acp.SessionTurnToolResult{
 					Cmd:    strings.TrimSpace(params.Update.Title),
 					Kind:   strings.TrimSpace(params.Update.Kind),
 					Status: strings.TrimSpace(params.Update.Status),
 				}, strings.TrimSpace(params.Update.ToolCallID))
 			case acp.SessionUpdatePlan:
-				entries := make([]acp.IMPlanResult, 0, len(params.Update.Entries))
+				entries := make([]acp.SessionTurnPlanResult, 0, len(params.Update.Entries))
 				for _, entry := range params.Update.Entries {
-					entries = append(entries, acp.IMPlanResult{Content: strings.TrimSpace(entry.Content), Status: strings.TrimSpace(entry.Status)})
+					entries = append(entries, acp.SessionTurnPlanResult{Content: strings.TrimSpace(entry.Content), Status: strings.TrimSpace(entry.Status)})
 				}
-				parsed.setJSONMessage(acp.IMMethodAgentPlan, entries, "")
+				parsed.setJSONMessage(acp.SessionTurnMethodAgentPlan, entries, "")
 			default:
 				return parsedSessionViewEvent{}, fmt.Errorf("unsupported session update type: %s", method)
 			}
@@ -1239,7 +1239,7 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 		if text == "" {
 			return parsed, nil
 		}
-		parsed.setJSONMessage(acp.IMMethodSystem, acp.IMTextResult{Text: text}, "")
+		parsed.setJSONMessage(acp.SessionTurnMethodSystem, acp.SessionTurnTextResult{Text: text}, "")
 	}
 
 	return parsed, nil
@@ -1250,9 +1250,9 @@ func mergeTurnMessage(existing, incoming sessionTurnMessage, turnIndex int64) se
 	existing.method = firstNonEmpty(incoming.method, existing.method)
 	existing.turnIndex = maxInt64(turnIndex, existing.turnIndex)
 	switch incoming.method {
-	case acp.IMMethodToolCall:
-		base := existing.payload.(acp.IMToolResult)
-		inc := incoming.payload.(acp.IMToolResult)
+	case acp.SessionTurnMethodToolCall:
+		base := existing.payload.(acp.SessionTurnToolResult)
+		inc := incoming.payload.(acp.SessionTurnToolResult)
 		if inc.Cmd == "" {
 			inc.Cmd = base.Cmd
 		}
@@ -1263,9 +1263,9 @@ func mergeTurnMessage(existing, incoming sessionTurnMessage, turnIndex int64) se
 			inc.Status = base.Status
 		}
 		existing.payload = inc
-	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought:
-		base := existing.payload.(acp.IMTextResult)
-		inc := incoming.payload.(acp.IMTextResult)
+	case acp.SessionTurnMethodAgentMessage, acp.SessionTurnMethodAgentThought:
+		base := existing.payload.(acp.SessionTurnTextResult)
+		inc := incoming.payload.(acp.SessionTurnTextResult)
 		inc.Text = base.Text + inc.Text
 		if inc.Text == "" {
 			inc.Text = base.Text
@@ -1279,15 +1279,15 @@ func mergeTurnMessage(existing, incoming sessionTurnMessage, turnIndex int64) se
 
 func isSessionTextTurnMethod(method string) bool {
 	switch strings.TrimSpace(method) {
-	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought:
+	case acp.SessionTurnMethodAgentMessage, acp.SessionTurnMethodAgentThought:
 		return true
 	default:
 		return false
 	}
 }
 
-func buildIMContentJSON(method string, payload any) string {
-	message := acp.IMTurnMessage{Method: method}
+func buildSessionTurnContentJSON(method string, payload any) string {
+	message := acp.SessionTurnMessage{Method: method}
 	if payload != nil {
 		message.Param = mustJSONRaw(payload)
 	}

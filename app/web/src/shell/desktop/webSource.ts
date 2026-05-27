@@ -16,16 +16,25 @@ export function inferDesktopRemoteWebCandidate(registryAddress: string): Desktop
   } catch {
     return null;
   }
-  if ((parsed.protocol !== 'wss:' && parsed.protocol !== 'https:') || !parsed.host) {
+  if (
+    parsed.protocol !== 'ws:' &&
+    parsed.protocol !== 'wss:' &&
+    parsed.protocol !== 'http:' &&
+    parsed.protocol !== 'https:'
+  ) {
+    return null;
+  }
+  if (!parsed.host) {
     return null;
   }
   if (isLoopbackHost(parsed.hostname)) {
     return null;
   }
+  const remoteProtocol = parsed.protocol === 'ws:' || parsed.protocol === 'http:' ? 'http:' : 'https:';
   return {
     source: 'registry',
     registryAddress: registryAddress.trim(),
-    remoteWebUrl: `https://${parsed.host}/`,
+    remoteWebUrl: `${remoteProtocol}//${parsed.host}/`,
   };
 }
 

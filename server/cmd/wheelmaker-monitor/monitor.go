@@ -238,7 +238,6 @@ func (m *Monitor) localProjectsByHub(hubID string) ([]RegistryProject, error) {
 			Path:      p.Path,
 			Online:    true,
 			Agent:     "unknown",
-			IMType:    p.IMType(),
 		})
 	}
 	return items, nil
@@ -613,7 +612,7 @@ func (m *Monitor) GetDBTables() *DBTablesResult {
 	}
 	defer db.Close()
 
-	tableNames := []string{"projects", "route_bindings", "sessions", "agent_preferences"}
+	tableNames := []string{"projects", "sessions", "agent_preferences"}
 	tables := make([]DBTable, 0, len(tableNames))
 
 	for _, name := range tableNames {
@@ -804,12 +803,12 @@ func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, fallbackIndex i
 
 	updateJSON = strings.TrimSpace(updateJSON)
 	if updateJSON != "" {
-		message := rp.IMTurnMessage{}
+		message := rp.SessionTurnMessage{}
 		if err := json.Unmarshal([]byte(updateJSON), &message); err == nil && strings.TrimSpace(message.Method) != "" && !isLegacyMonitorACPMethod(message.Method) {
 			method = strings.TrimSpace(message.Method)
 			switch method {
-			case rp.IMMethodPromptRequest:
-				prompt := rp.IMPromptRequest{}
+			case rp.SessionTurnMethodPromptRequest:
+				prompt := rp.SessionTurnPromptRequest{}
 				_ = json.Unmarshal(message.Param, &prompt)
 				parts := make([]string, 0, len(prompt.ContentBlocks))
 				for _, block := range prompt.ContentBlocks {
@@ -820,33 +819,33 @@ func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, fallbackIndex i
 				body = strings.TrimSpace(strings.Join(parts, " "))
 				role = "user"
 				status = "done"
-			case rp.IMMethodPromptDone:
-				result := rp.IMPromptResult{}
+			case rp.SessionTurnMethodPromptDone:
+				result := rp.SessionTurnPromptResult{}
 				_ = json.Unmarshal(message.Param, &result)
 				body = strings.TrimSpace(result.StopReason)
 				role = "system"
 				status = "done"
-			case rp.IMMethodAgentMessage, rp.IMMethodAgentThought, rp.SessionUpdateUserMessageChunk, rp.IMMethodSystem:
-				result := rp.IMTextResult{}
+			case rp.SessionTurnMethodAgentMessage, rp.SessionTurnMethodAgentThought, rp.SessionUpdateUserMessageChunk, rp.SessionTurnMethodSystem:
+				result := rp.SessionTurnTextResult{}
 				_ = json.Unmarshal(message.Param, &result)
 				body = strings.TrimSpace(result.Text)
 				status = "done"
 				switch method {
 				case rp.SessionUpdateUserMessageChunk:
 					role = "user"
-				case rp.IMMethodSystem:
+				case rp.SessionTurnMethodSystem:
 					role = "system"
 				default:
 					role = "assistant"
 				}
-			case rp.IMMethodToolCall:
-				result := rp.IMToolResult{}
+			case rp.SessionTurnMethodToolCall:
+				result := rp.SessionTurnToolResult{}
 				_ = json.Unmarshal(message.Param, &result)
 				body = strings.TrimSpace(result.Cmd)
 				role = "system"
 				status = firstNonEmpty(strings.TrimSpace(result.Status), "done")
-			case rp.IMMethodAgentPlan:
-				entries := []rp.IMPlanResult{}
+			case rp.SessionTurnMethodAgentPlan:
+				entries := []rp.SessionTurnPlanResult{}
 				_ = json.Unmarshal(message.Param, &entries)
 				parts := make([]string, 0, len(entries))
 				for _, entry := range entries {
@@ -1863,7 +1862,6 @@ type RegistryProject struct {
 	Path      string             `json:"path"`
 	Online    bool               `json:"online"`
 	Agent     string             `json:"agent"`
-	IMType    string             `json:"imType"`
 	Git       rp.ProjectGitState `json:"git"`
 }
 

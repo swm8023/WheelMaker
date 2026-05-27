@@ -2,7 +2,7 @@
 
 WheelMaker is a self-hosted daemon that lets you use AI coding workflows against your local repositories from a phone or a browser.
 
-> Feishu / Mobile App / Web UI → WheelMaker → Claude / Codex / Copilot → your codebase
+> Workspace Web UI / App -> WheelMaker -> Claude / Codex / Copilot -> your codebase
 
 ![Dual-machine topology](docs/readme-assets/topology-dual-machine.svg)
 
@@ -233,11 +233,7 @@ Example for Machine A:
   "projects": [
     {
       "name": "WheelMaker",
-      "path": "D:\\Code\\WheelMaker",
-      "feishu": {
-        "app_id": "cli_xxx",
-        "app_secret": "yyy"
-      }
+      "path": "D:\\Code\\WheelMaker"
     }
   ],
   "registry": {
@@ -274,11 +270,7 @@ Machine B does not expose the public entrypoint. It only reports projects to Mac
   "projects": [
     {
       "name": "Project-B",
-      "path": "D:\\Code\\Project-B",
-      "feishu": {
-        "app_id": "cli_xxx",
-        "app_secret": "yyy"
-      }
+      "path": "D:\\Code\\Project-B"
     }
   ],
   "registry": {

@@ -4702,13 +4702,6 @@ body,
   flex: 0 0 auto;
 }
 
-.wide-project-session-sentinel {
-  height: 1px;
-  width: 100%;
-  opacity: 0;
-  pointer-events: none;
-}
-
 .wide-project-empty {
   padding: 5px 7px;
 }

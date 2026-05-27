@@ -15,26 +15,17 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/client"
-	im "github.com/swm8023/wheelmaker/internal/im"
-	imapp "github.com/swm8023/wheelmaker/internal/im/app"
-	imfeishu "github.com/swm8023/wheelmaker/internal/im/feishu"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
-const (
-	feishuVerificationToken = ""
-	feishuEncryptKey        = ""
-)
-
 // Hub orchestrates one or more WheelMaker project clients.
-// Each project has its own IM channel, agent session, and state partition.
+// Each project has its own client, agent session, and state partition.
 type Hub struct {
 	cfg           *logger.AppConfig
 	dbPath        string
 	clients       []*client.Client
 	regSync       *Reporter
-	appIM         map[string]*imapp.Channel
 	clientsByName map[string]*client.Client
 }
 
@@ -44,13 +35,11 @@ func New(cfg *logger.AppConfig, dbPath string) *Hub {
 	return &Hub{
 		cfg:           cfg,
 		dbPath:        dbPath,
-		appIM:         map[string]*imapp.Channel{},
 		clientsByName: map[string]*client.Client{},
 	}
 }
 
 // Start validates config, creates one client.Client per project, and starts each client.
-// Returns an error if any project has an unsupported IM type.
 func (h *Hub) Start(ctx context.Context) error {
 	hubLogger("").Info("start projects=%d", len(h.cfg.Projects))
 	if err := client.CheckStoreSchema(h.dbPath); err != nil {
@@ -61,7 +50,7 @@ func (h *Hub) Start(ctx context.Context) error {
 		return fmt.Errorf("hub db schema check: %w", err)
 	}
 	for _, pc := range h.cfg.Projects {
-		hubLogger(pc.Name).Info("build client im=%s", pc.IMType())
+		hubLogger(pc.Name).Info("build client runtime=app")
 		c, err := h.buildClient(ctx, pc)
 		if err != nil {
 			hubLogger(pc.Name).Error("build client failed err=%v", err)
@@ -86,10 +75,10 @@ func (h *Hub) buildClient(ctx context.Context, pc logger.ProjectConfig) (*client
 			cwd = "."
 		}
 	}
-	return h.buildIMClient(ctx, pc, cwd)
+	return h.buildProjectClient(ctx, pc, cwd)
 }
 
-func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd string) (*client.Client, error) {
+func (h *Hub) buildProjectClient(ctx context.Context, pc logger.ProjectConfig, cwd string) (*client.Client, error) {
 	hubLogger(pc.Name).Info("opening store db=%s", h.dbPath)
 	store, err := client.NewStore(h.dbPath)
 	if err != nil {
@@ -101,34 +90,6 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 	c.SetSessionViewSink(c)
 	h.clientsByName[pc.Name] = c
 
-	router := im.NewRouter(c, im.NewMemoryHistoryStore())
-	if pc.Feishu != nil && !pc.HasFeishu() {
-		hubLogger(pc.Name).Error("build client failed err=invalid feishu config")
-		_ = c.Close()
-		return nil, fmt.Errorf("invalid feishu config: both app_id and app_secret are required")
-	}
-	if pc.HasFeishu() {
-		hubLogger(pc.Name).Info("register channel type=feishu")
-		if err := router.RegisterChannel(imfeishu.New(imfeishu.Config{
-			AppID:             pc.Feishu.AppID,
-			AppSecret:         pc.Feishu.AppSecret,
-			VerificationToken: feishuVerificationToken,
-			EncryptKey:        feishuEncryptKey,
-		})); err != nil {
-			hubLogger(pc.Name).Error("register channel failed type=feishu err=%v", err)
-			_ = c.Close()
-			return nil, err
-		}
-	}
-	hubLogger(pc.Name).Info("register channel type=app")
-	appChannel := imapp.New()
-	if err := router.RegisterChannel(appChannel); err != nil {
-		hubLogger(pc.Name).Error("register channel failed type=app err=%v", err)
-		_ = c.Close()
-		return nil, err
-	}
-	h.appIM[pc.Name] = appChannel
-	c.SetIMRouter(router)
 	hubLogger(pc.Name).Info("starting client")
 	if err := c.Start(ctx); err != nil {
 		hubLogger(pc.Name).Error("start client failed err=%v", err)
@@ -226,16 +187,12 @@ func (h *Hub) setupRegistrySync() {
 	})
 	for _, project := range projects {
 		projectClient := h.clientsByName[project.Name]
-		appChannel := h.appIM[project.Name]
 		projectID := rp.ProjectID(hubID, project.Name)
 		if projectClient != nil {
 			projectClient.SetSessionEventPublisher(func(method string, payload any) error {
 				return rep.PublishProjectEvent(projectID, method, payload)
 			})
 			rep.RegisterSessionHandler(projectID, projectClient)
-		}
-		if appChannel != nil {
-			rep.RegisterChatHandler(projectID, appChannel)
 		}
 	}
 	h.regSync = rep
@@ -259,7 +216,6 @@ func (h *Hub) collectProjectInfo(cfgProject logger.ProjectConfig) ProjectInfo {
 		Path:   path,
 		Online: true,
 		Agent:  "auto",
-		IMType: cfgProject.IMType(),
 	}
 	if preferred := strings.TrimSpace(agent.DefaultACPFactory().PreferredName()); preferred != "" {
 		info.Agent = preferred

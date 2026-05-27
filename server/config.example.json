@@ -2,19 +2,11 @@
   "projects": [
     {
       "name": "local-dev",
-      "path": "/path/to/your/project",
-      "feishu": {
-        "app_id": "cli_local",
-        "app_secret": "local_secret"
-      }
+      "path": "/path/to/your/project"
     },
     {
-      "name": "feishu-prod",
-      "path": "/path/to/other/project",
-      "feishu": {
-        "app_id": "cli_xxx",
-        "app_secret": "yyy"
-      }
+      "name": "app-dev",
+      "path": "/path/to/other/project"
     }
   ],
   "registry": {
@@ -31,7 +23,6 @@
     "level": "warn"
   }
 }
-
 
 
 

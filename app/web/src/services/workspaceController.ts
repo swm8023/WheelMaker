@@ -28,7 +28,7 @@ export class WorkspaceController {
     private readonly store: WorkspaceStore,
   ) {}
 
-  async connect(wsUrl: string, token: string): Promise<ProjectLoadResult> {
+  async connect(wsUrl: string, token: string, options?: {disableFileCache?: boolean}): Promise<ProjectLoadResult> {
     const baseSession = await this.service.connect(wsUrl, token.trim());
     const targetProjectId = this.store.selectProjectOnConnect(baseSession.projects, baseSession.selectedProjectId);
     const session = targetProjectId !== baseSession.selectedProjectId
@@ -38,27 +38,27 @@ export class WorkspaceController {
       projects: session.projects,
       hubs: session.hubs,
       rootEntries: session.fileEntries,
-      hydrated: this.store.hydrateProject(session.selectedProjectId, session.fileEntries),
+      hydrated: this.store.hydrateProject(session.selectedProjectId, session.fileEntries, options),
     };
   }
 
-  async switchProject(projectId: string): Promise<ProjectLoadResult> {
+  async switchProject(projectId: string, options?: {disableFileCache?: boolean}): Promise<ProjectLoadResult> {
     const session = await this.service.selectProject(projectId);
     return {
       projects: session.projects,
       hubs: session.hubs,
       rootEntries: session.fileEntries,
-      hydrated: this.store.hydrateProject(session.selectedProjectId, session.fileEntries),
+      hydrated: this.store.hydrateProject(session.selectedProjectId, session.fileEntries, options),
     };
   }
 
-  async switchProjectLightweight(projectId: string): Promise<ProjectLoadResult> {
+  async switchProjectLightweight(projectId: string, options?: {disableFileCache?: boolean}): Promise<ProjectLoadResult> {
     const session = await this.service.selectProjectLightweight(projectId);
     return {
       projects: session.projects,
       hubs: session.hubs,
       rootEntries: [],
-      hydrated: this.store.hydrateCachedProject(session.selectedProjectId),
+      hydrated: this.store.hydrateCachedProject(session.selectedProjectId, options),
     };
   }
 
@@ -66,17 +66,21 @@ export class WorkspaceController {
     projectId: string,
     rootEntries: RegistryFsEntry[],
     expandedSnapshot: string[],
+    options?: {disableFileCache?: boolean},
   ): Promise<ValidatedDirectoryState> {
+    const disableFileCache = options?.disableFileCache === true;
     const dirEntries: Record<string, RegistryFsEntry[]> = {
       '.': sortEntries(rootEntries),
     };
-    this.store.cacheDirectory(projectId, '.', '', dirEntries['.']);
+    if (!disableFileCache) {
+      this.store.cacheDirectory(projectId, '.', '', dirEntries['.']);
+    }
     const expandedDirs: string[] = ['.'];
     for (const dirPath of expandedSnapshot) {
       if (dirPath === '.') continue;
       try {
-        const cached = this.store.getCachedDirectory(projectId, dirPath);
-        const result = await this.service.listDirectory(dirPath, cached?.hash || undefined);
+        const cached = disableFileCache ? null : this.store.getCachedDirectory(projectId, dirPath);
+        const result = await this.service.listDirectory(dirPath, disableFileCache ? undefined : cached?.hash || undefined);
         if (result.notModified && cached) {
           dirEntries[dirPath] = sortEntries(cached.entries);
           expandedDirs.push(dirPath);
@@ -85,7 +89,9 @@ export class WorkspaceController {
         const entries = sortEntries(result.entries);
         dirEntries[dirPath] = entries;
         expandedDirs.push(dirPath);
-        this.store.cacheDirectory(projectId, dirPath, result.hash || cached?.hash || '', entries);
+        if (!disableFileCache) {
+          this.store.cacheDirectory(projectId, dirPath, result.hash || cached?.hash || '', entries);
+        }
       } catch {
         // drop stale directory cache entry
       }
@@ -93,8 +99,8 @@ export class WorkspaceController {
     return {dirEntries, expandedDirs};
   }
 
-  async refreshProject(projectId: string, expandedSnapshot: string[]): Promise<ValidatedDirectoryState> {
+  async refreshProject(projectId: string, expandedSnapshot: string[], options?: {disableFileCache?: boolean}): Promise<ValidatedDirectoryState> {
     const session = await this.service.selectProject(projectId);
-    return this.validateExpandedDirectories(projectId, session.fileEntries, expandedSnapshot);
+    return this.validateExpandedDirectories(projectId, session.fileEntries, expandedSnapshot, options);
   }
 }

@@ -21,6 +21,7 @@ const (
 	defaultServerVersion   = "0.1.0"
 	defaultRequestTimeout  = 10 * time.Second
 	clientIdleTimeout      = 5 * time.Minute
+	removedChatSendMethod  = "chat" + ".send"
 )
 
 // Config configures the project registry server.
@@ -265,41 +266,41 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		if state.role == "client" && isRemovedClientRequestMethod(in.Method) {
+			_ = s.writeError(state.peer, in.RequestID, in.Method, codeInvalidArgument, "unsupported method", map[string]any{"method": in.Method})
+			continue
+		}
 		if !methodAllowed(state.role, in.Method) {
 			_ = s.writeError(state.peer, in.RequestID, in.Method, codeForbidden, "method not allowed for role", map[string]any{"role": state.role})
 			continue
 		}
 
-		switch in.Method {
-		case "registry.reportProjects":
+		switch {
+		case in.Method == "registry.reportProjects":
 			s.handleHubReportProjects(state.peer, state, in)
-		case "registry.updateProject":
+		case in.Method == "registry.updateProject":
 			s.handleHubUpdateProject(state.peer, state, in)
-		case "registry.session.updated":
+		case in.Method == "registry.session.updated":
 			s.handleHubSessionEvent(state.peer, state, in, "session.updated")
-		case "registry.session.message":
+		case in.Method == "registry.session.message":
 			s.handleHubSessionEvent(state.peer, state, in, "session.message")
-		case "project.list":
+		case in.Method == "project.list":
 			s.handleProjectList(state.peer, state, in)
-		case "project.syncCheck":
+		case in.Method == "project.syncCheck":
 			s.handleProjectSyncCheck(state.peer, state, in)
-		case "monitor.listHub":
+		case in.Method == "monitor.listHub":
 			s.handleMonitorListHub(state.peer, state, in)
-		case "batch":
+		case in.Method == "batch":
 			s.handleBatch(state.peer, state, in)
-		case "hub.ping":
+		case in.Method == "hub.ping":
 			_ = s.writeResponse(state.peer, in.RequestID, in.Method, "", map[string]any{"ok": true})
-		case rp.MethodRelayEnable, rp.MethodRelayDisable, rp.MethodRelayStatus, rp.MethodRelayRegenerateAccessCode:
+		case in.Method == rp.MethodRelayEnable || in.Method == rp.MethodRelayDisable || in.Method == rp.MethodRelayStatus || in.Method == rp.MethodRelayRegenerateAccessCode:
 			s.handleRelayRequest(state.peer, state, in)
-		case "monitor.status", "monitor.log", "monitor.db", "monitor.action":
+		case in.Method == "monitor.status" || in.Method == "monitor.log" || in.Method == "monitor.db" || in.Method == "monitor.action":
 			s.handleMonitorForwardRequest(state.peer, state, in)
-		case "cmd.npm", "cmd.update", "cmd.skills", "cmd.token":
+		case in.Method == "cmd.npm" || in.Method == "cmd.update" || in.Method == "cmd.skills" || in.Method == "cmd.token":
 			go s.handleHubCommandForwardRequest(state.peer, state, in)
-		case "chat.send",
-			"session.list", "session.read", "session.search", "session.new", "session.resume.list", "session.resume.import", "session.reload", "session.archive", "session.delete", "session.rename", "session.send", "session.cancel", "session.markRead", "session.setConfig", "session.attachment.start", "session.attachment.chunk", "session.attachment.finish", "session.attachment.cancel", "session.attachment.delete", "session.token.providers", "session.token.deepseek.stats", "session.token.scan",
-			"fs.list", "fs.info", "fs.read", "fs.search", "fs.grep",
-			"git.refs", "git.log", "git.commit.files", "git.commit.fileDiff",
-			"git.diff", "git.diff.fileDiff", "git.status", "git.workingTree.fileDiff":
+		case isClientForwardMethod(in.Method):
 			s.handleForwardRequest(state.peer, state, in)
 		default:
 			_ = s.writeError(state.peer, in.RequestID, in.Method, codeInvalidArgument, "unsupported method", map[string]any{"method": in.Method})
@@ -345,10 +346,26 @@ func methodAllowed(role string, method string) bool {
 		return method == "project.list" || method == "project.syncCheck" || method == "batch" ||
 			method == rp.MethodRelayEnable || method == rp.MethodRelayDisable || method == rp.MethodRelayStatus || method == rp.MethodRelayRegenerateAccessCode ||
 			method == "cmd.npm" || method == "cmd.update" || method == "cmd.skills" || method == "cmd.token" ||
-			method == "chat.send" || strings.HasPrefix(method, "session.") ||
+			strings.HasPrefix(method, "session.") ||
 			strings.HasPrefix(method, "fs.") || strings.HasPrefix(method, "git.")
 	case "monitor":
 		return method == "project.list" || method == "monitor.listHub" || method == "batch" || strings.HasPrefix(method, "monitor.")
+	default:
+		return false
+	}
+}
+
+func isRemovedClientRequestMethod(method string) bool {
+	return method == removedChatSendMethod
+}
+
+func isClientForwardMethod(method string) bool {
+	switch method {
+	case "session.list", "session.read", "session.search", "session.new", "session.resume.list", "session.resume.import", "session.reload", "session.archive", "session.delete", "session.rename", "session.send", "session.cancel", "session.markRead", "session.setConfig", "session.attachment.start", "session.attachment.chunk", "session.attachment.finish", "session.attachment.cancel", "session.attachment.delete", "session.token.providers", "session.token.deepseek.stats", "session.token.scan",
+		"fs.list", "fs.info", "fs.read", "fs.search", "fs.grep",
+		"git.refs", "git.log", "git.commit.files", "git.commit.fileDiff",
+		"git.diff", "git.diff.fileDiff", "git.status", "git.workingTree.fileDiff":
+		return true
 	default:
 		return false
 	}
@@ -869,6 +886,13 @@ func (s *Server) handleBatch(peer *peerConn, state *connectionState, in envelope
 }
 
 func (s *Server) executeBatchRequest(state *connectionState, in envelope) envelope {
+	if state.role == "client" && isRemovedClientRequestMethod(in.Method) {
+		return s.errorEnvelope(in.Method, codeInvalidArgument, "unsupported method", map[string]any{"method": in.Method})
+	}
+	if !methodAllowed(state.role, in.Method) {
+		return s.errorEnvelope(in.Method, codeForbidden, "method not allowed for role", map[string]any{"role": state.role})
+	}
+
 	switch in.Method {
 	case "project.list":
 		return envelope{
@@ -895,7 +919,10 @@ func (s *Server) executeBatchRequest(state *connectionState, in envelope) envelo
 		}
 		return s.executeHubCommandRequest(state, in)
 	default:
-		return s.executeClientRequest(state, in)
+		if isClientForwardMethod(in.Method) {
+			return s.executeClientRequest(state, in)
+		}
+		return s.errorEnvelope(in.Method, codeInvalidArgument, "unsupported method", map[string]any{"method": in.Method})
 	}
 }
 
@@ -982,7 +1009,6 @@ func (s *Server) snapshotProjects(scopeHubID string) []rp.ProjectListItem {
 				Agent:         p.Agent,
 				Agents:        agents,
 				AgentProfiles: agentProfiles,
-				IMType:        p.IMType,
 				ProjectRev:    p.ProjectRev,
 				Git:           p.Git,
 			})

@@ -149,7 +149,7 @@ export class WorkspaceStore {
     return fallbackProjectId;
   }
 
-  hydrateProject(projectId: string, rootEntries: RegistryFsEntry[]): HydratedProjectState {
+  hydrateProject(projectId: string, rootEntries: RegistryFsEntry[], options?: {disableFileCache?: boolean}): HydratedProjectState {
     const cachedProjectState = this.persistence.getProjectState(projectId);
     const cachedCommitState = this.persistence.getProjectCommitsState(projectId);
     const rootSorted = sortEntries(rootEntries);
@@ -157,12 +157,14 @@ export class WorkspaceStore {
       '.': rootSorted,
     };
     const expandedDirs: string[] = ['.'];
-    for (const dirPath of uniqueStrings(cachedProjectState.expandedDirs)) {
-      if (!dirPath || dirPath === '.') continue;
-      const cachedDir = this.getCachedDirectory(projectId, dirPath);
-      if (!cachedDir) continue;
-      dirEntries[dirPath] = sortEntries(cachedDir.entries);
-      expandedDirs.push(dirPath);
+    if (!options?.disableFileCache) {
+      for (const dirPath of uniqueStrings(cachedProjectState.expandedDirs)) {
+        if (!dirPath || dirPath === '.') continue;
+        const cachedDir = this.getCachedDirectory(projectId, dirPath);
+        if (!cachedDir) continue;
+        dirEntries[dirPath] = sortEntries(cachedDir.entries);
+        expandedDirs.push(dirPath);
+      }
     }
 
     const selectedFile = cachedProjectState.selectedFile || (rootSorted.find(item => item.kind === 'file')?.path ?? '');
@@ -188,9 +190,9 @@ export class WorkspaceStore {
     };
   }
 
-  hydrateCachedProject(projectId: string): HydratedProjectState {
-    const cachedRoot = this.getCachedDirectory(projectId, '.');
-    return this.hydrateProject(projectId, cachedRoot?.entries ?? []);
+  hydrateCachedProject(projectId: string, options?: {disableFileCache?: boolean}): HydratedProjectState {
+    const cachedRoot = options?.disableFileCache ? null : this.getCachedDirectory(projectId, '.');
+    return this.hydrateProject(projectId, cachedRoot?.entries ?? [], options);
   }
 
   rememberProjectSnapshot(projectId: string, snapshot: ProjectSnapshot): void {
@@ -368,6 +370,14 @@ export class WorkspaceStore {
   deleteChatSession(projectId: string, sessionId: string): void {
     if (!projectId || !sessionId) return;
     this.persistence.deleteProjectChatSession(projectId, sessionId);
+  }
+
+  setDisableFileCache(disableFileCache: boolean): void {
+    this.persistence.patchGlobalState({disableFileCache});
+  }
+
+  clearFileCache(): void {
+    this.persistence.clearFileCache();
   }
 
   clearLocalCachePreservingToken(): void {

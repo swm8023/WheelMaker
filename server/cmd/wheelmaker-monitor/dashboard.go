@@ -1403,7 +1403,6 @@ function renderSidebar(cfg, projects) {
         '<div class="proj-path">' + esc(p.path || '') + '</div>' +
         '<div class="proj-badges">' +
           '<span class="badge badge-blue">' + esc(p.agent || 'none') + '</span>' +
-          '<span class="badge badge-yellow">' + esc(p.imType || 'none') + '</span>' +
           '<span class="badge ' + (p.online ? 'badge-green' : 'badge-red') + '">' + (p.online ? 'online' : 'offline') + '</span>' +
         '</div>' +
         '</div>';

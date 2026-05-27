@@ -39,7 +39,6 @@ type ProjectInfo struct {
 	Agent         string                `json:"agent"`
 	Agents        []string              `json:"agents,omitempty"`
 	AgentProfiles []ProjectAgentProfile `json:"agentProfiles,omitempty"`
-	IMType        string                `json:"imType"`
 	ProjectRev    string                `json:"projectRev"`
 	Git           ProjectGitState       `json:"git"`
 }
@@ -142,7 +141,6 @@ type ProjectListItem struct {
 	Agent         string                `json:"agent"`
 	Agents        []string              `json:"agents,omitempty"`
 	AgentProfiles []ProjectAgentProfile `json:"agentProfiles,omitempty"`
-	IMType        string                `json:"imType"`
 	ProjectRev    string                `json:"projectRev"`
 	Git           ProjectGitState       `json:"git"`
 }

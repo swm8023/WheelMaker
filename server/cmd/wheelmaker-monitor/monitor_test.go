@@ -209,13 +209,21 @@ func TestGetDBTablesDoesNotIncludeLegacyPromptTable(t *testing.T) {
 		t.Fatalf("GetDBTables error: %s", res.Error)
 	}
 	foundPrompts := false
+	legacyRouteTableName := strings.Join([]string{"route", "bindings"}, "_")
+	foundRouteBindings := false
 	for _, table := range res.Tables {
 		if table.Name == "session_prompts" {
 			foundPrompts = true
 		}
+		if table.Name == legacyRouteTableName {
+			foundRouteBindings = true
+		}
 	}
 	if foundPrompts {
 		t.Fatalf("session_prompts table unexpectedly present: %#v", res.Tables)
+	}
+	if foundRouteBindings {
+		t.Fatalf("%s table unexpectedly present: %#v", legacyRouteTableName, res.Tables)
 	}
 }
 

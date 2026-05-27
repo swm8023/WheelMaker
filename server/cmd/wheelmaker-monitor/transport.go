@@ -200,7 +200,6 @@ func (d *directHubTransport) ProjectList(_ context.Context, hubID string) ([]Reg
 			Path:      p.Path,
 			Online:    true,
 			Agent:     "unknown",
-			IMType:    p.IMType(),
 		})
 	}
 	return items, nil

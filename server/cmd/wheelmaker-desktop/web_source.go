@@ -305,7 +305,7 @@ func normalizeDesktopRemoteWebCandidate(candidate desktopRemoteWebCandidate) (st
 	if !strings.EqualFold(parsedRemote.Host, registryURL.Host) {
 		return "", "", false
 	}
-	return remoteURL, "wss://" + registryURL.Host, true
+	return remoteURL, desktopRegistryOriginForURL(registryURL), true
 }
 
 func normalizeDesktopRegistryURL(raw string) (*url.URL, bool) {
@@ -314,7 +314,7 @@ func normalizeDesktopRegistryURL(raw string) (*url.URL, bool) {
 		return nil, false
 	}
 	switch parsed.Scheme {
-	case "wss", "https":
+	case "ws", "wss", "http", "https":
 	default:
 		return nil, false
 	}
@@ -324,9 +324,25 @@ func normalizeDesktopRegistryURL(raw string) (*url.URL, bool) {
 	return parsed, true
 }
 
+func desktopRegistryOriginForURL(registryURL *url.URL) string {
+	scheme := registryURL.Scheme
+	if scheme == "http" {
+		scheme = "ws"
+	}
+	if scheme == "https" {
+		scheme = "wss"
+	}
+	return scheme + "://" + registryURL.Host
+}
+
 func normalizeDesktopRemoteWebURL(raw string) (string, bool) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+	if err != nil || parsed.Host == "" {
+		return "", false
+	}
+	switch parsed.Scheme {
+	case "http", "https":
+	default:
 		return "", false
 	}
 	if isDesktopLoopbackHost(parsed.Hostname()) {
@@ -338,7 +354,7 @@ func normalizeDesktopRemoteWebURL(raw string) (string, bool) {
 	if parsed.Path != "" && parsed.Path != "/" {
 		return "", false
 	}
-	return "https://" + parsed.Host + "/", true
+	return parsed.Scheme + "://" + parsed.Host + "/", true
 }
 
 func isDesktopLoopbackHost(host string) bool {

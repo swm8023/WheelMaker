@@ -47,10 +47,6 @@ type errorPayload = rp.ErrorPayload
 type monitorActionPayload = rp.MonitorActionPayload
 type monitorLogPayload = rp.MonitorLogPayload
 
-type ChatHandler interface {
-	HandleChatRequest(ctx context.Context, method string, projectID string, payload json.RawMessage) (any, error)
-}
-
 type SessionHandler interface {
 	HandleSessionRequest(ctx context.Context, method string, projectID string, payload json.RawMessage) (any, error)
 }
@@ -84,7 +80,6 @@ type Reporter struct {
 	mu           sync.RWMutex
 	projects     []ProjectInfo
 	projectsByID map[string]ProjectInfo
-	chatByID     map[string]ChatHandler
 	sessionByID  map[string]SessionHandler
 	conn         *websocket.Conn
 	pending      map[int64]chan envelope
@@ -144,7 +139,6 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		cfg:          cfg,
 		projects:     cp,
 		projectsByID: byID,
-		chatByID:     make(map[string]ChatHandler),
 		sessionByID:  make(map[string]SessionHandler),
 		pending:      make(map[int64]chan envelope),
 		monitorCore:  NewMonitorCore(monitorBase),
@@ -270,20 +264,6 @@ func (r *Reporter) SetMonitorResetSessionPromptState(reset func()) {
 		return
 	}
 	r.monitorCore.ResetSessionPromptState = reset
-}
-
-func (r *Reporter) RegisterChatHandler(projectID string, handler ChatHandler) {
-	projectID = strings.TrimSpace(projectID)
-	if projectID == "" {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if handler == nil {
-		delete(r.chatByID, projectID)
-		return
-	}
-	r.chatByID[projectID] = handler
 }
 
 func (r *Reporter) RegisterSessionHandler(projectID string, handler SessionHandler) {
@@ -435,8 +415,6 @@ func (r *Reporter) runSession(ctx context.Context) error {
 
 func (r *Reporter) handleRegistryRequest(conn *websocket.Conn, in envelope) {
 	switch in.Method {
-	case "chat.send":
-		r.replyChat(conn, in)
 	case "session.list", "session.read", "session.search", "session.new", "session.resume.list", "session.resume.import", "session.reload", "session.archive", "session.delete", "session.rename", "session.send", "session.cancel", "session.markRead", "session.setConfig", "session.attachment.start", "session.attachment.chunk", "session.attachment.finish", "session.attachment.cancel", "session.attachment.delete", "session.token.providers", "session.token.deepseek.stats", "session.token.scan":
 		r.replySession(conn, in)
 	case "monitor.status":
@@ -920,7 +898,6 @@ func (r *Reporter) localReadProjectListPayload() map[string]any {
 			Agent:         project.Agent,
 			Agents:        append([]string(nil), project.Agents...),
 			AgentProfiles: append([]rp.ProjectAgentProfile(nil), project.AgentProfiles...),
-			IMType:        project.IMType,
 			ProjectRev:    project.ProjectRev,
 			Git:           project.Git,
 		})
@@ -1163,36 +1140,6 @@ func (r *Reporter) ensureToolHandler() toolCommandHandler {
 		MonitorBaseDir: r.cfg.MonitorBaseDir,
 	})
 	return r.toolHandler
-}
-
-func (r *Reporter) replyChat(conn *websocket.Conn, req envelope) {
-	projectID := strings.TrimSpace(req.ProjectID)
-	if projectID == "" {
-		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "projectId is required")
-		return
-	}
-
-	r.mu.RLock()
-	handler := r.chatByID[projectID]
-	r.mu.RUnlock()
-	if handler == nil {
-		_ = r.writeError(conn, req.RequestID, codeNotFound, "chat unavailable for project")
-		return
-	}
-
-	payload, err := handler.HandleChatRequest(context.Background(), req.Method, projectID, req.Payload)
-	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
-		return
-	}
-
-	_ = r.writeJSON(conn, "->", envelope{
-		RequestID: req.RequestID,
-		Type:      "response",
-		Method:    req.Method,
-		ProjectID: projectID,
-		Payload:   rp.MustRaw(payload),
-	})
 }
 
 func (r *Reporter) replySession(conn *websocket.Conn, req envelope) {
@@ -2061,7 +2008,7 @@ func (r *Reporter) resolvePending(id int64, msg envelope) bool {
 
 func diffProjectDomains(previous, current ProjectInfo) []string {
 	domains := make([]string, 0, 3)
-	projectChanged := previous.ProjectRev != current.ProjectRev || previous.Agent != current.Agent || previous.IMType != current.IMType || previous.Path != current.Path || previous.Online != current.Online
+	projectChanged := previous.ProjectRev != current.ProjectRev || previous.Agent != current.Agent || previous.Path != current.Path || previous.Online != current.Online
 	gitChanged := previous.Git.GitRev != current.Git.GitRev || previous.Git.HeadSHA != current.Git.HeadSHA || previous.Git.Branch != current.Git.Branch
 	worktreeChanged := previous.Git.WorktreeRev != current.Git.WorktreeRev || previous.Git.Dirty != current.Git.Dirty
 	if projectChanged {

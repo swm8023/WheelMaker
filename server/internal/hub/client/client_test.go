@@ -11,9 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
-	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
-	logger "github.com/swm8023/wheelmaker/internal/shared"
 	"io"
 	_ "modernc.org/sqlite"
 	"net/url"
@@ -25,15 +23,6 @@ import (
 	"testing"
 	"time"
 )
-
-const testRouteKey = "test:local"
-
-type Message struct {
-	ChannelID string
-	ChatID    string
-	Text      string
-	SessionID string
-}
 
 type testInjectedInstance struct {
 	name        string
@@ -56,43 +45,13 @@ type testInjectedInstance struct {
 	skillsErr   error
 }
 
-type fakeIMRouter struct {
-	binds   []fakeIMBind
-	updates []fakeIMUpdate
-	systems []fakeIMSystem
-}
-
-type fakeIMBind struct {
-	chat      im.ChatRef
-	sessionID string
-	opts      im.BindOptions
-}
-
-type fakeIMUpdate struct {
-	target im.SendTarget
-	params acp.SessionUpdateParams
-}
-
-type fakeIMSystem struct {
-	target  im.SendTarget
-	payload im.SystemPayload
-}
-
-type TestCaptureRouter struct {
-	mu          sync.Mutex
-	Messages    []string
-	ChatIDs     []string
-	CardCount   int
-	textBuffers map[string]string
-}
-
 func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(context.Context, string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error), cancelFn func() error) {
 	name := strings.TrimSpace(agentName)
 	if name == "" {
 		name = string(acp.ACPProviderClaude)
 	}
 	c.mu.Lock()
-	sess := c.sessions[c.routeMap[testRouteKey]]
+	sess := c.sessions[sessionID]
 	if sess == nil {
 		var err error
 		sess, err = c.newWiredSession(sessionID, name)
@@ -100,7 +59,6 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 			panic(err)
 		}
 		c.sessions[sessionID] = sess
-		c.routeMap[testRouteKey] = sessionID
 	}
 	c.mu.Unlock()
 
@@ -117,72 +75,6 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 	sess.acpSessionID = sessionID
 	sess.ready = true
 	sess.mu.Unlock()
-}
-
-func (c *Client) HandleMessage(msg Message) {
-	channelID := strings.TrimSpace(msg.ChannelID)
-	if channelID == "" {
-		channelID = "test"
-	}
-	text := strings.TrimSpace(msg.Text)
-	if text == "" {
-		return
-	}
-
-	source := im.ChatRef{ChannelID: channelID, ChatID: strings.TrimSpace(msg.ChatID)}
-	routeKey := testRouteKey
-
-	if cmd, args, ok := parseCommand(text); ok {
-		switch cmd {
-		case "/new":
-			agentType := strings.TrimSpace(args)
-			if agentType == "" {
-				return
-			}
-			sess, err := c.ClientNewSession(routeKey, agentType)
-			if err != nil {
-				return
-			}
-			if source.ChatID != "" {
-				sess.setIMSource(source)
-			}
-			sess.reply("Created new session: " + sess.acpSessionID)
-			return
-		case "/load":
-			idx, err := parsePositiveIndex(args)
-			if err != nil {
-				if sess, resolveErr := c.resolveSession(routeKey); resolveErr == nil {
-					sess.reply("Load error: " + err.Error())
-				}
-				return
-			}
-			loaded, err := c.ClientLoadSession(routeKey, idx)
-			if err != nil {
-				if sess, resolveErr := c.resolveSession(routeKey); resolveErr == nil {
-					sess.reply("Load error: " + err.Error())
-				}
-				return
-			}
-			if source.ChatID != "" {
-				loaded.setIMSource(source)
-			}
-			loaded.reply("Loaded session: " + loaded.acpSessionID)
-			return
-		}
-	}
-
-	sess, err := c.resolveSession(routeKey)
-	if err != nil {
-		return
-	}
-	if source.ChatID != "" {
-		sess.setIMSource(source)
-	}
-	if cmd, args, ok := parseCommand(text); ok {
-		c.handleCommand(sess, routeKey, cmd, args)
-		return
-	}
-	sess.handlePrompt(text)
 }
 
 func (c *Client) InjectAgentFactory(provider acp.ACPProvider, creator agent.InstanceCreator) {
@@ -203,12 +95,6 @@ func (c *Client) InjectAgentFactory(provider acp.ACPProvider, creator agent.Inst
 	registry.Register(provider, creator)
 }
 
-func (c *Client) RouteSessionIDForTest(routeKey string) string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.routeMap[routeKey]
-}
-
 func (c *Client) HasSessionInMemoryForTest(sessionID string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -216,100 +102,9 @@ func (c *Client) HasSessionInMemoryForTest(sessionID string) bool {
 	return ok
 }
 
-func (c *Client) ResolveSessionForTest(routeKey string) (*Session, error) {
-	return c.resolveSession(routeKey)
+func (c *Client) SessionForTest(sessionID string) (*Session, error) {
+	return c.SessionByID(context.Background(), sessionID)
 }
-
-func (f *fakeIMRouter) Bind(_ context.Context, chat im.ChatRef, sessionID string, opts im.BindOptions) error {
-	f.binds = append(f.binds, fakeIMBind{chat: chat, sessionID: sessionID, opts: opts})
-	return nil
-}
-
-func (f *fakeIMRouter) PublishSessionUpdate(_ context.Context, target im.SendTarget, params acp.SessionUpdateParams) error {
-	f.updates = append(f.updates, fakeIMUpdate{target: target, params: params})
-	return nil
-}
-
-func (f *fakeIMRouter) PublishPromptResult(context.Context, im.SendTarget, acp.SessionPromptResult) error {
-	return nil
-}
-
-func (f *fakeIMRouter) SystemNotify(_ context.Context, target im.SendTarget, payload im.SystemPayload) error {
-	f.systems = append(f.systems, fakeIMSystem{target: target, payload: payload})
-	return nil
-}
-
-func (f *fakeIMRouter) Run(context.Context) error { return nil }
-
-func NewTestCaptureRouter() *TestCaptureRouter {
-	return &TestCaptureRouter{textBuffers: map[string]string{}}
-}
-
-func (r *TestCaptureRouter) Bind(context.Context, im.ChatRef, string, im.BindOptions) error {
-	return nil
-}
-
-func (r *TestCaptureRouter) PublishSessionUpdate(_ context.Context, target im.SendTarget, params acp.SessionUpdateParams) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	chatID := target.ChatID
-	if target.Source != nil && strings.TrimSpace(target.Source.ChatID) != "" {
-		chatID = strings.TrimSpace(target.Source.ChatID)
-	}
-	switch params.Update.SessionUpdate {
-	case acp.SessionUpdateAgentMessageChunk:
-		var content acp.ContentBlock
-		if len(params.Update.Content) > 0 && json.Unmarshal(params.Update.Content, &content) == nil {
-			key := strings.TrimSpace(target.SessionID)
-			if key == "" {
-				key = chatID
-			}
-			r.textBuffers[key] += content.Text
-		}
-	case acp.SessionUpdateConfigOptionUpdate:
-		r.Messages = append(r.Messages, formatConfigOptionUpdateMessage(mustJSON(params.Update)))
-		r.ChatIDs = append(r.ChatIDs, chatID)
-	default:
-		if strings.HasPrefix(params.Update.SessionUpdate, acp.SessionUpdateToolCall) {
-			r.CardCount++
-		}
-	}
-	return nil
-}
-
-func (r *TestCaptureRouter) PublishPromptResult(_ context.Context, target im.SendTarget, _ acp.SessionPromptResult) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	chatID := target.ChatID
-	if target.Source != nil && strings.TrimSpace(target.Source.ChatID) != "" {
-		chatID = strings.TrimSpace(target.Source.ChatID)
-	}
-	key := strings.TrimSpace(target.SessionID)
-	if key == "" {
-		key = chatID
-	}
-	if text := r.textBuffers[key]; text != "" {
-		r.Messages = append(r.Messages, text)
-		r.ChatIDs = append(r.ChatIDs, chatID)
-		delete(r.textBuffers, key)
-	}
-	return nil
-}
-func (r *TestCaptureRouter) SystemNotify(_ context.Context, target im.SendTarget, payload im.SystemPayload) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	chatID := target.ChatID
-	if target.Source != nil && strings.TrimSpace(target.Source.ChatID) != "" {
-		chatID = strings.TrimSpace(target.Source.ChatID)
-	}
-	r.Messages = append(r.Messages, payload.Body)
-	r.ChatIDs = append(r.ChatIDs, chatID)
-	return nil
-}
-
-func (r *TestCaptureRouter) Run(context.Context) error { return nil }
 
 func mustJSON(v any) []byte {
 	raw, _ := json.Marshal(v)
@@ -433,15 +228,9 @@ func (i *testInjectedInstance) ListSkills(context.Context, string) ([]agent.Skil
 func (i *testInjectedInstance) Close() error { return nil }
 
 var _ agent.Instance = (*testInjectedInstance)(nil)
-var _ IMRouter = (*TestCaptureRouter)(nil)
 
 type noopStore struct{}
 
-func (s *noopStore) LoadRouteBindings(context.Context, string) (map[string]string, error) {
-	return map[string]string{}, nil
-}
-func (s *noopStore) SaveRouteBinding(context.Context, string, string, string) error { return nil }
-func (s *noopStore) DeleteRouteBinding(context.Context, string, string) error       { return nil }
 func (s *noopStore) LoadProjectDefaultAgent(context.Context, string) (string, error) {
 	return "", nil
 }
@@ -481,48 +270,6 @@ func TestIsAgentExitError_TLSHandshakeEOFFalse(t *testing.T) {
 	}
 }
 
-func TestResolveConfigArg_ValidatesOptionValue(t *testing.T) {
-	st := &SessionAgentState{
-		ConfigOptions: []acp.ConfigOption{{
-			ID: "theme",
-			Options: []acp.ConfigOptionValue{
-				{Name: "Dark", Value: "dark"},
-				{Name: "Light", Value: "light"},
-			},
-		}},
-	}
-	id, value, err := resolveConfigArg("theme Dark", st)
-	if err != nil {
-		t.Fatalf("resolveConfigArg returned error: %v", err)
-	}
-	if id != "theme" || value != "dark" {
-		t.Fatalf("resolveConfigArg = (%q,%q), want (%q,%q)", id, value, "theme", "dark")
-	}
-	if _, _, err := resolveConfigArg("theme blue", st); err == nil {
-		t.Fatalf("expected unknown config value error")
-	}
-}
-
-func TestResolveConfigArg_ResolvesCategoryAlias(t *testing.T) {
-	st := &SessionAgentState{
-		ConfigOptions: []acp.ConfigOption{{
-			ID:       acp.ConfigOptionIDReasoningEffort,
-			Category: acp.ConfigOptionCategoryThoughtLv,
-			Options: []acp.ConfigOptionValue{
-				{Name: "High", Value: "high"},
-				{Name: "Medium", Value: "medium"},
-			},
-		}},
-	}
-	id, value, err := resolveConfigArg("thought_level High", st)
-	if err != nil {
-		t.Fatalf("resolveConfigArg returned error: %v", err)
-	}
-	if id != acp.ConfigOptionIDReasoningEffort || value != "high" {
-		t.Fatalf("resolveConfigArg = (%q,%q), want (%q,%q)", id, value, acp.ConfigOptionIDReasoningEffort, "high")
-	}
-}
-
 func TestSessionInfoLine_UsesPrimaryAgentStateWithoutLegacyAgentMap(t *testing.T) {
 	s := mustNewSession(t, "sess-1", "/tmp", "claude")
 	s.mu.Lock()
@@ -544,180 +291,6 @@ func TestSessionInfoLine_UsesPrimaryAgentStateWithoutLegacyAgentMap(t *testing.T
 	}
 }
 
-func TestHandleIMInbound_ListDirectDoesNotBind(t *testing.T) {
-	c := New(&noopStore{}, "test", "/tmp")
-	fake := &fakeIMRouter{}
-	c.SetIMRouter(fake)
-	if err := c.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "/list"}); err != nil {
-		t.Fatalf("HandleIMInbound: %v", err)
-	}
-	if len(fake.binds) != 0 {
-		t.Fatalf("binds=%+v, want none", fake.binds)
-	}
-	if len(fake.systems) != 1 {
-		t.Fatalf("systems=%+v, want direct /list response", fake.systems)
-	}
-}
-
-func TestHandleIMInbound_NewWithoutAgentOpensHelpCardAndDoesNotBind(t *testing.T) {
-	c := New(&noopStore{}, "test", "/tmp")
-	fake := &fakeIMRouter{}
-	c.SetIMRouter(fake)
-	if err := c.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "/new"}); err != nil {
-		t.Fatalf("HandleIMInbound: %v", err)
-	}
-
-	if len(fake.binds) != 0 {
-		t.Fatalf("binds=%+v, want none", fake.binds)
-	}
-	if got := c.RouteSessionIDForTest("im:feishu:chat-a"); got != "" {
-		t.Fatalf("route session = %q, want empty", got)
-	}
-	if len(fake.systems) != 1 {
-		t.Fatalf("systems=%+v, want one help card", fake.systems)
-	}
-	system := fake.systems[0]
-	if system.payload.Kind != "help_card" || system.payload.HelpCard == nil {
-		t.Fatalf("system payload = %+v, want help card", system.payload)
-	}
-	if system.payload.HelpCard.MenuID != "menu:new" {
-		t.Fatalf("help menu id = %q, want menu:new", system.payload.HelpCard.MenuID)
-	}
-}
-
-func TestHandleIMInbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
-	c := New(&noopStore{}, "test", "/tmp")
-	fake := &fakeIMRouter{}
-	c.SetIMRouter(fake)
-	factory := func(context.Context, string) (agent.Instance, error) {
-		return &testInjectedInstance{
-			name:      "claude",
-			sessionID: "acp-1",
-			promptFn: func(context.Context, string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error) {
-				ch := make(chan acp.SessionUpdateParams, 1)
-				content, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello back"})
-				ch <- acp.SessionUpdateParams{Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content}}
-				close(ch)
-				return ch, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}, nil
-			},
-		}, nil
-	}
-	c.InjectAgentFactory(acp.ACPProviderClaude, factory)
-	c.InjectAgentFactory(acp.ACPProviderCodex, factory)
-	if err := c.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "hello"}); err != nil {
-		t.Fatalf("HandleIMInbound: %v", err)
-	}
-	if len(fake.binds) != 1 {
-		t.Fatalf("binds=%+v, want one bind", fake.binds)
-	}
-	foundACP := false
-	for _, update := range fake.updates {
-		if update.params.Update.SessionUpdate == acp.SessionUpdateAgentMessageChunk {
-			foundACP = true
-			break
-		}
-	}
-	if !foundACP {
-		t.Fatalf("updates=%+v, want ACP session/update emission", fake.updates)
-	}
-}
-
-func TestResolveOrCreateIMSessionUsesStoredDefaultAndFallbackDoesNotRewrite(t *testing.T) {
-	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	defer store.Close()
-	if err := store.SaveProjectDefaultAgent(context.Background(), "proj1", "claude"); err != nil {
-		t.Fatalf("SaveProjectDefaultAgent: %v", err)
-	}
-
-	c := New(store, "proj1", "/tmp")
-	c.registry = &agent.ACPFactory{}
-	codexInst := &testInjectedInstance{name: "codex", initResult: acp.InitializeResult{ProtocolVersion: "0.1"}, newResult: &acp.SessionNewResult{SessionID: "sess-codex"}}
-	c.registry.Register(acp.ACPProviderCodex, func(context.Context, string) (agent.Instance, error) { return codexInst, nil })
-
-	sess := c.resolveOrCreateIMSession(context.Background(), im.ChatRef{ChannelID: "feishu", ChatID: "chat-a"}, "im:feishu:chat-a")
-	if sess == nil {
-		t.Fatal("resolveOrCreateIMSession = nil")
-	}
-	if sess.agentType != "codex" {
-		t.Fatalf("agentType = %q, want codex fallback", sess.agentType)
-	}
-	still, err := store.LoadProjectDefaultAgent(context.Background(), "proj1")
-	if err != nil {
-		t.Fatalf("LoadProjectDefaultAgent: %v", err)
-	}
-	if still != "claude" {
-		t.Fatalf("stored default rewritten to %q, want claude", still)
-	}
-}
-
-func TestHandleIMInbound_ViewSinkFailureDoesNotBlockIMUpdates(t *testing.T) {
-	c := New(&noopStore{}, "test", "/tmp")
-	fake := &fakeIMRouter{}
-	c.SetIMRouter(fake)
-	c.SetSessionViewSink(&failingSessionViewSink{})
-	factory := func(context.Context, string) (agent.Instance, error) {
-		return &testInjectedInstance{
-			name:      "claude",
-			sessionID: "acp-1",
-			promptFn: func(context.Context, string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error) {
-				ch := make(chan acp.SessionUpdateParams, 1)
-				content, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello back"})
-				ch <- acp.SessionUpdateParams{Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content}}
-				close(ch)
-				return ch, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}, nil
-			},
-		}, nil
-	}
-	c.InjectAgentFactory(acp.ACPProviderClaude, factory)
-	c.InjectAgentFactory(acp.ACPProviderCodex, factory)
-	if err := c.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "hello"}); err != nil {
-		t.Fatalf("HandleIMInbound: %v", err)
-	}
-
-	foundACP := false
-	for _, update := range fake.updates {
-		if update.params.Update.SessionUpdate == acp.SessionUpdateAgentMessageChunk {
-			foundACP = true
-			break
-		}
-	}
-	if !foundACP {
-		t.Fatalf("updates=%+v, want ACP session/update emission even when view sink fails", fake.updates)
-	}
-}
-
-type failingPermissionIMRouter struct{}
-
-func (f *failingPermissionIMRouter) Bind(context.Context, im.ChatRef, string, im.BindOptions) error {
-	return nil
-}
-func (f *failingPermissionIMRouter) PublishSessionUpdate(context.Context, im.SendTarget, acp.SessionUpdateParams) error {
-	return nil
-}
-func (f *failingPermissionIMRouter) PublishPromptResult(context.Context, im.SendTarget, acp.SessionPromptResult) error {
-	return nil
-}
-func (f *failingPermissionIMRouter) SystemNotify(context.Context, im.SendTarget, im.SystemPayload) error {
-	return nil
-}
-func (f *failingPermissionIMRouter) Run(context.Context) error { return nil }
-
 type failingSessionViewSink struct{}
 
 func (f *failingSessionViewSink) RecordEvent(context.Context, SessionViewEvent) error {
@@ -733,30 +306,14 @@ func (s *recordingSessionViewSink) RecordEvent(_ context.Context, event SessionV
 	return nil
 }
 
-func TestSessionRequestPermissionAutoAllowsWithoutIMRoundTrip(t *testing.T) {
-	var buf bytes.Buffer
-	if err := logger.Setup(logger.LoggerConfig{Level: logger.LevelWarn}); err != nil {
-		t.Fatalf("setup logger: %v", err)
+func recordedSystemContents(events []SessionViewEvent) []string {
+	out := make([]string, 0, len(events))
+	for _, event := range events {
+		if event.Type == SessionViewEventTypeSystem {
+			out = append(out, event.Content)
+		}
 	}
-	defer logger.Close()
-	logger.SetOutput(&buf)
-	defer logger.SetOutput(os.Stderr)
-
-	s := mustNewSession(t, "sess-1", "/tmp", "claude")
-	s.imRouter = &failingPermissionIMRouter{}
-	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
-	result, err := s.SessionRequestPermission(context.Background(), 1, acp.PermissionRequestParams{
-		Options: []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
-	})
-	if err != nil {
-		t.Fatalf("SessionRequestPermission: %v", err)
-	}
-	if result.Outcome != "selected" || result.OptionID != "allow" {
-		t.Fatalf("permission result = %+v, want selected allow", result)
-	}
-	if got := buf.String(); strings.Contains(got, "permission publish failed") {
-		t.Fatalf("unexpected permission publish failure log: %q", got)
-	}
+	return out
 }
 
 func TestSessionRequestPermissionRecognizesLegacyOnceKind(t *testing.T) {
@@ -776,13 +333,10 @@ func TestSessionRequestPermissionRecognizesLegacyOnceKind(t *testing.T) {
 	}
 }
 
-func TestReplyWithTitleRecordsLegacySystemEvent(t *testing.T) {
-	router := &fakeIMRouter{}
+func TestReplyWithTitleRecordsSystemEventThroughViewSink(t *testing.T) {
 	sink := &recordingSessionViewSink{}
 	s := mustNewSession(t, "sess-1", "/tmp", "claude")
-	s.imRouter = router
 	s.viewSink = sink
-	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
 
 	s.replyWithTitle("Switched", "session: sess-1")
 
@@ -799,28 +353,15 @@ func TestReplyWithTitleRecordsLegacySystemEvent(t *testing.T) {
 	if strings.TrimSpace(event.Content) != "Switched\nsession: sess-1" {
 		t.Fatalf("event.Content = %q, want %q", event.Content, "Switched\nsession: sess-1")
 	}
-	if strings.TrimSpace(event.SourceChannel) != "app" || strings.TrimSpace(event.SourceChatID) != "chat-1" {
-		t.Fatalf("event source = (%q, %q), want (%q, %q)", event.SourceChannel, event.SourceChatID, "app", "chat-1")
-	}
-
-	if len(router.systems) != 1 {
-		t.Fatalf("router system notifications len = %d, want 1", len(router.systems))
-	}
-	if strings.TrimSpace(router.systems[0].payload.Title) != "Switched" {
-		t.Fatalf("system payload title = %q, want %q", router.systems[0].payload.Title, "Switched")
-	}
-	if strings.TrimSpace(router.systems[0].payload.Body) != "session: sess-1" {
-		t.Fatalf("system payload body = %q, want %q", router.systems[0].payload.Body, "session: sess-1")
+	if event.SourceChannel != "" || event.SourceChatID != "" {
+		t.Fatalf("event source = (%q, %q), want empty source", event.SourceChannel, event.SourceChatID)
 	}
 }
 
-func TestReportTimeoutError_RecordsSystemEvent(t *testing.T) {
-	router := &fakeIMRouter{}
+func TestReportTimeoutErrorRecordsSystemEventThroughViewSink(t *testing.T) {
 	sink := &recordingSessionViewSink{}
 	s := mustNewSession(t, "sess-1", "/tmp", "claude")
-	s.imRouter = router
 	s.viewSink = sink
-	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
 
 	s.reportTimeoutError("stream", "silence")
 
@@ -834,12 +375,36 @@ func TestReportTimeoutError_RecordsSystemEvent(t *testing.T) {
 	if !strings.Contains(event.Content, "category=timeout stage=stream") {
 		t.Fatalf("event.Content = %q, want timeout payload", event.Content)
 	}
-
-	if len(router.systems) != 1 {
-		t.Fatalf("router system notifications len = %d, want 1", len(router.systems))
+	if strings.Contains(event.Content, "/status") {
+		t.Fatalf("event.Content = %q, want no stale slash-command hint", event.Content)
 	}
-	if got := strings.TrimSpace(router.systems[0].payload.Body); !strings.Contains(got, "category=timeout stage=stream") {
-		t.Fatalf("system payload body = %q, want timeout payload", got)
+	if event.SourceChannel != "" || event.SourceChatID != "" {
+		t.Fatalf("event source = (%q, %q), want empty source", event.SourceChannel, event.SourceChatID)
+	}
+}
+
+func TestConnectHintUsesAppSessionUIAction(t *testing.T) {
+	s := mustNewSession(t, "sess-1", "/tmp", "claude")
+
+	got := s.connectHint()
+
+	if strings.Contains(got, "/new") {
+		t.Fatalf("connectHint() = %q, want app/session UI action without slash command", got)
+	}
+	if !strings.Contains(got, "app") {
+		t.Fatalf("connectHint() = %q, want app/session UI action", got)
+	}
+}
+
+func TestRecordSessionViewEventReturnsTrueWhenConfiguredViewSinkFails(t *testing.T) {
+	s := mustNewSession(t, "sess-1", "/tmp", "claude")
+	s.viewSink = &failingSessionViewSink{}
+
+	if handled := s.recordSessionViewEvent(SessionViewEvent{
+		Type:    SessionViewEventTypeSystem,
+		Content: "fallback please",
+	}); !handled {
+		t.Fatal("recordSessionViewEvent returned false for configured failed view sink, want true")
 	}
 }
 
@@ -855,7 +420,7 @@ func TestCurrentAgentNameLocked_PrefersSessionAgentType(t *testing.T) {
 	}
 }
 
-func TestClientLoadSession_RestoresFromStore(t *testing.T) {
+func TestSessionByID_RestoresFromStore(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
 		t.Fatalf("new store: %v", err)
@@ -874,16 +439,13 @@ func TestClientLoadSession_RestoresFromStore(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save session: %v", err)
 	}
-	if err := store.SaveRouteBinding(ctx, "proj1", "route-1", "restore-me"); err != nil {
-		t.Fatalf("save route binding: %v", err)
-	}
 	if err := c.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
-	sess, err := c.resolveSession("route-1")
+	sess, err := c.SessionByID(ctx, "restore-me")
 	if err != nil {
-		t.Fatalf("resolveSession: %v", err)
+		t.Fatalf("SessionByID: %v", err)
 	}
 	if sess.acpSessionID != "restore-me" {
 		t.Fatalf("resolved session ID = %q, want restore-me", sess.acpSessionID)
@@ -1099,9 +661,8 @@ func TestEnsureReady_FailsWhenAgentDoesNotSupportLoadSession(t *testing.T) {
 func TestEnsureReadyAndNotify_DoesNotEmitReadySystemPrompt(t *testing.T) {
 	s := mustNewSession(t, "acp-1", "/tmp", "claude")
 	s.projectName = "proj1"
-	router := &fakeIMRouter{}
-	s.imRouter = router
-	s.imSource = &im.ChatRef{ChannelID: "feishu", ChatID: "chat-1"}
+	sink := &recordingSessionViewSink{}
+	s.viewSink = sink
 	s.registry = agent.DefaultACPFactory().Clone()
 	s.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
 		return &testInjectedInstance{
@@ -1121,15 +682,15 @@ func TestEnsureReadyAndNotify_DoesNotEmitReadySystemPrompt(t *testing.T) {
 	if err := s.ensureReadyAndNotify(context.Background()); err != nil {
 		t.Fatalf("ensureReadyAndNotify(first): %v", err)
 	}
-	if got := len(router.systems); got != 0 {
-		t.Fatalf("system notify count after first ensureReadyAndNotify = %d, want 0", got)
+	if got := len(sink.events); got != 0 {
+		t.Fatalf("session view events count after first ensureReadyAndNotify = %d, want 0", got)
 	}
 
 	if err := s.ensureReadyAndNotify(context.Background()); err != nil {
 		t.Fatalf("ensureReadyAndNotify(second): %v", err)
 	}
-	if got := len(router.systems); got != 0 {
-		t.Fatalf("system notify count after second ensureReadyAndNotify = %d, want 0", got)
+	if got := len(sink.events); got != 0 {
+		t.Fatalf("session view events count after second ensureReadyAndNotify = %d, want 0", got)
 	}
 }
 
@@ -1513,7 +1074,7 @@ func TestSQLiteStoreSkipsCodexAppMigrationWhenUserVersionIsCurrent(t *testing.T)
 	}
 }
 
-func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
+func TestCreateSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
@@ -1547,15 +1108,10 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	}
 	c.registry = agent.DefaultACPFactory().Clone()
 	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) { return inst, nil })
-	c.mu.Lock()
-	oldSess := mustNewWiredSession(t, c, "sess-old", "claude")
-	c.sessions[oldSess.acpSessionID] = oldSess
-	c.routeMap["route-1"] = oldSess.acpSessionID
-	c.mu.Unlock()
 
-	sess, err := c.ClientNewSession("route-1", "claude")
+	sess, err := c.CreateSession(context.Background(), "claude", "")
 	if err != nil {
-		t.Fatalf("ClientNewSession: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 	if err := sess.ensureInstance(context.Background()); err != nil {
 		t.Fatalf("ensureInstance: %v", err)
@@ -1568,30 +1124,6 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 		t.Fatalf("set calls = %d, want 3", got)
 	}
 
-}
-
-func TestClientNewSessionPersistsProjectDefaultAgent(t *testing.T) {
-	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	defer store.Close()
-
-	c := New(store, "proj1", "/tmp")
-	inst := &testInjectedInstance{name: "claude", initResult: acp.InitializeResult{ProtocolVersion: "0.1"}, newResult: &acp.SessionNewResult{SessionID: "sess-new"}}
-	c.registry = agent.DefaultACPFactory().Clone()
-	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) { return inst, nil })
-
-	if _, err := c.ClientNewSession("route-1", "claude"); err != nil {
-		t.Fatalf("ClientNewSession: %v", err)
-	}
-	got, err := store.LoadProjectDefaultAgent(context.Background(), "proj1")
-	if err != nil {
-		t.Fatalf("LoadProjectDefaultAgent: %v", err)
-	}
-	if got != "claude" {
-		t.Fatalf("default agent = %q, want claude", got)
-	}
 }
 
 func TestEnsureReady_SessionLoadSuccess_ReplaysStoredConfigValuesByID(t *testing.T) {
@@ -1787,149 +1319,6 @@ func TestEnsureReady_SessionLoadSuccess_AgentCommandsOverrideCachedCommands(t *t
 	}
 }
 
-func TestNormalizeIMPromptBlocks_PreservesImageAndText(t *testing.T) {
-	blocks := normalizeIMPromptBlocks([]acp.ContentBlock{
-		{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "aGVsbG8="},
-		{Type: acp.ContentBlockTypeText, Text: "  hello  "},
-	})
-	if len(blocks) != 2 {
-		t.Fatalf("blocks=%+v, want 2", blocks)
-	}
-	if blocks[0].Type != acp.ContentBlockTypeImage {
-		t.Fatalf("first block type=%q, want image", blocks[0].Type)
-	}
-	if blocks[1].Type != acp.ContentBlockTypeText || blocks[1].Text != "hello" {
-		t.Fatalf("second block=%+v", blocks[1])
-	}
-}
-
-func TestNormalizeChatRef_TrimsFields(t *testing.T) {
-	got := normalizeChatRef(im.ChatRef{ChannelID: " feishu ", ChatID: " chat-1 "})
-	if got.ChannelID != "feishu" || got.ChatID != "chat-1" {
-		t.Fatalf("normalizeChatRef() = %#v", got)
-	}
-}
-
-func TestPromptToSession_TrimsSourceBeforeRouting(t *testing.T) {
-	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	defer store.Close()
-
-	c := New(store, "proj1", "/tmp")
-	c.registry = agent.DefaultACPFactory().Clone()
-	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
-		return &testInjectedInstance{name: "claude", sessionID: "acp-route-test", alive: true}, nil
-	})
-	sess, err := c.ClientNewSession("route:test", "claude")
-	if err != nil {
-		t.Fatalf("ClientNewSession: %v", err)
-	}
-
-	err = c.PromptToSession(context.Background(), sess.acpSessionID, im.ChatRef{ChannelID: " feishu ", ChatID: " chat-1 "}, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}})
-	if err != nil {
-		t.Fatalf("PromptToSession: %v", err)
-	}
-
-	bindings, err := store.LoadRouteBindings(context.Background(), "proj1")
-	if err != nil {
-		t.Fatalf("LoadRouteBindings: %v", err)
-	}
-	if got := bindings["im:feishu:chat-1"]; got != sess.acpSessionID {
-		t.Fatalf("route binding = %q, want %q", got, sess.acpSessionID)
-	}
-}
-
-func TestResolveHelpModelRefreshesSessionMenuFromRuntimeList(t *testing.T) {
-	s := mustNewSession(t, "sess-local", ".", "claude")
-	inst := &testInjectedInstance{
-		name:      string(acp.ACPProviderClaude),
-		sessionID: "sess-current",
-		alive:     true,
-		listResult: acp.SessionListResult{
-			Sessions: []acp.SessionInfo{
-				{SessionID: "sess-older", Title: "Older Session"},
-				{SessionID: "sess-current", Title: "Current Session"},
-			},
-		},
-	}
-
-	s.mu.Lock()
-	s.instance = inst
-	s.agentType = inst.name
-	s.ready = true
-	state := &s.agentState
-	state.AgentCapabilities = acp.AgentCapabilities{
-		LoadSession: true,
-		SessionCapabilities: &acp.SessionCapabilities{
-			List: &acp.SessionListCapability{},
-		},
-	}
-	s.mu.Unlock()
-
-	model, err := s.resolveHelpModel(context.Background(), "")
-	if err != nil {
-		t.Fatalf("resolveHelpModel() err = %v", err)
-	}
-
-	sessionMenu, ok := model.Menus["menu:sessions"]
-	if !ok {
-		t.Fatalf("session menu not found")
-	}
-	if len(sessionMenu.Options) != 1 {
-		t.Fatalf("session menu options len = %d, want 1", len(sessionMenu.Options))
-	}
-	if sessionMenu.Options[0].Command != "/list" {
-		t.Fatalf("session menu option[0] = %#v, want /list", sessionMenu.Options[0])
-	}
-	if !strings.Contains(sessionMenu.Body, "/list") {
-		t.Fatalf("session menu body = %q, want usage hint about /list", sessionMenu.Body)
-	}
-}
-
-func TestResolveHelpModel_RootStartsWithNewConversationMenu(t *testing.T) {
-	s := mustNewSession(t, "sess-help", "/tmp", "claude")
-	s.registry = agent.DefaultACPFactory().Clone()
-	s.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
-		return &testInjectedInstance{name: "claude", alive: true}, nil
-	})
-	s.registry.Register(acp.ACPProviderCodex, func(context.Context, string) (agent.Instance, error) {
-		return &testInjectedInstance{name: "codex", alive: true}, nil
-	})
-	s.mu.Lock()
-	s.instance = &testInjectedInstance{name: "claude", alive: true}
-	s.ready = true
-	s.mu.Unlock()
-
-	model, err := s.resolveHelpModel(context.Background(), "")
-	if err != nil {
-		t.Fatalf("resolveHelpModel: %v", err)
-	}
-	if len(model.Options) == 0 || model.Options[0].Label != "New Conversation" {
-		t.Fatalf("root option[0] = %+v, want New Conversation", model.Options)
-	}
-	newMenu, ok := model.Menus["menu:new"]
-	if !ok {
-		t.Fatalf("menus = %+v, want menu:new", model.Menus)
-	}
-	for _, opt := range model.Options {
-		if strings.Contains(opt.Label, "Switch Agent") || opt.Command == "/use" {
-			t.Fatalf("unexpected switch-agent option: %+v", opt)
-		}
-	}
-	seenAgents := map[string]bool{}
-	for _, opt := range newMenu.Options {
-		if opt.Command != "/new" {
-			t.Fatalf("new menu option = %+v, want /new", opt)
-		}
-		seenAgents[strings.TrimPrefix(opt.Label, "Agent: ")] = true
-	}
-	if !seenAgents["claude"] || !seenAgents["codex"] {
-		t.Fatalf("new menu options = %+v, want claude and codex", newMenu.Options)
-	}
-}
-
 func TestStoreAgentPreferenceRoundTrip(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
@@ -2092,55 +1481,6 @@ func TestApplyStoredConfigOptions_ReplaysByCategoryAlias(t *testing.T) {
 	}
 	if got := findCurrentValue(updated, acp.ConfigOptionIDReasoningEffort); got != "high" {
 		t.Fatalf("updated reasoning_effort = %q, want high", got)
-	}
-}
-
-func TestResolveHelpModel_UsesRawConfigOptionName(t *testing.T) {
-	s := mustNewSession(t, "sess-help-reasoning", "/tmp", "copilot")
-	s.registry = agent.DefaultACPFactory().Clone()
-	s.registry.Register(acp.ACPProviderCopilot, func(context.Context, string) (agent.Instance, error) {
-		return &testInjectedInstance{name: "copilot", alive: true}, nil
-	})
-	s.mu.Lock()
-	s.instance = &testInjectedInstance{name: "copilot", alive: true}
-	s.ready = true
-	s.agentState.ConfigOptions = []acp.ConfigOption{
-		{
-			ID:           "reasoning_effort",
-			Name:         "Reasoning Effort",
-			CurrentValue: "medium",
-			Options: []acp.ConfigOptionValue{
-				{Name: "Low", Value: "low"},
-				{Name: "Medium", Value: "medium"},
-				{Name: "High", Value: "high"},
-			},
-		},
-	}
-	s.mu.Unlock()
-
-	model, err := s.resolveHelpModel(context.Background(), "")
-	if err != nil {
-		t.Fatalf("resolveHelpModel: %v", err)
-	}
-	found := false
-	for _, opt := range model.Options {
-		if opt.MenuID == "menu:config:reasoning_effort" {
-			if !strings.HasPrefix(opt.Label, "Config: Reasoning Effort") {
-				t.Fatalf("config option label = %q, want Reasoning Effort", opt.Label)
-			}
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("did not find config option menu for reasoning_effort")
-	}
-	menu, ok := model.Menus["menu:config:reasoning_effort"]
-	if !ok {
-		t.Fatal("missing config menu for reasoning_effort")
-	}
-	if menu.Title != "Config: Reasoning Effort" {
-		t.Fatalf("config menu title = %q, want %q", menu.Title, "Config: Reasoning Effort")
 	}
 }
 
@@ -2958,7 +2298,7 @@ func sessionViewACPSystemEvent(sessionID, text string) SessionViewEvent {
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content: acp.BuildACPContentJSON(acp.IMMethodSystem, map[string]any{
+		Content: acp.BuildACPContentJSON(acp.SessionTurnMethodSystem, map[string]any{
 			"result": text,
 		}),
 	}
@@ -2978,8 +2318,8 @@ func TestParseSessionViewEventSessionUpdateReturnsToolTurnKey(t *testing.T) {
 	if !parsed.bMessage {
 		t.Fatal("parsed.bMessage = false, want true")
 	}
-	if parsed.method != acp.IMMethodToolCall {
-		t.Fatalf("parsed.method = %q, want %q", parsed.method, acp.IMMethodToolCall)
+	if parsed.method != acp.SessionTurnMethodToolCall {
+		t.Fatalf("parsed.method = %q, want %q", parsed.method, acp.SessionTurnMethodToolCall)
 	}
 	if parsed.turnKey != "call-1" {
 		t.Fatalf("parsed.turnKey = %q, want %q", parsed.turnKey, "call-1")
@@ -3016,30 +2356,30 @@ func TestMergeTurnMessageMergesTypedTextPayload(t *testing.T) {
 	merged := mergeTurnMessage(
 		sessionTurnMessage{
 			sessionID: "sess-1",
-			method:    acp.IMMethodAgentMessage,
-			payload:   acp.IMTextResult{Text: "hello"},
+			method:    acp.SessionTurnMethodAgentMessage,
+			payload:   acp.SessionTurnTextResult{Text: "hello"},
 			turnIndex: 2,
 		},
 		sessionTurnMessage{
 			sessionID: "sess-1",
-			method:    acp.IMMethodAgentMessage,
-			payload:   acp.IMTextResult{Text: " world"},
+			method:    acp.SessionTurnMethodAgentMessage,
+			payload:   acp.SessionTurnTextResult{Text: " world"},
 			turnIndex: 2,
 		},
 		2,
 	)
-	result, ok := merged.payload.(acp.IMTextResult)
+	result, ok := merged.payload.(acp.SessionTurnTextResult)
 	if !ok {
-		t.Fatalf("merged.payload type = %T, want %T", merged.payload, acp.IMTextResult{})
+		t.Fatalf("merged.payload type = %T, want %T", merged.payload, acp.SessionTurnTextResult{})
 	}
 	if result.Text != "hello world" {
 		t.Fatalf("merged text = %q, want %q", result.Text, "hello world")
 	}
 }
 
-func TestBuildIMContentJSONDoesNotTrimMethod(t *testing.T) {
-	raw := buildIMContentJSON("  method.with.space  ", map[string]any{"k": "v"})
-	msg := acp.IMTurnMessage{}
+func TestBuildSessionTurnContentJSONDoesNotTrimSessionTurnMethod(t *testing.T) {
+	raw := buildSessionTurnContentJSON("  method.with.space  ", map[string]any{"k": "v"})
+	msg := acp.SessionTurnMessage{}
 	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
@@ -3149,8 +2489,8 @@ func TestGetTurnIndexUsesGenericTurnKeyIndex(t *testing.T) {
 	state := sessionPromptState{
 		nextTurnIndex: 3,
 		turns: []sessionTurnMessage{
-			{turnIndex: 1, method: acp.IMMethodSystem},
-			{turnIndex: 2, method: acp.IMMethodToolCall},
+			{turnIndex: 1, method: acp.SessionTurnMethodSystem},
+			{turnIndex: 2, method: acp.SessionTurnMethodToolCall},
 		},
 		turnIndexByKey: map[string]int64{
 			"merge-key": 2,
@@ -3188,8 +2528,8 @@ func TestAddMessageTurnMutatesStateInPlace(t *testing.T) {
 		t.Fatalf("len(state.turns) = %d, want 1", len(state.turns))
 	}
 	turn := state.turns[0]
-	if turn.method != acp.IMMethodPromptRequest {
-		t.Fatalf("turn method = %q, want %q", turn.method, acp.IMMethodPromptRequest)
+	if turn.method != acp.SessionTurnMethodPromptRequest {
+		t.Fatalf("turn method = %q, want %q", turn.method, acp.SessionTurnMethodPromptRequest)
 	}
 }
 
@@ -3214,12 +2554,12 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			event:         sessionViewPromptEvent("sess-1", "say hi", nil),
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
-			wantMethod:    acp.IMMethodPromptRequest,
+			wantMethod:    acp.SessionTurnMethodPromptRequest,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				requestPayload, ok := parsed.payload.(acp.IMPromptRequest)
+				requestPayload, ok := parsed.payload.(acp.SessionTurnPromptRequest)
 				if !ok {
-					t.Fatalf("parsed.payload type = %T, want %T", parsed.payload, acp.IMPromptRequest{})
+					t.Fatalf("parsed.payload type = %T, want %T", parsed.payload, acp.SessionTurnPromptRequest{})
 				}
 				if len(requestPayload.ContentBlocks) != 1 || strings.TrimSpace(requestPayload.ContentBlocks[0].Text) != "say hi" {
 					t.Fatalf("payload.ContentBlocks = %#v, want single text block", requestPayload.ContentBlocks)
@@ -3231,12 +2571,12 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			event:         sessionViewPromptFinishedEvent("sess-1", acp.StopReasonEndTurn),
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
-			wantMethod:    acp.IMMethodPromptDone,
+			wantMethod:    acp.SessionTurnMethodPromptDone,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				resultPayload, ok := parsed.payload.(acp.IMPromptResult)
+				resultPayload, ok := parsed.payload.(acp.SessionTurnPromptResult)
 				if !ok {
-					t.Fatalf("parsed.payload type = %T, want %T", parsed.payload, acp.IMPromptResult{})
+					t.Fatalf("parsed.payload type = %T, want %T", parsed.payload, acp.SessionTurnPromptResult{})
 				}
 				if resultPayload.StopReason != acp.StopReasonEndTurn {
 					t.Fatalf("payload.StopReason = %q, want %q", resultPayload.StopReason, acp.StopReasonEndTurn)
@@ -3253,7 +2593,7 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			}),
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionUpdate,
-			wantMethod:    acp.IMMethodToolCall,
+			wantMethod:    acp.SessionTurnMethodToolCall,
 			wantTurnKey:   "call-1",
 		},
 		{
@@ -3273,7 +2613,7 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			},
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
-			wantMethod:    acp.IMMethodPromptRequest,
+			wantMethod:    acp.SessionTurnMethodPromptRequest,
 		},
 	}
 
@@ -3320,12 +2660,12 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			},
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
-			wantMethod:    acp.IMMethodPromptRequest,
+			wantMethod:    acp.SessionTurnMethodPromptRequest,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				request, ok := parsed.payload.(acp.IMPromptRequest)
+				request, ok := parsed.payload.(acp.SessionTurnPromptRequest)
 				if !ok {
-					t.Fatalf("parsed.payload type = %T, want acp.IMPromptRequest", parsed.payload)
+					t.Fatalf("parsed.payload type = %T, want acp.SessionTurnPromptRequest", parsed.payload)
 				}
 				if len(request.ContentBlocks) != 0 {
 					t.Fatalf("request.ContentBlocks len = %d, want 0", len(request.ContentBlocks))
@@ -3341,12 +2681,12 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			},
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
-			wantMethod:    acp.IMMethodPromptRequest,
+			wantMethod:    acp.SessionTurnMethodPromptRequest,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				request, ok := parsed.payload.(acp.IMPromptRequest)
+				request, ok := parsed.payload.(acp.SessionTurnPromptRequest)
 				if !ok {
-					t.Fatalf("parsed.payload type = %T, want acp.IMPromptRequest", parsed.payload)
+					t.Fatalf("parsed.payload type = %T, want acp.SessionTurnPromptRequest", parsed.payload)
 				}
 				if len(request.ContentBlocks) != 0 {
 					t.Fatalf("request.ContentBlocks len = %d, want 0", len(request.ContentBlocks))
@@ -3380,10 +2720,10 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			event: SessionViewEvent{
 				Type:      SessionViewEventTypeACP,
 				SessionID: "sess-1",
-				Content:   acp.BuildACPContentJSON(acp.IMMethodSystem, nil),
+				Content:   acp.BuildACPContentJSON(acp.SessionTurnMethodSystem, nil),
 			},
 			wantMessage:   false,
-			wantACPMethod: acp.IMMethodSystem,
+			wantACPMethod: acp.SessionTurnMethodSystem,
 			wantMethod:    "",
 		},
 		{
@@ -3391,12 +2731,12 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			event: SessionViewEvent{
 				Type:      SessionViewEventTypeACP,
 				SessionID: "sess-1",
-				Content: acp.BuildACPContentJSON(acp.IMMethodSystem, map[string]any{
+				Content: acp.BuildACPContentJSON(acp.SessionTurnMethodSystem, map[string]any{
 					"result": "ignored",
 				}),
 			},
 			wantMessage:   false,
-			wantACPMethod: acp.IMMethodSystem,
+			wantACPMethod: acp.SessionTurnMethodSystem,
 			wantMethod:    "",
 		},
 		{
@@ -3408,12 +2748,12 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			},
 			wantMessage:   true,
 			wantACPMethod: "",
-			wantMethod:    acp.IMMethodSystem,
+			wantMethod:    acp.SessionTurnMethodSystem,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				result, ok := parsed.payload.(acp.IMTextResult)
+				result, ok := parsed.payload.(acp.SessionTurnTextResult)
 				if !ok {
-					t.Fatalf("parsed.payload type = %T, want acp.IMTextResult", parsed.payload)
+					t.Fatalf("parsed.payload type = %T, want acp.SessionTurnTextResult", parsed.payload)
 				}
 				if strings.TrimSpace(result.Text) != "legacy system" {
 					t.Fatalf("result.Text = %q, want %q", result.Text, "legacy system")
@@ -4238,14 +3578,14 @@ func TestPromptBoundaryTurnsCarryModelAndTimes(t *testing.T) {
 	var doneContent string
 	for _, event := range *published {
 		content := publishedTurnMap(t, event.payload)["content"].(string)
-		var msg acp.IMTurnMessage
+		var msg acp.SessionTurnMessage
 		if err := json.Unmarshal([]byte(content), &msg); err != nil {
 			t.Fatalf("unmarshal content: %v", err)
 		}
 		switch msg.Method {
-		case acp.IMMethodPromptRequest:
+		case acp.SessionTurnMethodPromptRequest:
 			requestContent = content
-		case acp.IMMethodPromptDone:
+		case acp.SessionTurnMethodPromptDone:
 			doneContent = content
 		}
 	}
@@ -4343,12 +3683,12 @@ func TestPromptDoneIsPublishedAsFinishedRealTurn(t *testing.T) {
 	last := lastPublishedEvent(t, *published, "registry.session.message")
 	turn := publishedTurnMap(t, last)
 	content := turn["content"].(string)
-	var msg acp.IMTurnMessage
+	var msg acp.SessionTurnMessage
 	if err := json.Unmarshal([]byte(content), &msg); err != nil {
 		t.Fatalf("unmarshal content: %v", err)
 	}
-	if msg.Method != acp.IMMethodPromptDone {
-		t.Fatalf("method = %q, want %q", msg.Method, acp.IMMethodPromptDone)
+	if msg.Method != acp.SessionTurnMethodPromptDone {
+		t.Fatalf("method = %q, want %q", msg.Method, acp.SessionTurnMethodPromptDone)
 	}
 	if got := turn["finished"]; got != true {
 		t.Fatalf("finished = %v, want true", got)
@@ -4398,12 +3738,12 @@ func TestSessionReadReturnsPromptDoneAsFinishedTurn(t *testing.T) {
 	if last.Finished != true {
 		t.Fatalf("prompt_done finished = %v, want true", last.Finished)
 	}
-	var msg acp.IMTurnMessage
+	var msg acp.SessionTurnMessage
 	if err := json.Unmarshal([]byte(last.Content), &msg); err != nil {
 		t.Fatalf("unmarshal prompt_done content: %v", err)
 	}
-	if msg.Method != acp.IMMethodPromptDone {
-		t.Fatalf("last method = %q, want %q", msg.Method, acp.IMMethodPromptDone)
+	if msg.Method != acp.SessionTurnMethodPromptDone {
+		t.Fatalf("last method = %q, want %q", msg.Method, acp.SessionTurnMethodPromptDone)
 	}
 }
 
@@ -4718,7 +4058,7 @@ func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 		t.Fatalf("turns len = %d, want 1", len(turns))
 	}
 
-	promptMessage := acp.IMTurnMessage{}
+	promptMessage := acp.SessionTurnMessage{}
 	if err := json.Unmarshal([]byte(turns[0].Content), &promptMessage); err != nil {
 		t.Fatalf("unmarshal prompt message: %v", err)
 	}
@@ -4726,8 +4066,8 @@ func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 	if err := json.Unmarshal([]byte(turns[0].Content), &promptDoc); err != nil {
 		t.Fatalf("unmarshal prompt message doc: %v", err)
 	}
-	if strings.TrimSpace(promptMessage.Method) != acp.IMMethodPromptRequest {
-		t.Fatalf("messages[0].method = %q, want %q", promptMessage.Method, acp.IMMethodPromptRequest)
+	if strings.TrimSpace(promptMessage.Method) != acp.SessionTurnMethodPromptRequest {
+		t.Fatalf("messages[0].method = %q, want %q", promptMessage.Method, acp.SessionTurnMethodPromptRequest)
 	}
 	if _, ok := promptDoc["session"]; ok {
 		t.Fatalf("messages[0].content unexpectedly contains session field")
@@ -4735,7 +4075,7 @@ func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 	if _, ok := promptDoc["index"]; ok {
 		t.Fatalf("messages[0].content unexpectedly contains index field")
 	}
-	promptRequest := acp.IMPromptRequest{}
+	promptRequest := acp.SessionTurnPromptRequest{}
 	if err := json.Unmarshal(promptMessage.Param, &promptRequest); err != nil {
 		t.Fatalf("unmarshal prompt request: %v", err)
 	}
@@ -5035,14 +4375,14 @@ func TestSessionViewPersistsLegacySystemEventsButIgnoresACPSystemEvents(t *testi
 		t.Fatalf("turns len = %d, want 3 (prompt + legacy system + prompt_done)", len(turns))
 	}
 
-	msg := acp.IMTurnMessage{}
+	msg := acp.SessionTurnMessage{}
 	if err := json.Unmarshal([]byte(turns[1]), &msg); err != nil {
 		t.Fatalf("unmarshal legacy system turn: %v", err)
 	}
-	if strings.TrimSpace(msg.Method) != acp.IMMethodSystem {
-		t.Fatalf("legacy system turn method = %q, want %q", msg.Method, acp.IMMethodSystem)
+	if strings.TrimSpace(msg.Method) != acp.SessionTurnMethodSystem {
+		t.Fatalf("legacy system turn method = %q, want %q", msg.Method, acp.SessionTurnMethodSystem)
 	}
-	result := acp.IMTextResult{}
+	result := acp.SessionTurnTextResult{}
 	if err := json.Unmarshal(msg.Param, &result); err != nil {
 		t.Fatalf("unmarshal legacy system result: %v", err)
 	}
@@ -5463,14 +4803,14 @@ func TestSessionViewPromptFinishedPublishesPromptDoneMessage(t *testing.T) {
 		t.Fatalf("published turnIndex = %d, want 3", got)
 	}
 	content, _ := turn["content"].(string)
-	msg := acp.IMTurnMessage{}
+	msg := acp.SessionTurnMessage{}
 	if err := json.Unmarshal([]byte(content), &msg); err != nil {
 		t.Fatalf("unmarshal prompt_done content: %v", err)
 	}
-	if strings.TrimSpace(msg.Method) != acp.IMMethodPromptDone {
-		t.Fatalf("published method = %q, want %q", msg.Method, acp.IMMethodPromptDone)
+	if strings.TrimSpace(msg.Method) != acp.SessionTurnMethodPromptDone {
+		t.Fatalf("published method = %q, want %q", msg.Method, acp.SessionTurnMethodPromptDone)
 	}
-	result := acp.IMPromptResult{}
+	result := acp.SessionTurnPromptResult{}
 	if err := json.Unmarshal(msg.Param, &result); err != nil {
 		t.Fatalf("unmarshal prompt_done param: %v", err)
 	}
@@ -5511,7 +4851,7 @@ func TestSessionViewPromptFinishedPublishesPromptDoneBeforeSessionUpdated(t *tes
 		if event.method == "registry.session.message" {
 			turn := publishedTurnMap(t, event.payload)
 			content, _ := turn["content"].(string)
-			if strings.Contains(content, acp.IMMethodAgentMessage) || strings.Contains(content, acp.IMMethodPromptDone) {
+			if strings.Contains(content, acp.SessionTurnMethodAgentMessage) || strings.Contains(content, acp.SessionTurnMethodPromptDone) {
 				finishTail = append(finishTail, event)
 			}
 			continue
@@ -5524,10 +4864,10 @@ func TestSessionViewPromptFinishedPublishesPromptDoneBeforeSessionUpdated(t *tes
 		t.Fatalf("finish publish tail len = %d, want at least 3; events=%+v", len(finishTail), finishTail)
 	}
 	tail := finishTail[len(finishTail)-3:]
-	if tail[0].method != "registry.session.message" || !strings.Contains(publishedTurnMap(t, tail[0].payload)["content"].(string), acp.IMMethodAgentMessage) {
+	if tail[0].method != "registry.session.message" || !strings.Contains(publishedTurnMap(t, tail[0].payload)["content"].(string), acp.SessionTurnMethodAgentMessage) {
 		t.Fatalf("tail[0] = %+v, want sealed agent message", tail[0])
 	}
-	if tail[1].method != "registry.session.message" || !strings.Contains(publishedTurnMap(t, tail[1].payload)["content"].(string), acp.IMMethodPromptDone) {
+	if tail[1].method != "registry.session.message" || !strings.Contains(publishedTurnMap(t, tail[1].payload)["content"].(string), acp.SessionTurnMethodPromptDone) {
 		t.Fatalf("tail[1] = %+v, want prompt_done message", tail[1])
 	}
 	if tail[2].method != "registry.session.updated" {
@@ -5831,9 +5171,6 @@ func TestHandleSessionRequestSessionDeleteRemovesActiveSession(t *testing.T) {
 
 	now := time.Now().UTC()
 	addRuntimeSession(c, "sess-1", "Delete Target", "claude", now, now)
-	c.mu.Lock()
-	c.routeMap["im:app:delete"] = "sess-1"
-	c.mu.Unlock()
 	if err := c.store.SaveSession(ctx, &SessionRecord{
 		ID:              "sess-1",
 		ProjectName:     "proj1",
@@ -5866,10 +5203,9 @@ func TestHandleSessionRequestSessionDeleteRemovesActiveSession(t *testing.T) {
 	}
 	c.mu.Lock()
 	_, inMemory := c.sessions["sess-1"]
-	_, routeMapped := c.routeMap["im:app:delete"]
 	c.mu.Unlock()
-	if inMemory || routeMapped {
-		t.Fatalf("session still active after delete inMemory=%v routeMapped=%v", inMemory, routeMapped)
+	if inMemory {
+		t.Fatal("session still active after delete")
 	}
 	if len(cleanupCalls) != 1 || cleanupCalls[0].projectName != "proj1" || cleanupCalls[0].agentType != "claude" || cleanupCalls[0].sessionID != "sess-1" {
 		t.Fatalf("cleanup calls=%#v, want claude session cleanup", cleanupCalls)
@@ -5892,9 +5228,6 @@ func TestHandleSessionRequestSessionArchiveShortSessionDeletesWithoutArchive(t *
 
 	now := time.Date(2026, 5, 17, 10, 15, 0, 0, time.UTC)
 	addRuntimeSession(c, "sess-short", "Short Archive Target", "codex", now, now)
-	c.mu.Lock()
-	c.routeMap["im:app:short"] = "sess-short"
-	c.mu.Unlock()
 
 	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-short", "Short Archive Target")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
@@ -5927,10 +5260,9 @@ func TestHandleSessionRequestSessionArchiveShortSessionDeletesWithoutArchive(t *
 	}
 	c.mu.Lock()
 	_, inMemory := c.sessions["sess-short"]
-	_, routeMapped := c.routeMap["im:app:short"]
 	c.mu.Unlock()
-	if inMemory || routeMapped {
-		t.Fatalf("short session still active after archive inMemory=%v routeMapped=%v", inMemory, routeMapped)
+	if inMemory {
+		t.Fatal("short session still active after archive")
 	}
 	if len(cleanupCalls) != 1 || cleanupCalls[0].projectName != "proj1" || cleanupCalls[0].agentType != "codex" || cleanupCalls[0].sessionID != "sess-short" {
 		t.Fatalf("cleanup calls=%#v, want codex short session cleanup", cleanupCalls)
@@ -5945,9 +5277,6 @@ func TestHandleSessionRequestSessionArchiveWritesPackAndDeletesActiveSession(t *
 
 	now := time.Date(2026, 5, 17, 10, 30, 0, 0, time.UTC)
 	addRuntimeSession(c, "sess-archive", "Archive Target", "claude", now, now)
-	c.mu.Lock()
-	c.routeMap["im:app:archive"] = "sess-archive"
-	c.mu.Unlock()
 
 	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-archive", "Archive Target")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
@@ -5991,13 +5320,9 @@ func TestHandleSessionRequestSessionArchiveWritesPackAndDeletesActiveSession(t *
 	}
 	c.mu.Lock()
 	_, inMemory := c.sessions["sess-archive"]
-	_, routeMapped := c.routeMap["im:app:archive"]
 	c.mu.Unlock()
 	if inMemory {
 		t.Fatal("session still present in memory after archive")
-	}
-	if routeMapped {
-		t.Fatal("route binding still present after archive")
 	}
 	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
 		t.Fatalf("source session dir stat err = %v, want not exist", err)
@@ -6028,13 +5353,13 @@ func TestHandleSessionRequestSessionArchiveWritesPackAndDeletesActiveSession(t *
 	if len(contents) != 3 {
 		t.Fatalf("archive turn contents len = %d, want 3", len(contents))
 	}
-	if !strings.Contains(contents[0], acp.IMMethodPromptRequest) {
+	if !strings.Contains(contents[0], acp.SessionTurnMethodPromptRequest) {
 		t.Fatalf("first archived turn = %s, want prompt request", contents[0])
 	}
 	if !strings.Contains(contents[1], "world") {
 		t.Fatalf("second archived turn = %s, want agent message", contents[1])
 	}
-	if !strings.Contains(contents[2], acp.IMMethodPromptDone) {
+	if !strings.Contains(contents[2], acp.SessionTurnMethodPromptDone) {
 		t.Fatalf("third archived turn = %s, want prompt done", contents[2])
 	}
 }
@@ -6100,8 +5425,8 @@ func TestHandleSessionRequestSessionMutationsRejectRunningSession(t *testing.T) 
 			state := newSessionPromptState(1)
 			state.updateTurn(sessionTurnMessage{
 				sessionID: "sess-running",
-				method:    acp.IMMethodPromptRequest,
-				payload:   acp.IMPromptRequest{ContentBlocks: []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "still running"}}},
+				method:    acp.SessionTurnMethodPromptRequest,
+				payload:   acp.SessionTurnPromptRequest{ContentBlocks: []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "still running"}}},
 				turnIndex: 1,
 				finished:  true,
 			}, "")
@@ -6458,19 +5783,19 @@ func decodeTurnSessionUpdate(t *testing.T, raw string) acp.SessionUpdate {
 		return legacy.Params.Update
 	}
 
-	msg := acp.IMTurnMessage{}
+	msg := acp.SessionTurnMessage{}
 	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 		t.Fatalf("unmarshal turn update_json: %v", err)
 	}
 	switch strings.TrimSpace(msg.Method) {
-	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought, acp.SessionUpdateUserMessageChunk:
-		result := acp.IMTextResult{}
+	case acp.SessionTurnMethodAgentMessage, acp.SessionTurnMethodAgentThought, acp.SessionUpdateUserMessageChunk:
+		result := acp.SessionTurnTextResult{}
 		if err := json.Unmarshal(msg.Param, &result); err != nil {
 			t.Fatalf("unmarshal text result: %v", err)
 		}
 		return acp.SessionUpdate{SessionUpdate: strings.TrimSpace(msg.Method), Content: mustJSON(map[string]any{"text": result.Text})}
-	case acp.IMMethodToolCall:
-		result := acp.IMToolResult{}
+	case acp.SessionTurnMethodToolCall:
+		result := acp.SessionTurnToolResult{}
 		if err := json.Unmarshal(msg.Param, &result); err != nil {
 			t.Fatalf("unmarshal tool result: %v", err)
 		}
@@ -6480,8 +5805,8 @@ func decodeTurnSessionUpdate(t *testing.T, raw string) acp.SessionUpdate {
 			Kind:          strings.TrimSpace(result.Kind),
 			Status:        strings.TrimSpace(result.Status),
 		}
-	case acp.IMMethodAgentPlan:
-		plan := []acp.IMPlanResult{}
+	case acp.SessionTurnMethodAgentPlan:
+		plan := []acp.SessionTurnPlanResult{}
 		if err := json.Unmarshal(msg.Param, &plan); err != nil {
 			t.Fatalf("unmarshal plan result: %v", err)
 		}
@@ -6498,10 +5823,10 @@ func decodeTurnSessionUpdate(t *testing.T, raw string) acp.SessionUpdate {
 
 func decodeTurnMethod(t *testing.T, raw string) string {
 	t.Helper()
-	msg := acp.IMTurnMessage{}
+	msg := acp.SessionTurnMessage{}
 	if err := json.Unmarshal([]byte(raw), &msg); err == nil {
 		switch strings.TrimSpace(msg.Method) {
-		case acp.IMMethodPromptRequest, acp.IMMethodPromptDone:
+		case acp.SessionTurnMethodPromptRequest, acp.SessionTurnMethodPromptDone:
 			return acp.MethodSessionPrompt
 		default:
 			return strings.TrimSpace(msg.Method)
@@ -6764,14 +6089,14 @@ func seedPromptWithTurns(t *testing.T, c *Client, ctx context.Context, sessionID
 func hasPromptDoneTurnWithStopReason(t *testing.T, turns []sessionViewTurn, stopReason string) bool {
 	t.Helper()
 	for _, message := range turns {
-		var turn acp.IMTurnMessage
+		var turn acp.SessionTurnMessage
 		if err := json.Unmarshal([]byte(message.Content), &turn); err != nil {
 			t.Fatalf("unmarshal turn content: %v", err)
 		}
-		if turn.Method != acp.IMMethodPromptDone {
+		if turn.Method != acp.SessionTurnMethodPromptDone {
 			continue
 		}
-		var result acp.IMPromptResult
+		var result acp.SessionTurnPromptResult
 		raw, err := json.Marshal(turn.Param)
 		if err != nil {
 			t.Fatalf("marshal prompt_done param: %v", err)
@@ -6786,14 +6111,14 @@ func hasPromptDoneTurnWithStopReason(t *testing.T, turns []sessionViewTurn, stop
 
 func decodePromptDoneStopReason(t *testing.T, raw string) string {
 	t.Helper()
-	var turn acp.IMTurnMessage
+	var turn acp.SessionTurnMessage
 	if err := json.Unmarshal([]byte(raw), &turn); err != nil {
 		t.Fatalf("unmarshal prompt_done turn: %v", err)
 	}
-	if turn.Method != acp.IMMethodPromptDone {
-		t.Fatalf("turn method = %q, want %q", turn.Method, acp.IMMethodPromptDone)
+	if turn.Method != acp.SessionTurnMethodPromptDone {
+		t.Fatalf("turn method = %q, want %q", turn.Method, acp.SessionTurnMethodPromptDone)
 	}
-	var result acp.IMPromptResult
+	var result acp.SessionTurnPromptResult
 	if err := json.Unmarshal(turn.Param, &result); err != nil {
 		t.Fatalf("unmarshal prompt_done param: %v", err)
 	}
@@ -6802,7 +6127,7 @@ func decodePromptDoneStopReason(t *testing.T, raw string) string {
 
 func decodeTurnParamMap(t *testing.T, raw string) map[string]any {
 	t.Helper()
-	var turn acp.IMTurnMessage
+	var turn acp.SessionTurnMessage
 	if err := json.Unmarshal([]byte(raw), &turn); err != nil {
 		t.Fatalf("unmarshal turn: %v", err)
 	}
@@ -6825,11 +6150,11 @@ func listRecordedPromptTurns(ctx context.Context, t *testing.T, c *Client, sessi
 	currentPrompt := int64(0)
 	out := []string{}
 	for _, turn := range turns {
-		var msg acp.IMTurnMessage
+		var msg acp.SessionTurnMessage
 		if err := json.Unmarshal([]byte(turn.Content), &msg); err != nil {
 			t.Fatalf("unmarshal turn content: %v", err)
 		}
-		if strings.TrimSpace(msg.Method) == acp.IMMethodPromptRequest || currentPrompt == 0 {
+		if strings.TrimSpace(msg.Method) == acp.SessionTurnMethodPromptRequest || currentPrompt == 0 {
 			currentPrompt++
 		}
 		if currentPrompt == promptOrdinal {
@@ -7007,49 +6332,6 @@ func base64ForTest(data []byte) string {
 	return b.String()
 }
 
-func captureReplies(c *Client) *[]string {
-	router := NewTestCaptureRouter()
-	c.SetIMRouter(router)
-	return &router.Messages
-}
-
-func TestStart_LoadsRouteBindingsWithoutRestoringSessions(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "db", "client.sqlite3")
-
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	defer store.Close()
-
-	ctx := context.Background()
-	if err := store.SaveRouteBinding(ctx, "proj-a", "im:feishu:chat-1", "sess-1"); err != nil {
-		t.Fatalf("SaveRouteBinding() error = %v", err)
-	}
-	if err := store.SaveSession(ctx, &SessionRecord{
-		ID:          "sess-1",
-		ProjectName: "proj-a",
-		Status:      SessionPersisted,
-		AgentType:   "claude",
-		AgentJSON:   `{"title":"Persisted"}`,
-	}); err != nil {
-		t.Fatalf("SaveSession() error = %v", err)
-	}
-
-	c := New(store, "proj-a", dir)
-	if err := c.Start(ctx); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-
-	if got := c.RouteSessionIDForTest("im:feishu:chat-1"); got != "sess-1" {
-		t.Fatalf("route binding = %q, want sess-1", got)
-	}
-	if c.HasSessionInMemoryForTest("sess-1") {
-		t.Fatal("persisted session should not be eagerly restored during Start()")
-	}
-}
-
 func TestStart_CreatesProjectRowWhenMissing(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
@@ -7084,226 +6366,12 @@ func TestStart_CreatesProjectRowWhenMissing(t *testing.T) {
 	}
 }
 
-func TestResolveSession_RejectsEmptyRouteKey(t *testing.T) {
-	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	defer store.Close()
-
-	c := New(store, "proj-a", t.TempDir())
-	if _, err := c.ResolveSessionForTest(""); err == nil {
-		t.Fatal(`ResolveSessionForTest("") should fail`)
-	}
-}
-
-func TestHandleMessage_Cancel(t *testing.T) {
-	mock := &mockSession{agentName: "claude", sessionID: "sess-1"}
+func TestHandleSessionRequestSessionSendSlashTextIsPrompt(t *testing.T) {
+	mock := &mockSession{agentName: "codex", sessionID: "sess-send-slash"}
 	c := newTestClient(t, mock)
-	msgs := captureReplies(c)
+	published := captureSessionMessageEvents(t, c)
 
-	c.HandleMessage(Message{ChatID: "chat1", Text: "/cancel"})
-
-	if mock.cancelCalls != 1 {
-		t.Fatalf("Cancel called %d times, want 1", mock.cancelCalls)
-	}
-	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "Cancelled") {
-		t.Fatalf("reply = %v, want Cancelled", *msgs)
-	}
-}
-
-func TestHandleMessage_Status(t *testing.T) {
-	mock := &mockSession{agentName: "codex", sessionID: "sess-abc"}
-	c := newTestClient(t, mock)
-	msgs := captureReplies(c)
-
-	c.HandleMessage(Message{ChatID: "chat1", Text: "/status"})
-
-	if len(*msgs) == 0 {
-		t.Fatal("no reply received")
-	}
-	reply := (*msgs)[0]
-	if !strings.Contains(reply, "codex") {
-		t.Fatalf("status reply %q missing agent name", reply)
-	}
-	if !strings.Contains(reply, "session:") {
-		t.Fatalf("status reply %q missing session field", reply)
-	}
-}
-
-func TestHandleMessage_PromptTextStreaming(t *testing.T) {
-	mock := &mockSession{
-		agentName: "codex",
-		sessionID: "sess-1",
-		promptFn: func(_ string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error) {
-			ch := make(chan acp.SessionUpdateParams, 2)
-			content1, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello "})
-			content2, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"})
-			ch <- acp.SessionUpdateParams{Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content1}}
-			ch <- acp.SessionUpdateParams{Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content2}}
-			close(ch)
-			return ch, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}, nil
-		},
-	}
-	c := newTestClient(t, mock)
-	msgs := captureReplies(c)
-
-	c.HandleMessage(Message{ChatID: "chat1", Text: "hi there"})
-
-	if len(mock.promptCalls) != 1 || mock.promptCalls[0] != "hi there" {
-		t.Fatalf("Prompt called with %v, want [hi there]", mock.promptCalls)
-	}
-	// msgs[0] is the session-info system message; the streamed text follows.
-	found := false
-	for _, m := range *msgs {
-		if m == "hello world" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("reply = %v, want a message containing 'hello world'", *msgs)
-	}
-}
-
-func TestSQLiteStore_ProjectRouteAndSessionRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "db", "client.sqlite3")
-
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	defer store.Close()
-
-	ctx := context.Background()
-	if err := store.SaveRouteBinding(ctx, "proj-a", "im:feishu:chat-1", "sess-1"); err != nil {
-		t.Fatalf("SaveRouteBinding() error = %v", err)
-	}
-	if err := store.SaveSession(ctx, &SessionRecord{
-		ID:           "sess-1",
-		ProjectName:  "proj-a",
-		Status:       SessionSuspended,
-		AgentType:    "claude",
-		AgentJSON:    `{"title":"Persisted","commands":[{"name":"/status"}]}`,
-		Title:        "Persisted",
-		CreatedAt:    time.Unix(10, 0).UTC(),
-		LastActiveAt: time.Unix(20, 0).UTC(),
-	}); err != nil {
-		t.Fatalf("SaveSession() error = %v", err)
-	}
-	if err := store.SaveAgentPreference(ctx, AgentPreferenceRecord{
-		ProjectName:    "proj-a",
-		AgentType:      "claude",
-		PreferenceJSON: `{"configOptions":[{"id":"mode","currentValue":"code"}]}`,
-	}); err != nil {
-		t.Fatalf("SaveAgentPreference() error = %v", err)
-	}
-
-	bindings, err := store.LoadRouteBindings(ctx, "proj-a")
-	if err != nil {
-		t.Fatalf("LoadRouteBindings() error = %v", err)
-	}
-	if got := bindings["im:feishu:chat-1"]; got != "sess-1" {
-		t.Fatalf("binding = %q, want sess-1", got)
-	}
-
-	rec, err := store.LoadSession(ctx, "proj-a", "sess-1")
-	if err != nil {
-		t.Fatalf("LoadSession() error = %v", err)
-	}
-	if rec == nil || rec.ID != "sess-1" {
-		t.Fatalf("LoadSession() = %+v, want sess-1", rec)
-	}
-	if rec.AgentType != "claude" {
-		t.Fatalf("LoadSession().AgentType = %q, want claude", rec.AgentType)
-	}
-	if strings.Contains(rec.AgentJSON, "acpSessionId") {
-		t.Fatalf("LoadSession().AgentJSON = %q, should not contain acpSessionId", rec.AgentJSON)
-	}
-
-	pref, err := store.LoadAgentPreference(ctx, "proj-a", "claude")
-	if err != nil {
-		t.Fatalf("LoadAgentPreference() error = %v", err)
-	}
-	if pref == nil || !strings.Contains(pref.PreferenceJSON, `"mode"`) {
-		t.Fatalf("LoadAgentPreference() = %+v, want mode config", pref)
-	}
-
-	entries, err := store.ListSessions(ctx, "proj-a")
-	if err != nil {
-		t.Fatalf("ListSessions() error = %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("ListSessions() len = %d, want 1", len(entries))
-	}
-	if entries[0].Agent != "claude" {
-		t.Fatalf("ListSessions()[0].Agent = %q, want claude", entries[0].Agent)
-	}
-	if entries[0].Title != "Persisted" {
-		t.Fatalf("ListSessions()[0].Title = %q, want Persisted", entries[0].Title)
-	}
-}
-
-func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "db", "client.sqlite3")
-
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	defer store.Close()
-
-	err = store.SaveRouteBinding(context.Background(), "proj-a", "", "sess-1")
-	if err == nil {
-		t.Fatal("SaveRouteBinding() should reject empty route keys")
-	}
-}
-func TestHandleMessage_Skills(t *testing.T) {
-	mock := &mockSession{agentName: "codex", sessionID: "sess-skills"}
-	c := newTestClient(t, mock)
-	msgs := captureReplies(c)
-
-	sess, err := c.resolveSession(testRouteKey)
-	if err != nil {
-		t.Fatalf("resolveSession: %v", err)
-	}
-	inst, ok := sess.instance.(*testInjectedInstance)
-	if !ok {
-		t.Fatalf("instance type = %T", sess.instance)
-	}
-	inst.skills = []agent.SkillDescriptor{{Name: "frontend-design", Path: "D:/repo/.agents/skills/frontend-design/SKILL.md"}}
-
-	c.HandleMessage(Message{ChatID: "chat1", Text: "/skills"})
-
-	if len(*msgs) == 0 {
-		t.Fatal("no reply received")
-	}
-	reply := strings.Join(*msgs, "\n")
-	if !strings.Contains(reply, "Skills (1):") {
-		t.Fatalf("skills reply missing header: %q", reply)
-	}
-	if !strings.Contains(reply, "frontend-design") {
-		t.Fatalf("skills reply missing skill name: %q", reply)
-	}
-}
-func TestHandleSessionRequest_SessionSendSlashSkills(t *testing.T) {
-	mock := &mockSession{agentName: "codex", sessionID: "sess-send-skills"}
-	c := newTestClient(t, mock)
-	msgs := captureReplies(c)
-
-	sess, err := c.resolveSession(testRouteKey)
-	if err != nil {
-		t.Fatalf("resolveSession: %v", err)
-	}
-	inst, ok := sess.instance.(*testInjectedInstance)
-	if !ok {
-		t.Fatalf("instance type = %T", sess.instance)
-	}
-	inst.skills = []agent.SkillDescriptor{{Name: "diagnose", Path: "D:/repo/.agents/skills/diagnose/SKILL.md"}}
-
-	payload := json.RawMessage(`{"sessionId":"sess-send-skills","text":"/skills"}`)
+	payload := json.RawMessage(`{"sessionId":"sess-send-slash","text":"/skills"}`)
 	resp, err := c.HandleSessionRequest(context.Background(), "session.send", "proj1", payload)
 	if err != nil {
 		t.Fatalf("HandleSessionRequest(session.send): %v", err)
@@ -7313,15 +6381,14 @@ func TestHandleSessionRequest_SessionSendSlashSkills(t *testing.T) {
 		t.Fatalf("response = %#v, want ok=true", resp)
 	}
 
-	if len(*msgs) == 0 {
-		t.Fatal("no reply received")
+	first := (*published)[0].payload
+	turn := publishedTurnMap(t, first)
+	content, _ := turn["content"].(string)
+	if !strings.Contains(content, `"/skills"`) {
+		t.Fatalf("first turn content = %q, want prompt text /skills", content)
 	}
-	reply := strings.Join(*msgs, "\n")
-	if !strings.Contains(reply, "Skills (1):") {
-		t.Fatalf("skills reply missing header: %q", reply)
-	}
-	if !strings.Contains(reply, "diagnose") {
-		t.Fatalf("skills reply missing skill name: %q", reply)
+	if strings.Contains(content, `"method":"system"`) {
+		t.Fatalf("slash text was handled as a system command: %q", content)
 	}
 }
 
@@ -7369,9 +6436,9 @@ func TestSessionSendConvertsUploadedImageResourceLinkForImageCapableACPAgent(t *
 	imageBytes := []byte("hello")
 	block := uploadSessionAttachmentForTest(t, c, "sess-send-image", "pixel.png", "image/png", imageBytes)
 
-	sess, err := c.resolveSession(testRouteKey)
+	sess, err := c.SessionForTest("sess-send-image")
 	if err != nil {
-		t.Fatalf("resolveSession: %v", err)
+		t.Fatalf("SessionForTest: %v", err)
 	}
 	sess.mu.Lock()
 	sess.agentState.AgentCapabilities.PromptCapabilities = &acp.PromptCapabilities{Image: true}
@@ -7518,9 +6585,9 @@ func TestSessionSendAcceptsUploadedAttachmentBlock(t *testing.T) {
 	if body["ok"] != true {
 		t.Fatalf("send response=%#v, want ok", body)
 	}
-	sess, err := c.resolveSession(testRouteKey)
+	sess, err := c.SessionForTest("sess-send-attachment")
 	if err != nil {
-		t.Fatalf("resolveSession: %v", err)
+		t.Fatalf("SessionForTest: %v", err)
 	}
 	inst := sess.instance.(*testInjectedInstance)
 	if len(inst.lastPrompt) != 2 || inst.lastPrompt[1].URI != block.URI || inst.lastPrompt[1].Data != "" {
@@ -7583,7 +6650,7 @@ func TestPromptToSessionRecordsFailedPromptDoneOnAgentError(t *testing.T) {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
 
-	if err := c.PromptToSession(context.Background(), "sess-prompt-error", im.ChatRef{ChannelID: "app", ChatID: "sess-prompt-error"}, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}}); err != nil {
+	if err := c.PromptToSession(context.Background(), "sess-prompt-error", []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}}); err != nil {
 		t.Fatalf("PromptToSession: %v", err)
 	}
 	_, turns, err := c.sessionRecorder.ReadSessionTurns(context.Background(), "sess-prompt-error", 0)
@@ -7629,7 +6696,7 @@ func TestHandleSessionRequestSessionCancelFinishesPromptAsCancelled(t *testing.T
 
 	done := make(chan error, 1)
 	go func() {
-		done <- c.PromptToSession(context.Background(), "sess-cancel-running", im.ChatRef{ChannelID: "app", ChatID: "sess-cancel-running"}, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "please stop"}})
+		done <- c.PromptToSession(context.Background(), "sess-cancel-running", []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "please stop"}})
 	}()
 	<-started
 
