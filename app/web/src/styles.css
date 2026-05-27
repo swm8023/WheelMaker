@@ -7109,14 +7109,14 @@ body,
 
 .chat-composer-input-row {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 5px;
   min-height: 30px;
   min-width: 0;
 }
 
 .chat-composer-skill-trigger {
-  width: 30px;
+  width: 24px;
   height: 30px;
   flex: 0 0 auto;
   border: none;
@@ -7131,7 +7131,8 @@ body,
 .chat-composer-stop-trigger {
   position: absolute;
   right: 0;
-  bottom: 0;
+  top: 50%;
+  transform: translateY(-50%);
   width: 24px;
   height: 24px;
   flex: 0 0 auto;
@@ -7301,10 +7302,10 @@ body,
 }
 
 .chat-composer-action-column {
-  align-self: flex-start;
   flex: 0 0 auto;
   width: 30px;
   height: 30px;
+  align-self: flex-end;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -7356,14 +7357,17 @@ body,
 }
 
 .chat-composer-tools {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  width: 24px;
+  min-height: 24px;
   flex: 0 0 auto;
 }
 
 .chat-tool-button {
-  width: 30px;
+  width: 24px;
   height: 24px;
   border: none;
   border-radius: 7px;
@@ -7379,18 +7383,11 @@ body,
   color: color-mix(in srgb, var(--accent) 72%, var(--text));
 }
 
-.chat-mention-button {
+.chat-attachment-plus-button {
   color: color-mix(in srgb, var(--accent) 72%, var(--text));
 }
 
 .chat-slash-symbol {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.chat-mention-symbol {
   font-family: var(--font-mono);
   font-size: 14px;
   font-weight: 700;
@@ -7403,6 +7400,86 @@ body,
 
 .chat-image-attach-button {
   color: color-mix(in srgb, #d7a84f 78%, var(--text));
+}
+
+.chat-attachment-action-tray {
+  position: absolute;
+  left: 0;
+  bottom: -4px;
+  z-index: 38;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  max-width: calc(100vw - 46px);
+  min-height: 34px;
+  padding: 4px 42px 4px 4px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--panel) 96%, var(--accent)) 0%,
+      color-mix(in srgb, var(--panel) 92%, var(--accent)) 72%,
+      color-mix(in srgb, var(--panel) 64%, transparent) 100%
+    );
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(10px);
+}
+
+.chat-attachment-action-tray::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 44px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--panel) 88%, transparent));
+  pointer-events: none;
+}
+
+.chat-attachment-action-button {
+  min-width: 62px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-1) 86%, transparent);
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1;
+}
+
+.chat-attachment-action-button:hover {
+  background: var(--hover);
+}
+
+.chat-attachment-action-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.chat-attachment-action-button.code .codicon {
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+}
+
+.chat-attachment-action-button.file .codicon {
+  color: color-mix(in srgb, #4db6ac 78%, var(--text));
+}
+
+.chat-attachment-action-button.photo .codicon {
+  color: color-mix(in srgb, #d7a84f 78%, var(--text));
+}
+
+.chat-attachment-action-label {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .chat-tool-button:hover {

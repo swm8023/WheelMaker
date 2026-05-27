@@ -1287,8 +1287,8 @@ function chatConfigIconClass(option: RegistrySessionConfigOption): string {
   if (key.includes('effort') || key.includes('thought')) {
     return 'codicon-pulse';
   }
-  if (key.includes('mode') || key.includes('permission')) {
-    return 'codicon-shield';
+  if (key.includes('mode') || key.includes('permission') || key.includes('access')) {
+    return 'codicon-lock';
   }
   return 'codicon-settings-gear';
 }
@@ -3274,6 +3274,8 @@ function App() {
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const chatPromptButtonRef = useRef<HTMLButtonElement | null>(null);
   const chatFileMentionButtonRef = useRef<HTMLButtonElement | null>(null);
+  const chatAttachmentTrayRef = useRef<HTMLDivElement | null>(null);
+  const chatAttachmentTrayButtonRef = useRef<HTMLButtonElement | null>(null);
   const chatFileMentionMenuRef = useRef<HTMLDivElement | null>(null);
   const chatSlashMenuRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOptionsRef = useRef<HTMLDivElement | null>(null);
@@ -3375,6 +3377,7 @@ function App() {
   const chatAttachmentCancelIdsRef = useRef<Set<string>>(new Set());
   const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);
   const [chatFileMentionMenuOpen, setChatFileMentionMenuOpen] = useState(false);
+  const [chatAttachmentTrayOpen, setChatAttachmentTrayOpen] = useState(false);
   const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');
   const [chatHubMenuOpen, setChatHubMenuOpen] = useState(false);
   const chatHubMenuRef = useRef<HTMLDivElement | null>(null);
@@ -3558,7 +3561,7 @@ function App() {
     [chatPromptMenuOpen, chatSlashCommands, chatSlashCommandOptions],
   );
 
-  const chatSlashMenuVisible = !chatFileMentionMenuOpen && chatSlashMenuOptions.length > 0;
+  const chatSlashMenuVisible = !chatFileMentionMenuOpen && !chatAttachmentTrayOpen && chatSlashMenuOptions.length > 0;
 
 
   const currentChatDraftKey = useMemo(
@@ -3654,7 +3657,7 @@ function App() {
       return;
     }
     input.style.height = '0px';
-    const nextHeight = Math.max(36, Math.min(input.scrollHeight, 180));
+    const nextHeight = Math.max(30, Math.min(input.scrollHeight, 180));
     input.style.height = `${nextHeight}px`;
     input.style.overflowY = input.scrollHeight > 180 ? 'auto' : 'hidden';
   }, []);
@@ -3797,6 +3800,10 @@ function App() {
     [saveChatComposerDraft],
   );
 
+  const closeChatAttachmentTray = useCallback(() => {
+    setChatAttachmentTrayOpen(false);
+  }, []);
+
   const applyChatSlashCommand = useCallback(
     (command: ChatSlashCommandOption) => {
       const input = chatComposerTextareaRef.current;
@@ -3808,6 +3815,7 @@ function App() {
       );
       setChatPromptMenuOpen(false);
       setChatFileMentionMenuOpen(false);
+      setChatAttachmentTrayOpen(false);
       setChatConfigMenuOptionId('');
       setChatConfigOverflowOpen(false);
       updateChatComposerText(inserted.text);
@@ -3825,6 +3833,7 @@ function App() {
 
   const openChatPromptMenu = useCallback(() => {
     setChatFileMentionMenuOpen(false);
+    setChatAttachmentTrayOpen(false);
     setChatConfigMenuOptionId('');
     setChatConfigOverflowOpen(false);
     setChatPromptMenuOpen(value => !value);
@@ -3835,10 +3844,27 @@ function App() {
 
   const openChatFileMentionMenu = useCallback(() => {
     setChatPromptMenuOpen(false);
+    setChatAttachmentTrayOpen(false);
     setChatConfigMenuOptionId('');
     setChatConfigOverflowOpen(false);
     setChatFileMentionMenuOpen(value => !value);
   }, [setChatConfigOverflowOpen]);
+
+  const toggleChatAttachmentTray = useCallback(() => {
+    setChatPromptMenuOpen(false);
+    setChatFileMentionMenuOpen(false);
+    setChatConfigMenuOptionId('');
+    setChatConfigOverflowOpen(false);
+    setChatAttachmentTrayOpen(value => !value);
+    window.requestAnimationFrame(() => {
+      chatComposerTextareaRef.current?.focus();
+    });
+  }, [setChatConfigOverflowOpen]);
+
+  const handleChatAttachmentTrayCode = useCallback(() => {
+    closeChatAttachmentTray();
+    openChatFileMentionMenu();
+  }, [closeChatAttachmentTray, openChatFileMentionMenu]);
 
   const getChatDraftGeneration = useCallback((draftKey: string) => {
     const normalizedDraftKey = draftKey.trim();
@@ -5076,6 +5102,22 @@ function App() {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [chatFileMentionMenuOpen]);
+
+  useEffect(() => {
+    if (!chatAttachmentTrayOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && chatAttachmentTrayRef.current?.contains(target)) {
+        return;
+      }
+      if (target && chatAttachmentTrayButtonRef.current?.contains(target)) {
+        return;
+      }
+      setChatAttachmentTrayOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [chatAttachmentTrayOpen]);
 
   useEffect(() => {
     if (!chatConfigMenuOptionId) return;
@@ -14481,7 +14523,10 @@ function App() {
                     value={chatComposerText}
                     readOnly={chatSending}
                     enterKeyHint={isWide ? undefined : 'send'}
-                    onChange={event => updateChatComposerText(event.target.value)}
+                    onChange={event => {
+                      closeChatAttachmentTray();
+                      updateChatComposerText(event.target.value);
+                    }}
                     onPaste={event => {
                       if (chatSending) {
                         return;
@@ -14590,49 +14635,77 @@ function App() {
                 <div className="chat-composer-tools">
                   <button
                     type="button"
-                    ref={chatFileMentionButtonRef}
-                    className="chat-tool-button chat-mention-button"
+                    ref={chatAttachmentTrayButtonRef}
+                    className="chat-tool-button chat-attachment-plus-button"
                     onPointerDown={event => event.preventDefault()}
-                    onClick={openChatFileMentionMenu}
-                    title="Mention files"
-                    aria-label="Mention files"
+                    onClick={toggleChatAttachmentTray}
+                    title="Tools"
+                    aria-label="Open composer tools"
                     aria-haspopup="menu"
-                    aria-expanded={chatFileMentionMenuOpen}
+                    aria-expanded={chatAttachmentTrayOpen}
                   >
-                    <span className="chat-mention-symbol">@</span>
+                    <span className="codicon codicon-add" aria-hidden="true" />
                   </button>
-                  <button
-                    type="button"
-                    className="chat-tool-button chat-attach-button"
-                    onClick={() => {
-                      setChatPromptMenuOpen(false);
-                      setChatFileMentionMenuOpen(false);
-                      setChatConfigMenuOptionId('');
-                      setChatConfigOverflowOpen(false);
-                      chatFileInputRef.current?.click();
-                    }}
-                    disabled={chatSending}
-                    title="Attach file"
-                    aria-label="Attach file"
-                  >
-                    <span className="codicon codicon-cloud-upload" />
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-tool-button chat-image-attach-button"
-                    onClick={() => {
-                      setChatPromptMenuOpen(false);
-                      setChatFileMentionMenuOpen(false);
-                      setChatConfigMenuOptionId('');
-                      setChatConfigOverflowOpen(false);
-                      chatImageInputRef.current?.click();
-                    }}
-                    disabled={chatSending}
-                    title="Attach image"
-                    aria-label="Attach image"
-                  >
-                    <span className="codicon codicon-device-camera" />
-                  </button>
+                  {chatAttachmentTrayOpen ? (
+                    <div
+                      ref={chatAttachmentTrayRef}
+                      className="chat-attachment-action-tray"
+                      role="menu"
+                      aria-label="Composer tools"
+                    >
+                      <button
+                        type="button"
+                        ref={chatFileMentionButtonRef}
+                        className="chat-attachment-action-button code"
+                        onPointerDown={event => event.preventDefault()}
+                        onClick={handleChatAttachmentTrayCode}
+                        title="Mention files"
+                        aria-label="Mention files"
+                        role="menuitem"
+                      >
+                        <span className="codicon codicon-file-code" aria-hidden="true" />
+                        <span className="chat-attachment-action-label">Code</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-attachment-action-button file"
+                        onClick={() => {
+                          closeChatAttachmentTray();
+                          setChatPromptMenuOpen(false);
+                          setChatFileMentionMenuOpen(false);
+                          setChatConfigMenuOptionId('');
+                          setChatConfigOverflowOpen(false);
+                          chatFileInputRef.current?.click();
+                        }}
+                        disabled={chatSending}
+                        title="Attach file"
+                        aria-label="Attach file"
+                        role="menuitem"
+                      >
+                        <span className="codicon codicon-cloud-upload" aria-hidden="true" />
+                        <span className="chat-attachment-action-label">File</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-attachment-action-button photo"
+                        onClick={() => {
+                          closeChatAttachmentTray();
+                          setChatPromptMenuOpen(false);
+                          setChatFileMentionMenuOpen(false);
+                          setChatConfigMenuOptionId('');
+                          setChatConfigOverflowOpen(false);
+                          chatImageInputRef.current?.click();
+                        }}
+                        disabled={chatSending}
+                        title="Attach photo"
+                        aria-label="Attach photo"
+                        role="menuitem"
+                      >
+                        <span className="codicon codicon-device-camera" aria-hidden="true" />
+                        <span className="chat-attachment-action-label">Photo</span>
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="chat-composer-toolbar-actions">
                   {selectedChatConfigOptions.length > 0 ? (

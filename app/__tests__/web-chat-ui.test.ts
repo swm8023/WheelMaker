@@ -249,7 +249,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('attachmentDraftKey,');
     expect(mainTsx).toContain('attachmentDraftGeneration);');
     expect(mainTsx).toContain('if (chatSending || chatAttachmentUploadPending) {');
-    expect(mainTsx).toContain('disabled={chatSending}\n                    title="Attach file"');
+    expect(mainTsx).toContain('disabled={chatSending}');
+    expect(mainTsx).toContain('title="Attach file"');
     expect(mainTsx).not.toContain('respondToChatPermission');
     expect(mainTsx).not.toContain("const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);");
     expect(stylesCss).toContain('.chat-composer');
@@ -614,6 +615,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const CHAT_CONFIG_INLINE_LIMIT = 3;');
     expect(mainTsx).not.toContain('CHAT_QUICK_REPLY_OPTIONS');
     expect(mainTsx).toContain('const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);');
+    expect(mainTsx).toContain('const [chatAttachmentTrayOpen, setChatAttachmentTrayOpen] = useState(false);');
     expect(mainTsx).not.toContain('chatQuickReplyMenuOpen');
     expect(mainTsx).toContain('const [chatFileMentionMenuOpen, setChatFileMentionMenuOpen] = useState(false);');
     expect(mainTsx).toContain("const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');");
@@ -643,11 +645,21 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('aria-label="Cancel prompt"');
     expect(mainTsx).toContain('codicon-debug-stop');
     expect(mainTsx).toContain('className="chat-composer-tools"');
+    expect(mainTsx).toContain('className="chat-tool-button chat-attachment-plus-button"');
+    expect(mainTsx).toContain('aria-label="Open composer tools"');
+    expect(mainTsx).toContain('aria-expanded={chatAttachmentTrayOpen}');
+    expect(mainTsx).toContain('className="chat-attachment-action-tray"');
+    expect(mainTsx).toContain('className="chat-attachment-action-button code"');
+    expect(mainTsx).toContain('className="chat-attachment-action-button file"');
+    expect(mainTsx).toContain('className="chat-attachment-action-button photo"');
+    expect(mainTsx).toContain('<span className="chat-attachment-action-label">Code</span>');
+    expect(mainTsx).toContain('<span className="chat-attachment-action-label">File</span>');
+    expect(mainTsx).toContain('<span className="chat-attachment-action-label">Photo</span>');
     expect(mainTsx).toContain('className="chat-slash-symbol"');
-    expect(mainTsx).toContain('className="chat-tool-button chat-mention-button"');
+    expect(mainTsx).not.toContain('className="chat-tool-button chat-mention-button"');
     expect(mainTsx).toContain('title="Mention files"');
     expect(mainTsx).toContain('aria-label="Mention files"');
-    expect(mainTsx).toContain('className="chat-mention-symbol"');
+    expect(mainTsx).not.toContain('className="chat-mention-symbol"');
     expect(mainTsx).toContain('className="chat-file-mention-menu"');
     expect(mainTsx).toContain('className="chat-file-mention-empty"');
     expect(mainTsx).toContain('File mentions coming soon');
@@ -655,7 +667,7 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('className="chat-tool-button chat-skill-button"');
     expect(mainTsx).not.toContain('codicon-wand');
     expect(mainTsx).not.toContain('codicon-symbol-keyword');
-    expect(mainTsx).toContain('className="chat-tool-button chat-attach-button"');
+    expect(mainTsx).not.toContain('className="chat-tool-button chat-attach-button"');
     expect(mainTsx).toContain('codicon-cloud-upload');
     expect(mainTsx).not.toContain('codicon-new-file');
     expect(mainTsx).toContain('chatFileInputRef.current?.click();');
@@ -714,6 +726,7 @@ describe('web chat integration', () => {
     expect(promptMenuOpenEnd).toBeGreaterThan(promptMenuOpenStart);
     const promptMenuOpenBody = mainTsx.slice(promptMenuOpenStart, promptMenuOpenEnd);
     expect(promptMenuOpenBody).toContain('setChatFileMentionMenuOpen(false);');
+    expect(promptMenuOpenBody).toContain('setChatAttachmentTrayOpen(false);');
     expect(promptMenuOpenBody).toContain('chatComposerTextareaRef.current?.focus();');
     expect(promptMenuOpenBody).not.toContain('chatComposerTextareaRef.current?.blur();');
 
@@ -723,6 +736,7 @@ describe('web chat integration', () => {
     expect(fileMentionMenuOpenEnd).toBeGreaterThan(fileMentionMenuOpenStart);
     const fileMentionMenuOpenBody = mainTsx.slice(fileMentionMenuOpenStart, fileMentionMenuOpenEnd);
     expect(fileMentionMenuOpenBody).toContain('setChatPromptMenuOpen(false);');
+    expect(fileMentionMenuOpenBody).toContain('setChatAttachmentTrayOpen(false);');
     expect(fileMentionMenuOpenBody).toContain('setChatConfigMenuOptionId(\'\');');
     expect(fileMentionMenuOpenBody).toContain('setChatConfigOverflowOpen(false);');
     expect(fileMentionMenuOpenBody).toContain('setChatFileMentionMenuOpen(value => !value);');
@@ -734,8 +748,11 @@ describe('web chat integration', () => {
     expect(toolsEnd).toBeGreaterThan(toolsStart);
     const toolsBlock = mainTsx.slice(toolsStart, toolsEnd);
     expect(toolsBlock).not.toContain('chat-slash-button');
-    expect(toolsBlock.indexOf('chat-mention-button')).toBeGreaterThanOrEqual(0);
-    expect(toolsBlock.indexOf('chat-attach-button')).toBeGreaterThan(toolsBlock.indexOf('chat-mention-button'));
+    expect(toolsBlock).toContain('chat-attachment-plus-button');
+    expect(toolsBlock).toContain('chat-attachment-action-tray');
+    expect(toolsBlock).not.toContain('chat-mention-button');
+    expect(toolsBlock).not.toContain('chat-attach-button');
+    expect(toolsBlock).not.toContain('chat-image-attach-button');
     expect(toolsBlock).not.toContain('chat-stop-button');
     expect(toolsBlock).not.toContain('chat-composer-stop-trigger');
 
@@ -745,6 +762,13 @@ describe('web chat integration', () => {
     expect(configPillEnd).toBeGreaterThan(configPillStart);
     const configPillBlock = mainTsx.slice(configPillStart, configPillEnd);
     expect(configPillBlock).not.toContain('codicon-chevron-down');
+    const configIconStart = mainTsx.indexOf('function chatConfigIconClass(option: RegistrySessionConfigOption): string {');
+    const configIconEnd = mainTsx.indexOf('function decodeSessionMessageFromEventPayload', configIconStart);
+    expect(configIconStart).toBeGreaterThanOrEqual(0);
+    expect(configIconEnd).toBeGreaterThan(configIconStart);
+    const configIconBlock = mainTsx.slice(configIconStart, configIconEnd);
+    expect(configIconBlock).toContain("return 'codicon-lock';");
+    expect(configIconBlock).not.toContain("return 'codicon-shield';");
 
     const configChangeStart = mainTsx.indexOf('const handleChatConfigOptionChange = async');
     const configChangeEnd = mainTsx.indexOf('const handleChatFileChange = (', configChangeStart);
@@ -783,14 +807,14 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toContain('.chat-composer-input-row {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-input-row \{[\s\S]*align-items: flex-start;[\s\S]*gap: 5px;[\s\S]*min-height: 30px;[\s\S]*\}/,
+      /\.chat-composer-input-row \{[\s\S]*align-items: flex-end;[\s\S]*gap: 5px;[\s\S]*min-height: 30px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-skill-trigger {');
     expect(stylesCss).toContain('.chat-composer-action-column {');
     expect(stylesCss).toContain('.chat-composer-toolbar-actions {');
     expect(stylesCss).toContain('.chat-composer-stop-trigger {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-stop-trigger \{[\s\S]*position: absolute;[\s\S]*right: 0;[\s\S]*bottom: 0;[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
+      /\.chat-composer-stop-trigger \{[\s\S]*position: absolute;[\s\S]*right: 0;[\s\S]*top: 50%;[\s\S]*transform: translateY\(-50%\);[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-stop-trigger.active {');
     expect(stylesCss).not.toContain('.chat-composer-quick-trigger {');
@@ -852,7 +876,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-composer-tools {');
     expect(stylesCss).toContain('.chat-tool-button {');
     expect(stylesCss).toMatch(
-      /\.chat-tool-button \{[\s\S]*width: 30px;[\s\S]*height: 24px;[\s\S]*\}/,
+      /\.chat-tool-button \{[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.chat-tool-button \{[\s\S]*border: none;[\s\S]*background: transparent;/,
@@ -861,10 +885,13 @@ describe('web chat integration', () => {
       /\.chat-slash-button \{[\s\S]*color: color-mix\(in srgb, var\(--accent\) 72%, var\(--text\)\);[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-slash-symbol {');
-    expect(stylesCss).toMatch(
-      /\.chat-mention-button \{[\s\S]*color: color-mix\(in srgb, var\(--accent\) 72%, var\(--text\)\);[\s\S]*\}/,
-    );
-    expect(stylesCss).toContain('.chat-mention-symbol {');
+    expect(stylesCss).toContain('.chat-attachment-plus-button {');
+    expect(stylesCss).toContain('.chat-attachment-action-tray {');
+    expect(stylesCss).toContain('.chat-attachment-action-tray::after {');
+    expect(stylesCss).toContain('.chat-attachment-action-button {');
+    expect(stylesCss).toContain('.chat-attachment-action-label {');
+    expect(stylesCss).not.toContain('.chat-mention-button {');
+    expect(stylesCss).not.toContain('.chat-mention-symbol {');
     expect(stylesCss).not.toContain('.chat-skill-button {');
     expect(stylesCss).toMatch(
       /\.chat-attach-button \{[\s\S]*color: color-mix\(in srgb, #4db6ac 78%, var\(--text\)\);[\s\S]*\}/,
@@ -912,6 +939,7 @@ describe('web chat integration', () => {
     expect(inputRow).toContain('className="chat-composer-action-column"');
     expect(inputRow).toContain('className="chat-send-button"');
     expect(inputRow).not.toContain('chat-composer-stop-trigger');
+    expect(mainTsx).toContain('const nextHeight = Math.max(30, Math.min(input.scrollHeight, 180));');
 
     const toolsStart = mainTsx.indexOf('className="chat-composer-tools"');
     const toolsEnd = mainTsx.indexOf('className="chat-config-options-wrap"', toolsStart);
@@ -926,28 +954,36 @@ describe('web chat integration', () => {
     expect(toolbarConfigStart).toBeGreaterThan(toolbarActionsStart);
     expect(toolbarStopStart).toBeGreaterThan(toolbarConfigStart);
 
-    expect(stylesCss).toMatch(/\.chat-composer-input-row \{[\s\S]*align-items: flex-start;[\s\S]*\}/);
-    expect(stylesCss).toMatch(/\.chat-composer-skill-trigger \{[\s\S]*width: 30px;[\s\S]*height: 30px;[\s\S]*\}/);
-    expect(stylesCss).toMatch(/\.chat-tool-button \{[\s\S]*width: 30px;[\s\S]*height: 24px;[\s\S]*\}/);
+    expect(stylesCss).toMatch(/\.chat-composer-input-row \{[\s\S]*align-items: flex-end;[\s\S]*\}/);
+    expect(stylesCss).toMatch(/\.chat-composer-skill-trigger \{[\s\S]*width: 24px;[\s\S]*height: 30px;[\s\S]*\}/);
+    expect(stylesCss).toMatch(/\.chat-tool-button \{[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*\}/);
     expect(stylesCss).toContain('.chat-composer-toolbar-actions');
-    expect(stylesCss).toMatch(/\.chat-composer-action-column \{[\s\S]*height: 30px;[\s\S]*align-self: flex-start;[\s\S]*\}/);
+    expect(stylesCss).toMatch(/\.chat-composer-action-column \{[\s\S]*height: 30px;[\s\S]*align-self: flex-end;[\s\S]*\}/);
     expect(stylesCss).toMatch(/\.chat-composer-toolbar \{[\s\S]*padding-right: 30px;[\s\S]*\}/);
-    expect(stylesCss).toMatch(/\.chat-composer-stop-trigger \{[\s\S]*position: absolute;[\s\S]*right: 0;[\s\S]*bottom: 0;[\s\S]*\}/);
+    expect(stylesCss).toMatch(/\.chat-composer-stop-trigger \{[\s\S]*position: absolute;[\s\S]*right: 0;[\s\S]*top: 50%;[\s\S]*transform: translateY\(-50%\);[\s\S]*\}/);
   });
 
-  test('adds a dedicated multi-image attachment picker that reuses chat attachment enqueueing', () => {
+  test('collapses code, file, and photo actions behind a plus tray', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     expect(mainTsx).toContain('const chatImageInputRef = useRef<HTMLInputElement | null>(null);');
+    expect(mainTsx).toContain('const chatAttachmentTrayRef = useRef<HTMLDivElement | null>(null);');
+    expect(mainTsx).toContain('const chatAttachmentTrayButtonRef = useRef<HTMLButtonElement | null>(null);');
+    expect(mainTsx).toContain('const closeChatAttachmentTray = useCallback(() => {');
+    expect(mainTsx).toContain('setChatAttachmentTrayOpen(false);');
     expect(mainTsx).toContain('const handleChatImageChange = (');
     expect(mainTsx).toContain('accept="image/*"');
     expect(mainTsx).toContain('ref={chatImageInputRef}');
     expect(mainTsx).toContain('chatImageInputRef.current?.click();');
-    expect(mainTsx).toContain('className="chat-tool-button chat-image-attach-button"');
-    expect(mainTsx).toContain('aria-label="Attach image"');
+    expect(mainTsx).toContain('className="chat-attachment-action-button photo"');
+    expect(mainTsx).toContain('aria-label="Attach photo"');
     expect(mainTsx).toContain('codicon-device-camera');
+    expect(mainTsx).toContain('closeChatAttachmentTray();');
+    expect(mainTsx).toContain('if (target && chatAttachmentTrayRef.current?.contains(target))');
+    expect(mainTsx).toContain('if (target && chatAttachmentTrayButtonRef.current?.contains(target))');
+    expect(mainTsx).toContain('setChatAttachmentTrayOpen(false);');
 
     const imageHandlerStart = mainTsx.indexOf('const handleChatImageChange = (');
     const imageHandlerEnd = mainTsx.indexOf('const connect = async', imageHandlerStart);
@@ -959,7 +995,10 @@ describe('web chat integration', () => {
     const toolsStart = mainTsx.indexOf('className="chat-composer-tools"');
     const toolsEnd = mainTsx.indexOf('className="chat-config-options-wrap"', toolsStart);
     const toolsBlock = mainTsx.slice(toolsStart, toolsEnd);
-    expect(toolsBlock.indexOf('chat-attach-button')).toBeLessThan(toolsBlock.indexOf('chat-image-attach-button'));
+    expect(toolsBlock).toContain('chat-attachment-plus-button');
+    expect(toolsBlock).toContain('chat-attachment-action-button code');
+    expect(toolsBlock).toContain('chat-attachment-action-button file');
+    expect(toolsBlock).toContain('chat-attachment-action-button photo');
     expect(toolsBlock).toContain('codicon-cloud-upload');
     expect(toolsBlock).toContain('codicon-device-camera');
     expect(toolsBlock).not.toContain('codicon-new-file');
