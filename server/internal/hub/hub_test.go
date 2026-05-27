@@ -2196,6 +2196,27 @@ func TestMonitorCoreGetDBTables_NoDBReturnsErrorResult(t *testing.T) {
 	}
 }
 
+func TestMonitorCoreGetDBTablesDoesNotExposeRouteBindings(t *testing.T) {
+	base := t.TempDir()
+	store, err := clientpkg.NewStore(filepath.Join(base, "db", "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	core := NewMonitorCore(base)
+	res := core.GetDBTables()
+	if res.Error != "" {
+		t.Fatalf("GetDBTables error: %s", res.Error)
+	}
+	legacyRouteTableName := strings.Join([]string{"route", "bindings"}, "_")
+	for _, table := range res.Tables {
+		if table.Name == legacyRouteTableName {
+			t.Fatalf("%s table unexpectedly present: %#v", legacyRouteTableName, res.Tables)
+		}
+	}
+}
+
 func TestMonitorCoreAction_UnsupportedAction(t *testing.T) {
 	core := NewMonitorCore(t.TempDir())
 	if err := core.ExecuteAction("unknown-action"); err == nil {
