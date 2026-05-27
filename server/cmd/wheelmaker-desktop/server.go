@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -28,7 +29,15 @@ func (s *desktopAssetServer) URL() string {
 }
 
 func (s *desktopAssetServer) Close() error {
-	return s.server.Close()
+	serverErr := s.server.Close()
+	listenerErr := s.ln.Close()
+	if serverErr != nil && !errors.Is(serverErr, net.ErrClosed) {
+		return serverErr
+	}
+	if listenerErr != nil && !errors.Is(listenerErr, net.ErrClosed) {
+		return listenerErr
+	}
+	return nil
 }
 
 func startDesktopAssetServer(assets fs.FS) (*desktopAssetServer, error) {
