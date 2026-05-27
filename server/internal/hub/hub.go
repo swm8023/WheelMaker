@@ -15,16 +15,8 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/client"
-	im "github.com/swm8023/wheelmaker/internal/im"
-	imapp "github.com/swm8023/wheelmaker/internal/im/app"
-	imfeishu "github.com/swm8023/wheelmaker/internal/im/feishu"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
-)
-
-const (
-	feishuVerificationToken = ""
-	feishuEncryptKey        = ""
 )
 
 // Hub orchestrates one or more WheelMaker project clients.
@@ -34,7 +26,6 @@ type Hub struct {
 	dbPath        string
 	clients       []*client.Client
 	regSync       *Reporter
-	appIM         map[string]*imapp.Channel
 	clientsByName map[string]*client.Client
 }
 
@@ -44,7 +35,6 @@ func New(cfg *logger.AppConfig, dbPath string) *Hub {
 	return &Hub{
 		cfg:           cfg,
 		dbPath:        dbPath,
-		appIM:         map[string]*imapp.Channel{},
 		clientsByName: map[string]*client.Client{},
 	}
 }
@@ -101,34 +91,6 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 	c.SetSessionViewSink(c)
 	h.clientsByName[pc.Name] = c
 
-	router := im.NewRouter(c, im.NewMemoryHistoryStore())
-	if pc.Feishu != nil && !pc.HasFeishu() {
-		hubLogger(pc.Name).Error("build client failed err=invalid feishu config")
-		_ = c.Close()
-		return nil, fmt.Errorf("invalid feishu config: both app_id and app_secret are required")
-	}
-	if pc.HasFeishu() {
-		hubLogger(pc.Name).Info("register channel type=feishu")
-		if err := router.RegisterChannel(imfeishu.New(imfeishu.Config{
-			AppID:             pc.Feishu.AppID,
-			AppSecret:         pc.Feishu.AppSecret,
-			VerificationToken: feishuVerificationToken,
-			EncryptKey:        feishuEncryptKey,
-		})); err != nil {
-			hubLogger(pc.Name).Error("register channel failed type=feishu err=%v", err)
-			_ = c.Close()
-			return nil, err
-		}
-	}
-	hubLogger(pc.Name).Info("register channel type=app")
-	appChannel := imapp.New()
-	if err := router.RegisterChannel(appChannel); err != nil {
-		hubLogger(pc.Name).Error("register channel failed type=app err=%v", err)
-		_ = c.Close()
-		return nil, err
-	}
-	h.appIM[pc.Name] = appChannel
-	c.SetIMRouter(router)
 	hubLogger(pc.Name).Info("starting client")
 	if err := c.Start(ctx); err != nil {
 		hubLogger(pc.Name).Error("start client failed err=%v", err)
@@ -226,16 +188,12 @@ func (h *Hub) setupRegistrySync() {
 	})
 	for _, project := range projects {
 		projectClient := h.clientsByName[project.Name]
-		appChannel := h.appIM[project.Name]
 		projectID := rp.ProjectID(hubID, project.Name)
 		if projectClient != nil {
 			projectClient.SetSessionEventPublisher(func(method string, payload any) error {
 				return rep.PublishProjectEvent(projectID, method, payload)
 			})
 			rep.RegisterSessionHandler(projectID, projectClient)
-		}
-		if appChannel != nil {
-			rep.RegisterChatHandler(projectID, appChannel)
 		}
 	}
 	h.regSync = rep

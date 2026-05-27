@@ -1,7 +1,6 @@
 package hub
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"database/sql"
@@ -31,7 +30,7 @@ import (
 	"time"
 )
 
-func TestBuildClient_FeishuEnablesIMWithoutVersion(t *testing.T) {
+func TestBuildClient_FeishuConfigStartsSessionClient(t *testing.T) {
 	h := New(&logger.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
 	c, err := h.buildClient(context.Background(), logger.ProjectConfig{
 		Name:   "p",
@@ -41,13 +40,13 @@ func TestBuildClient_FeishuEnablesIMWithoutVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildClient: %v", err)
 	}
-	if !c.HasIMRouter() {
-		t.Fatal("expected IM router for feishu config")
+	if _, err := c.HandleSessionRequest(context.Background(), "session.list", "p", nil); err != nil {
+		t.Fatalf("session.list: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
 }
 
-func TestBuildClient_AppEnablesIMStub(t *testing.T) {
+func TestBuildClient_DefaultConfigStartsSessionClient(t *testing.T) {
 	h := New(&logger.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
 	c, err := h.buildClient(context.Background(), logger.ProjectConfig{
 		Name: "p",
@@ -56,8 +55,8 @@ func TestBuildClient_AppEnablesIMStub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildClient: %v", err)
 	}
-	if !c.HasIMRouter() {
-		t.Fatal("expected IM router for app config")
+	if _, err := c.HandleSessionRequest(context.Background(), "session.list", "p", nil); err != nil {
+		t.Fatalf("session.list: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
 }
@@ -125,36 +124,17 @@ func TestBuildClientStartsWithSessionTurnStore(t *testing.T) {
 	}
 }
 
-func TestBuildClient_RejectsInvalidFeishuConfig(t *testing.T) {
+func TestBuildClient_IncompleteFeishuConfigDoesNotBlockSessionClient(t *testing.T) {
 	h := New(&logger.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
-	_, err := h.buildClient(context.Background(), logger.ProjectConfig{
+	c, err := h.buildClient(context.Background(), logger.ProjectConfig{
 		Name:   "p",
 		Path:   ".",
 		Feishu: &logger.FeishuConfig{AppID: "cli_xxx"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "invalid feishu config") {
-		t.Fatalf("err=%v, want invalid feishu config", err)
+	if err != nil {
+		t.Fatalf("buildClient: %v", err)
 	}
-}
-
-func TestBuildClient_InvalidFeishuLogsError(t *testing.T) {
-	var buf bytes.Buffer
-	if err := logger.Setup(logger.LoggerConfig{Level: logger.LevelInfo}); err != nil {
-		t.Fatalf("setup logger: %v", err)
-	}
-	defer logger.Close()
-	logger.SetOutput(&buf)
-	defer logger.SetOutput(os.Stderr)
-
-	h := New(&logger.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
-	_, _ = h.buildClient(context.Background(), logger.ProjectConfig{
-		Name:   "p",
-		Path:   ".",
-		Feishu: &logger.FeishuConfig{AppID: "cli_xxx"},
-	})
-	if !strings.Contains(buf.String(), "[Hub:p] build client failed") {
-		t.Fatalf("missing startup error log: %s", buf.String())
-	}
+	t.Cleanup(func() { _ = c.Close() })
 }
 
 func TestStartRejectsSchemaMismatchWithDeleteHint(t *testing.T) {

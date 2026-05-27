@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
-	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	"io"
 	_ "modernc.org/sqlite"
@@ -407,37 +406,6 @@ func TestSessionInfoLine_UsesPrimaryAgentStateWithoutLegacyAgentMap(t *testing.T
 	}
 }
 
-func TestResolveOrCreateIMSessionUsesStoredDefaultAndFallbackDoesNotRewrite(t *testing.T) {
-	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	defer store.Close()
-	if err := store.SaveProjectDefaultAgent(context.Background(), "proj1", "claude"); err != nil {
-		t.Fatalf("SaveProjectDefaultAgent: %v", err)
-	}
-
-	c := New(store, "proj1", "/tmp")
-	c.registry = &agent.ACPFactory{}
-	codexInst := &testInjectedInstance{name: "codex", initResult: acp.InitializeResult{ProtocolVersion: "0.1"}, newResult: &acp.SessionNewResult{SessionID: "sess-codex"}}
-	c.registry.Register(acp.ACPProviderCodex, func(context.Context, string) (agent.Instance, error) { return codexInst, nil })
-
-	sess := c.resolveOrCreateIMSession(context.Background(), im.ChatRef{ChannelID: "feishu", ChatID: "chat-a"}, "im:feishu:chat-a")
-	if sess == nil {
-		t.Fatal("resolveOrCreateIMSession = nil")
-	}
-	if sess.agentType != "codex" {
-		t.Fatalf("agentType = %q, want codex fallback", sess.agentType)
-	}
-	still, err := store.LoadProjectDefaultAgent(context.Background(), "proj1")
-	if err != nil {
-		t.Fatalf("LoadProjectDefaultAgent: %v", err)
-	}
-	if still != "claude" {
-		t.Fatalf("stored default rewritten to %q, want claude", still)
-	}
-}
-
 type failingSessionViewSink struct{}
 
 func (f *failingSessionViewSink) RecordEvent(context.Context, SessionViewEvent) error {
@@ -524,6 +492,18 @@ func TestReportTimeoutErrorRecordsSystemEventThroughViewSink(t *testing.T) {
 	}
 	if event.SourceChannel != "" || event.SourceChatID != "" {
 		t.Fatalf("event source = (%q, %q), want empty source", event.SourceChannel, event.SourceChatID)
+	}
+}
+
+func TestRecordSessionViewEventReturnsFalseWhenViewSinkFails(t *testing.T) {
+	s := mustNewSession(t, "sess-1", "/tmp", "claude")
+	s.viewSink = &failingSessionViewSink{}
+
+	if delivered := s.recordSessionViewEvent(SessionViewEvent{
+		Type:    SessionViewEventTypeSystem,
+		Content: "fallback please",
+	}); delivered {
+		t.Fatal("recordSessionViewEvent returned true for failed view sink, want false")
 	}
 }
 
@@ -1467,22 +1447,6 @@ func TestEnsureReady_SessionLoadSuccess_AgentCommandsOverrideCachedCommands(t *t
 	}
 	if got := state.Commands[0].Name; got != "/agent" {
 		t.Fatalf("command = %q, want /agent", got)
-	}
-}
-
-func TestNormalizeIMPromptBlocks_PreservesImageAndText(t *testing.T) {
-	blocks := normalizeIMPromptBlocks([]acp.ContentBlock{
-		{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "aGVsbG8="},
-		{Type: acp.ContentBlockTypeText, Text: "  hello  "},
-	})
-	if len(blocks) != 2 {
-		t.Fatalf("blocks=%+v, want 2", blocks)
-	}
-	if blocks[0].Type != acp.ContentBlockTypeImage {
-		t.Fatalf("first block type=%q, want image", blocks[0].Type)
-	}
-	if blocks[1].Type != acp.ContentBlockTypeText || blocks[1].Text != "hello" {
-		t.Fatalf("second block=%+v", blocks[1])
 	}
 }
 

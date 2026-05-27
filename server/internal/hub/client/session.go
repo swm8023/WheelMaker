@@ -281,8 +281,9 @@ func (s *Session) recordSessionViewEvent(event SessionViewEvent) bool {
 	s.lastActiveAt = maxTime(s.lastActiveAt, event.UpdatedAt)
 	s.mu.Unlock()
 	if s.viewSink != nil {
-		_ = s.viewSink.RecordEvent(context.Background(), event)
-		return true
+		if err := s.viewSink.RecordEvent(context.Background(), event); err == nil {
+			return true
+		}
 	}
 	return false
 }
