@@ -976,6 +976,123 @@ func TestChatSendIsUnsupportedAfterIMRemoval(t *testing.T) {
 	}
 }
 
+func TestBatchChatSendIsUnsupportedAfterIMRemoval(t *testing.T) {
+	s := New(Config{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	method := removedChatSendMethod
+
+	hub := dialWS(t, ts.URL+"/ws")
+	defer hub.Close()
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-hub",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.3",
+			"role":            "hub",
+			"hubId":           "hub-a",
+		},
+	})
+	initResp := mustReadEnvelope(t, hub)
+	principal, _ := initResp.Payload["principal"].(map[string]any)
+	connectionEpoch, _ := principal["connectionEpoch"].(float64)
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "registry.reportProjects",
+		Payload: map[string]any{
+			"hubId":           "hub-a",
+			"connectionEpoch": int64(connectionEpoch),
+			"projects": []map[string]any{
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
+			},
+		},
+	})
+	_ = mustReadEnvelope(t, hub)
+
+	client := dialWS(t, ts.URL+"/ws")
+	defer client.Close()
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-web",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.3",
+			"role":            "client",
+		},
+	})
+	_ = mustReadEnvelope(t, client)
+
+	forwardedCh := make(chan testEnvelope, 1)
+	forwardWriteErrCh := make(chan error, 1)
+	go func() {
+		_ = hub.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		var forwarded testEnvelope
+		if err := hub.ReadJSON(&forwarded); err != nil {
+			return
+		}
+		forwardedCh <- forwarded
+		forwardWriteErrCh <- hub.WriteJSON(testEnvelope{
+			RequestID: forwarded.RequestID,
+			Type:      "response",
+			Method:    forwarded.Method,
+			ProjectID: forwarded.ProjectID,
+			Payload: map[string]any{
+				"ok": true,
+			},
+		})
+	}()
+
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "batch",
+		Payload: map[string]any{
+			"requests": []map[string]any{
+				{
+					"method":    method,
+					"projectId": "hub-a:server",
+					"payload": map[string]any{
+						"chatId": "chat-1",
+						"text":   "hello",
+					},
+				},
+			},
+		},
+	})
+
+	select {
+	case forwarded := <-forwardedCh:
+		if err := <-forwardWriteErrCh; err != nil {
+			t.Fatalf("write forwarded response: %v", err)
+		}
+		t.Fatalf("batch subrequest was forwarded to hub: %#v", forwarded)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	resp := mustReadEnvelope(t, client)
+	if resp.Type != "response" || resp.Method != "batch" {
+		t.Fatalf("batch response=%#v, want response", resp)
+	}
+	responses, _ := resp.Payload["responses"].([]any)
+	if len(responses) != 1 {
+		t.Fatalf("responses=%#v, want one response", resp.Payload["responses"])
+	}
+	item, _ := responses[0].(map[string]any)
+	if item["type"] != "error" {
+		t.Fatalf("batch item=%#v, want error", item)
+	}
+	payload, _ := item["payload"].(map[string]any)
+	if payload["code"] != codeInvalidArgument {
+		t.Fatalf("batch item code=%v, want %s", payload["code"], codeInvalidArgument)
+	}
+}
+
 func TestConnectInitMonitorRole(t *testing.T) {
 	s := New(Config{})
 	ts := httptest.NewServer(s.Handler())
