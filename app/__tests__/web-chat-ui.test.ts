@@ -624,7 +624,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className={`chat-composer-stop-trigger${selectedChatPromptRunning ? \' active\' : \'\'}`}');
     expect(mainTsx).toContain('title="Skills"');
     expect(mainTsx).toContain('aria-label="Open skills"');
-    expect(mainTsx).not.toContain('className="chat-composer-skill-trigger"');
+    expect(mainTsx).toContain('className="chat-composer-skill-trigger chat-slash-button"');
     expect(mainTsx).not.toContain('codicon-terminal');
     expect(mainTsx).not.toContain('className="chat-composer-quick-trigger"');
     expect(mainTsx).not.toContain('title="Quick replies"');
@@ -636,13 +636,12 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('chatComposerText.length === 0 ? (');
     expect(mainTsx).not.toContain('if (chatComposerText.length > 0) {');
     expect(mainTsx).toContain('className="chat-composer-toolbar"');
-    expect(mainTsx).toContain('className="chat-send-control"');
+    expect(mainTsx).toContain('className="chat-composer-action-column"');
     expect(mainTsx).not.toContain('className={`chat-cancel-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
     expect(mainTsx).toContain('title={selectedChatPromptRunning ? \'Cancel prompt\' : \'No prompt running\'}');
     expect(mainTsx).toContain('aria-label="Cancel prompt"');
     expect(mainTsx).toContain('codicon-debug-stop');
     expect(mainTsx).toContain('className="chat-composer-tools"');
-    expect(mainTsx).toContain('className="chat-tool-button chat-slash-button"');
     expect(mainTsx).toContain('className="chat-slash-symbol"');
     expect(mainTsx).toContain('className="chat-tool-button chat-mention-button"');
     expect(mainTsx).toContain('title="Mention files"');
@@ -698,7 +697,7 @@ describe('web chat integration', () => {
 
     const stopTriggerClassStart = mainTsx.indexOf('className={`chat-composer-stop-trigger${selectedChatPromptRunning ? \' active\' : \'\'}`}');
     const stopTriggerStart = mainTsx.lastIndexOf('<button', stopTriggerClassStart);
-    const stopTriggerEnd = mainTsx.indexOf('className="chat-composer-input-shell"', stopTriggerStart);
+    const stopTriggerEnd = mainTsx.indexOf('</button>', stopTriggerClassStart);
     expect(stopTriggerStart).toBeGreaterThanOrEqual(0);
     expect(stopTriggerEnd).toBeGreaterThan(stopTriggerStart);
     const stopTriggerBlock = mainTsx.slice(stopTriggerStart, stopTriggerEnd);
@@ -732,14 +731,10 @@ describe('web chat integration', () => {
     expect(toolsStart).toBeGreaterThanOrEqual(0);
     expect(toolsEnd).toBeGreaterThan(toolsStart);
     const toolsBlock = mainTsx.slice(toolsStart, toolsEnd);
-    expect(toolsBlock.indexOf('chat-slash-button')).toBeGreaterThanOrEqual(0);
-    expect(toolsBlock.indexOf('chat-mention-button')).toBeGreaterThan(toolsBlock.indexOf('chat-slash-button'));
+    expect(toolsBlock).not.toContain('chat-slash-button');
+    expect(toolsBlock.indexOf('chat-mention-button')).toBeGreaterThanOrEqual(0);
     expect(toolsBlock.indexOf('chat-attach-button')).toBeGreaterThan(toolsBlock.indexOf('chat-mention-button'));
     expect(toolsBlock).not.toContain('chat-stop-button');
-    const slashButtonStart = toolsBlock.indexOf('chat-slash-button');
-    const slashButtonBlock = toolsBlock.slice(toolsBlock.lastIndexOf('<button', slashButtonStart), toolsBlock.indexOf('</button>', slashButtonStart));
-    expect(slashButtonBlock).toContain('ref={chatPromptButtonRef}');
-    expect(slashButtonBlock).toContain('onClick={openChatPromptMenu}');
 
     const configPillStart = mainTsx.indexOf('const renderChatConfigPill = (option: RegistrySessionConfigOption) => {');
     const configPillEnd = mainTsx.indexOf('if (tab === \'chat\')', configPillStart);
@@ -785,14 +780,15 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toContain('.chat-composer-input-row {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-input-row \{[\s\S]*gap: 5px;[\s\S]*min-height: 32px;[\s\S]*\}/,
+      /\.chat-composer-input-row \{[\s\S]*align-items: flex-end;[\s\S]*gap: 5px;[\s\S]*min-height: 32px;[\s\S]*\}/,
     );
+    expect(stylesCss).toContain('.chat-composer-skill-trigger {');
+    expect(stylesCss).toContain('.chat-composer-action-column {');
     expect(stylesCss).toContain('.chat-composer-stop-trigger {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-stop-trigger \{[\s\S]*width: 22px;[\s\S]*height: 30px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
+      /\.chat-composer-stop-trigger \{[\s\S]*width: 32px;[\s\S]*height: 26px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-stop-trigger.active {');
-    expect(stylesCss).not.toContain('.chat-composer-skill-trigger {');
     expect(stylesCss).not.toContain('.chat-composer-quick-trigger {');
     expect(stylesCss).not.toContain('.chat-quick-trigger-label {');
     expect(stylesCss).not.toContain('.chat-quick-reply-menu {');
@@ -831,7 +827,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.chat-send-button \{[\s\S]*width: 32px;[\s\S]*height: 32px;[\s\S]*\}/,
     );
-    expect(stylesCss).toContain('.chat-send-control {');
+    expect(stylesCss).toContain('.chat-composer-action-column {');
     expect(stylesCss).not.toContain('.chat-cancel-button {');
     expect(stylesCss).toMatch(
       /\.chat-send-button \.codicon \{[\s\S]*font-size: 15px;[\s\S]*\}/,
@@ -884,6 +880,74 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-config-overflow-group {');
     expect(stylesCss).not.toContain('.chat-config-select {');
     expect(stylesCss).not.toContain('.chat-config-feedback {');
+  });
+
+  test('places skills beside the composer input and stacks send above cancel on the right', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    const inputRowStart = mainTsx.indexOf('className="chat-composer-input-row"');
+    const inputRowEnd = mainTsx.indexOf('{chatFileMentionMenuOpen ?', inputRowStart);
+    expect(inputRowStart).toBeGreaterThanOrEqual(0);
+    expect(inputRowEnd).toBeGreaterThan(inputRowStart);
+    const inputRow = mainTsx.slice(inputRowStart, inputRowEnd);
+
+    expect(inputRow).toContain('className="chat-composer-skill-trigger chat-slash-button"');
+    expect(inputRow).toContain('onClick={openChatPromptMenu}');
+    expect(inputRow.indexOf('chat-composer-skill-trigger')).toBeLessThan(inputRow.indexOf('className="chat-composer-input-shell"'));
+    expect(inputRow).toContain('className="chat-composer-action-column"');
+    expect(inputRow).toContain('className="chat-send-button"');
+    expect(inputRow).toContain("className={`chat-composer-stop-trigger${selectedChatPromptRunning ? ' active' : ''}`}");
+    expect(inputRow.indexOf('chat-send-button')).toBeLessThan(inputRow.indexOf('chat-composer-stop-trigger'));
+
+    const toolsStart = mainTsx.indexOf('className="chat-composer-tools"');
+    const toolsEnd = mainTsx.indexOf('className="chat-config-options-wrap"', toolsStart);
+    const toolsBlock = mainTsx.slice(toolsStart, toolsEnd);
+    expect(toolsBlock).not.toContain('chat-slash-button');
+
+    expect(stylesCss).toMatch(/\.chat-composer-input-row \{[\s\S]*align-items: flex-end;[\s\S]*\}/);
+    expect(stylesCss).toContain('.chat-composer-action-column');
+  });
+
+  test('adds a dedicated multi-image attachment picker that reuses chat attachment enqueueing', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    expect(mainTsx).toContain('const chatImageInputRef = useRef<HTMLInputElement | null>(null);');
+    expect(mainTsx).toContain('const handleChatImageChange = (');
+    expect(mainTsx).toContain('accept="image/*"');
+    expect(mainTsx).toContain('ref={chatImageInputRef}');
+    expect(mainTsx).toContain('chatImageInputRef.current?.click();');
+    expect(mainTsx).toContain('className="chat-tool-button chat-image-attach-button"');
+    expect(mainTsx).toContain('aria-label="Attach image"');
+
+    const imageHandlerStart = mainTsx.indexOf('const handleChatImageChange = (');
+    const imageHandlerEnd = mainTsx.indexOf('const connect = async', imageHandlerStart);
+    const imageHandler = mainTsx.slice(imageHandlerStart, imageHandlerEnd);
+    expect(imageHandler).toContain('const files = chatFilesFromFileList(event.target.files);');
+    expect(imageHandler).toContain('enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration);');
+    expect(imageHandler).toContain("event.target.value = '';");
+
+    const toolsStart = mainTsx.indexOf('className="chat-composer-tools"');
+    const toolsEnd = mainTsx.indexOf('className="chat-config-options-wrap"', toolsStart);
+    const toolsBlock = mainTsx.slice(toolsStart, toolsEnd);
+    expect(toolsBlock.indexOf('chat-attach-button')).toBeLessThan(toolsBlock.indexOf('chat-image-attach-button'));
+
+    expect(stylesCss).toContain('.chat-image-attach-button');
+  });
+
+  test('uses mobile Enter as send while keeping modified Enter and IME composition from sending', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    expect(mainTsx).toContain("enterKeyHint={isWide ? undefined : 'send'}");
+    expect(mainTsx).toContain("const shouldSendChatOnEnter = event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing;");
+    expect(mainTsx).toContain('if (!isWide || isWindowsPlatform) {');
+    expect(mainTsx).toContain('if (!shouldSendChatOnEnter) {');
+    expect(mainTsx).toContain('event.preventDefault();');
+    expect(mainTsx).toContain('sendChatMessage().catch(() => undefined);');
   });
 
   test('keeps the mobile drawer wide while preserving floating control clicks and backdrop dismissal', () => {

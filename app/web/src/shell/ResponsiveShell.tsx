@@ -19,6 +19,7 @@ export type DesktopShellProps = ShellContentProps & {
 
 export type MobileShellProps = ShellContentProps & {
   floatingControlStack: ReactNode;
+  floatingControlSide: 'left' | 'right';
   mobileSettingsScreen: ReactNode;
   drawerOpen: boolean;
   onCloseDrawer: () => void;
@@ -62,6 +63,7 @@ export function MobileShell({
   themeMode,
   setiFontCss,
   floatingControlStack,
+  floatingControlSide,
   mobileSettingsScreen,
   sidebar,
   main,
@@ -69,7 +71,10 @@ export function MobileShell({
   onCloseDrawer,
 }: MobileShellProps) {
   return (
-    <div className={`workspace theme-${themeMode} narrow-shell`}>
+    <div
+      className={`workspace theme-${themeMode} narrow-shell`}
+      data-floating-control-side={floatingControlSide}
+    >
       <style>{setiFontCss}</style>
       {floatingControlStack}
       {mobileSettingsScreen}

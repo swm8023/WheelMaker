@@ -1,5 +1,6 @@
 import type { LayoutMode } from './responsiveLayout';
 import type {
+  PersistedFloatingControlSide,
   PersistedFloatingControlSlot,
   PersistedTab,
 } from './workspacePersistence';
@@ -14,7 +15,10 @@ export type WorkspaceFloatingDragState = {
   active: boolean;
   pressing: boolean;
   pointerId: number;
+  originX: number;
   originY: number;
+  startSide: PersistedFloatingControlSide;
+  currentX: number;
   startTop: number;
   currentTop: number;
   cooldownUntil: number;
@@ -34,6 +38,7 @@ export type WorkspaceUiState = {
   mobile: {
     drawerOpen: boolean;
     floatingControlSlot: PersistedFloatingControlSlot;
+    floatingControlSide: PersistedFloatingControlSide;
     chatConfigOverflowOpen: boolean;
   };
   transient: {
@@ -53,6 +58,7 @@ export type WorkspaceUiStateInput = {
   pinnedProjectIds?: unknown;
   drawerOpen?: unknown;
   floatingControlSlot?: unknown;
+  floatingControlSide?: unknown;
   chatConfigOverflowOpen?: unknown;
   chatKeyboardInset?: unknown;
   floatingKeyboardOffset?: unknown;
@@ -70,6 +76,10 @@ export type WorkspaceUiAction =
   | {
       type: 'mobile/setFloatingControlSlot';
       next: WorkspaceUiStateValue<PersistedFloatingControlSlot>;
+    }
+  | {
+      type: 'mobile/setFloatingControlSide';
+      next: WorkspaceUiStateValue<PersistedFloatingControlSide>;
     }
   | {
       type: 'mobile/setChatConfigOverflowOpen';
@@ -103,6 +113,10 @@ function sanitizeFloatingControlSlot(value: unknown): PersistedFloatingControlSl
     value === 'lower-middle'
     ? value
     : 'upper-middle';
+}
+
+function sanitizeFloatingControlSide(value: unknown): PersistedFloatingControlSide {
+  return value === 'left' || value === 'right' ? value : 'right';
 }
 
 function sanitizeInset(value: unknown): number {
@@ -156,6 +170,7 @@ export function createWorkspaceUiState(input: WorkspaceUiStateInput = {}): Works
     mobile: {
       drawerOpen: typeof input.drawerOpen === 'boolean' ? input.drawerOpen : false,
       floatingControlSlot: sanitizeFloatingControlSlot(input.floatingControlSlot),
+      floatingControlSide: sanitizeFloatingControlSide(input.floatingControlSide),
       chatConfigOverflowOpen:
         typeof input.chatConfigOverflowOpen === 'boolean'
           ? input.chatConfigOverflowOpen
@@ -244,6 +259,16 @@ export function workspaceUiReducer(
           ...state.mobile,
           floatingControlSlot: sanitizeFloatingControlSlot(
             resolveNext(state.mobile.floatingControlSlot, action.next),
+          ),
+        },
+      };
+    case 'mobile/setFloatingControlSide':
+      return {
+        ...state,
+        mobile: {
+          ...state.mobile,
+          floatingControlSide: sanitizeFloatingControlSide(
+            resolveNext(state.mobile.floatingControlSide, action.next),
           ),
         },
       };

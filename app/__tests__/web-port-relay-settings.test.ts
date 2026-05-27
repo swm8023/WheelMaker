@@ -45,8 +45,18 @@ describe('port relay settings UI source structure', () => {
 
   test('embeds relay pages through desktop main pane and mobile floating overlay', () => {
     expect(mainTsx).toContain("const PORT_RELAY_FLOATING_SLOT_STORAGE_KEY = 'wheelmaker:portRelayFloatingSlot';");
+    expect(mainTsx).toContain("const PORT_RELAY_FLOATING_SIDE_STORAGE_KEY = 'wheelmaker:portRelayFloatingSide';");
     expect(mainTsx).toContain('readPortRelayFloatingSlot()');
+    expect(mainTsx).toContain('readPortRelayFloatingSide()');
     expect(mainTsx).toContain('window.localStorage.setItem(PORT_RELAY_FLOATING_SLOT_STORAGE_KEY, nextSlot);');
+    expect(mainTsx).toContain('window.localStorage.setItem(PORT_RELAY_FLOATING_SIDE_STORAGE_KEY, nextSide);');
+    expect(mainTsx).toContain('const floatingControlSide = workspaceUiState.mobile.floatingControlSide;');
+    expect(mainTsx).toContain('data-side={floatingControlSide}');
+    expect(mainTsx).toContain('originX: event.clientX,');
+    expect(mainTsx).toContain('startSide: floatingControlSide,');
+    expect(mainTsx).toContain('currentX: event.clientX,');
+    expect(mainTsx).toContain("const nextSide = current.currentX < windowWidth / 2 ? 'left' : 'right';");
+    expect(mainTsx).toContain("dispatchWorkspaceUi({ type: 'mobile/setFloatingControlSide', next });");
     expect(mainTsx).toContain('const [portRelayFrameOpen, setPortRelayFrameOpen] = useState(false);');
     expect(mainTsx).toContain('const [portRelayFrameAutoOpenPending, setPortRelayFrameAutoOpenPending] = useState(false);');
     expect(mainTsx).toContain("portRelaySnapshot.enabled && portRelaySnapshot.status === 'Up'");
@@ -74,6 +84,9 @@ describe('port relay settings UI source structure', () => {
     expect(stylesCss).toContain('.port-relay-frame-surface.mobile');
     expect(stylesCss).toContain('.port-relay-frame');
     expect(stylesCss).toContain('.port-relay-floating-bubble');
+    expect(stylesCss).toContain(".floating-control-stack[data-side='left']");
+    expect(stylesCss).toContain(".floating-control-stack[data-side='right']");
+    expect(stylesCss).toContain(".floating-control-stack[data-side='left'] .port-relay-target-switch-menu");
   });
 
   test('auto-opens the desktop relay frame after enable and polls opening status silently', () => {

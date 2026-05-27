@@ -46,6 +46,7 @@ describe('web responsive ui state', () => {
       collapsedProjectIds: ['project-a', 'project-b', 'project-a'],
       pinnedProjectIds: ['project-c', 'project-a', 'project-c'],
       floatingControlSlot: 'center',
+      floatingControlSide: 'left',
       chatConfigOverflowOpen: true,
       chatKeyboardInset: 120,
       floatingKeyboardOffset: 120,
@@ -75,8 +76,10 @@ describe('web responsive ui state', () => {
     expect(state.mobile).toMatchObject({
       drawerOpen: true,
       floatingControlSlot: 'center',
+      floatingControlSide: 'left',
       chatConfigOverflowOpen: true,
     });
+    expect(createWorkspaceUiState({ floatingControlSide: 'invalid' }).mobile.floatingControlSide).toBe('right');
 
     state = workspaceUiReducer(state, {
       type: 'layout/modeChanged',
@@ -90,6 +93,7 @@ describe('web responsive ui state', () => {
     expect(state.desktop.sidebarCollapsed).toBe(true);
     expect(state.desktop.sidebarWidth).toBe(420);
     expect(state.mobile.floatingControlSlot).toBe('center');
+    expect(state.mobile.floatingControlSide).toBe('left');
     expect(state.mobile.drawerOpen).toBe(false);
     expect(state.mobile.chatConfigOverflowOpen).toBe(false);
     expect(state.transient.chatKeyboardInset).toBe(0);
@@ -102,6 +106,13 @@ describe('web responsive ui state', () => {
     });
 
     expect(state.shared.pinnedProjectIds).toEqual(['project-b', 'project-c']);
+
+    state = workspaceUiReducer(state, {
+      type: 'mobile/setFloatingControlSide',
+      next: 'right',
+    });
+
+    expect(state.mobile.floatingControlSide).toBe('right');
 
     state = workspaceUiReducer(state, {
       type: 'desktop/setSidebarWidth',
@@ -151,6 +162,7 @@ describe('web responsive ui state', () => {
     expect(mainTsx).toContain('collapsedProjectIds: globalState.collapsedProjectIds ?? globalState.desktopCollapsedProjectIds ?? []');
     expect(mainTsx).toContain('desktopSidebarWidth: globalState.desktopSidebarWidth');
     expect(mainTsx).toContain('pinnedProjectIds: globalState.pinnedProjectIds ?? []');
+    expect(mainTsx).toContain('floatingControlSide: globalState.floatingControlSide ?? readPortRelayFloatingSide() ?? \'right\'');
     expect(mainTsx).toContain('const desktopSidebarWidth = workspaceUiState.desktop.sidebarWidth;');
     expect(mainTsx).toContain('const collapsedProjectIds = workspaceUiState.shared.collapsedProjectIds;');
     expect(mainTsx).toContain('const pinnedProjectIds = workspaceUiState.shared.pinnedProjectIds;');
@@ -167,19 +179,27 @@ describe('web responsive ui state', () => {
     );
 
     expect(persistenceTs).toContain('desktopSidebarWidth: number;');
+    expect(persistenceTs).toContain("export type PersistedFloatingControlSide = 'left' | 'right';");
+    expect(persistenceTs).toContain('floatingControlSide: PersistedFloatingControlSide;');
     expect(persistenceTs).not.toContain('useLatestPromptTitle: boolean;');
     expect(persistenceTs).toContain("desktopSidebarWidth: 'desktopSidebarWidth',");
+    expect(persistenceTs).toContain("floatingControlSide: 'floatingControlSide',");
     expect(persistenceTs).not.toContain("useLatestPromptTitle: 'useLatestPromptTitle',");
     expect(persistenceTs).toContain('desktopSidebarWidth: 380,');
+    expect(persistenceTs).toContain("floatingControlSide: 'right',");
     expect(persistenceTs).not.toContain('useLatestPromptTitle: false,');
     expect(persistenceTs).not.toContain('useLatestPromptTitle: typeof input.useLatestPromptTitle');
     expect(persistenceTs).toContain('desktopSidebarWidth: sanitizeDesktopSidebarWidth(input.desktopSidebarWidth, base.desktopSidebarWidth),');
+    expect(persistenceTs).toContain('floatingControlSide: sanitizeFloatingControlSide(input.floatingControlSide, base.floatingControlSide),');
     expect(persistenceTs).toContain(
       '{k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(this.state.global.desktopSidebarWidth), updatedAt: now}',
     );
     expect(persistenceTs).not.toContain('GLOBAL_KEYS.useLatestPromptTitle');
     expect(persistenceTs).toContain(
       '{k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(next.desktopSidebarWidth), updatedAt: now}',
+    );
+    expect(persistenceTs).toContain(
+      '{k: GLOBAL_KEYS.floatingControlSide, v: serialize(next.floatingControlSide), updatedAt: now}',
     );
     expect(persistenceTs).not.toContain('next.useLatestPromptTitle');
   });

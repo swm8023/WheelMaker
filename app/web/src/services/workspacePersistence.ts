@@ -29,6 +29,7 @@ export type PersistedFloatingControlSlot =
   | 'upper-middle'
   | 'center'
   | 'lower-middle';
+export type PersistedFloatingControlSide = 'left' | 'right';
 
 export type DiffCacheEntry = {
   diff: string;
@@ -81,6 +82,7 @@ export type PersistedGlobalState = {
   selectedChatProjectId: string;
   selectedChatSessionId: string;
   floatingControlSlot: PersistedFloatingControlSlot;
+  floatingControlSide: PersistedFloatingControlSide;
   desktopSidebarWidth: number;
   collapsedProjectIds: string[];
   desktopCollapsedProjectIds: string[];
@@ -155,6 +157,7 @@ const GLOBAL_KEYS = {
   selectedChatProjectId: 'selectedChatProjectId',
   selectedChatSessionId: 'selectedChatSessionId',
   floatingControlSlot: 'floatingControlSlot',
+  floatingControlSide: 'floatingControlSide',
   desktopSidebarWidth: 'desktopSidebarWidth',
   collapsedProjectIds: 'collapsedProjectIds',
   desktopCollapsedProjectIds: 'desktopCollapsedProjectIds',
@@ -188,6 +191,7 @@ function defaultGlobalState(): PersistedGlobalState {
     selectedChatProjectId: '',
     selectedChatSessionId: '',
     floatingControlSlot: 'upper-middle',
+    floatingControlSide: 'right',
     desktopSidebarWidth: 380,
     collapsedProjectIds: [],
     desktopCollapsedProjectIds: [],
@@ -375,6 +379,8 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     const numeric = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
     return Math.min(560, Math.max(320, Math.round(numeric)));
   };
+  const sanitizeFloatingControlSide = (value: unknown, fallback: PersistedFloatingControlSide): PersistedFloatingControlSide =>
+    value === 'left' || value === 'right' ? value : fallback;
   return {
     address: typeof input.address === 'string' ? input.address : base.address,
     token: typeof input.token === 'string' ? input.token : base.token,
@@ -398,6 +404,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     selectedChatProjectId: typeof input.selectedChatProjectId === 'string' ? input.selectedChatProjectId : base.selectedChatProjectId,
     selectedChatSessionId: typeof input.selectedChatSessionId === 'string' ? input.selectedChatSessionId : base.selectedChatSessionId,
     floatingControlSlot,
+    floatingControlSide: sanitizeFloatingControlSide(input.floatingControlSide, base.floatingControlSide),
     desktopSidebarWidth: sanitizeDesktopSidebarWidth(input.desktopSidebarWidth, base.desktopSidebarWidth),
     collapsedProjectIds,
     desktopCollapsedProjectIds: collapsedProjectIds,
@@ -866,6 +873,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.selectedChatProjectId, v: serialize(this.state.global.selectedChatProjectId), updatedAt: now},
       {k: GLOBAL_KEYS.selectedChatSessionId, v: serialize(this.state.global.selectedChatSessionId), updatedAt: now},
       {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(this.state.global.floatingControlSlot), updatedAt: now},
+      {k: GLOBAL_KEYS.floatingControlSide, v: serialize(this.state.global.floatingControlSide), updatedAt: now},
       {k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(this.state.global.desktopSidebarWidth), updatedAt: now},
       {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(this.state.global.collapsedProjectIds), updatedAt: now},
       {k: GLOBAL_KEYS.desktopCollapsedProjectIds, v: serialize(this.state.global.desktopCollapsedProjectIds), updatedAt: now},
@@ -1214,6 +1222,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedChatProjectId, v: serialize(next.selectedChatProjectId), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedChatSessionId, v: serialize(next.selectedChatSessionId), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(next.floatingControlSlot), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.floatingControlSide, v: serialize(next.floatingControlSide), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(next.desktopSidebarWidth), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(next.collapsedProjectIds), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.desktopCollapsedProjectIds, v: serialize(next.desktopCollapsedProjectIds), updatedAt: now});

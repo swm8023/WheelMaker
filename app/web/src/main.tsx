@@ -203,7 +203,10 @@ import {
   workspaceUiReducer,
   type WorkspaceUiStateValue,
 } from './services/workspaceUiState';
-import type { PersistedFloatingControlSlot } from './services/workspacePersistence';
+import type {
+  PersistedFloatingControlSide,
+  PersistedFloatingControlSlot,
+} from './services/workspacePersistence';
 import type {
   RegistryChatContentBlock,
   RegistryChatMessage,
@@ -391,7 +394,10 @@ type FloatingDragState = {
   active: boolean;
   pressing: boolean;
   pointerId: number;
+  originX: number;
   originY: number;
+  startSide: PersistedFloatingControlSide;
+  currentX: number;
   startTop: number;
   currentTop: number;
   cooldownUntil: number;
@@ -564,6 +570,7 @@ const PROJECT_SESSION_LONG_PRESS_MS = 450;
 const DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO = 0.45;
 const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;
 const PORT_RELAY_FLOATING_SLOT_STORAGE_KEY = 'wheelmaker:portRelayFloatingSlot';
+const PORT_RELAY_FLOATING_SIDE_STORAGE_KEY = 'wheelmaker:portRelayFloatingSide';
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
 const DEFAULT_PORT_RELAY_SNAPSHOT: RegistryPortRelaySnapshot = {ok: true, enabled: false, status: 'Disabled'};
 let mermaidRenderSequence = 0;
@@ -882,10 +889,23 @@ function isFloatingControlSlot(value: unknown): value is PersistedFloatingContro
     value === 'lower-middle';
 }
 
+function isFloatingControlSide(value: unknown): value is PersistedFloatingControlSide {
+  return value === 'left' || value === 'right';
+}
+
 function readPortRelayFloatingSlot(): PersistedFloatingControlSlot | null {
   try {
     const value = window.localStorage.getItem(PORT_RELAY_FLOATING_SLOT_STORAGE_KEY);
     return isFloatingControlSlot(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function readPortRelayFloatingSide(): PersistedFloatingControlSide | null {
+  try {
+    const value = window.localStorage.getItem(PORT_RELAY_FLOATING_SIDE_STORAGE_KEY);
+    return isFloatingControlSide(value) ? value : null;
   } catch {
     return null;
   }
@@ -2914,10 +2934,12 @@ function App() {
         desktopSidebarWidth: globalState.desktopSidebarWidth,
         pinnedProjectIds: globalState.pinnedProjectIds ?? [],
         floatingControlSlot: globalState.floatingControlSlot ?? readPortRelayFloatingSlot() ?? 'upper-middle',
+        floatingControlSide: globalState.floatingControlSide ?? readPortRelayFloatingSide() ?? 'right',
       }),
   );
   const tab = workspaceUiState.shared.tab as Tab;
   const floatingControlSlot = workspaceUiState.mobile.floatingControlSlot;
+  const floatingControlSide = workspaceUiState.mobile.floatingControlSide;
   const floatingDragState = workspaceUiState.transient.floatingDragState as FloatingDragState | null;
   const floatingKeyboardOffset = workspaceUiState.transient.floatingKeyboardOffset;
   const sidebarCollapsed = workspaceUiState.desktop.sidebarCollapsed;
@@ -2959,6 +2981,12 @@ function App() {
   const setFloatingControlSlot = useCallback(
     (next: WorkspaceUiStateValue<PersistedFloatingControlSlot>) => {
       dispatchWorkspaceUi({ type: 'mobile/setFloatingControlSlot', next });
+    },
+    [],
+  );
+  const setFloatingControlSide = useCallback(
+    (next: WorkspaceUiStateValue<PersistedFloatingControlSide>) => {
+      dispatchWorkspaceUi({ type: 'mobile/setFloatingControlSide', next });
     },
     [],
   );
@@ -3236,6 +3264,7 @@ function App() {
   const gitBranchMenuRef = useRef<HTMLDivElement | null>(null);
   const gitSelectedBranchesRef = useRef<string[]>([]);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
+  const chatImageInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatVirtuosoListRef = useRef<ChatVirtuosoTurnListHandle | null>(null);
   const chatLayoutMetrics = useChatLayoutMetrics(chatScrollRef);
@@ -5447,6 +5476,7 @@ function App() {
     requestFloatingBackdropToneMeasure();
   }, [
     drawerOpen,
+    floatingControlSide,
     effectiveFloatingControlTop,
     floatingControlStackHeight,
     floatingDragVisualState,
@@ -5519,7 +5549,10 @@ function App() {
         active: false,
         pressing: true,
         pointerId: event.pointerId,
+        originX: event.clientX,
         originY,
+        startSide: floatingControlSide,
+        currentX: event.clientX,
         startTop: floatingControlTop,
         currentTop: floatingControlTop,
         cooldownUntil: 0,
@@ -5533,7 +5566,7 @@ function App() {
         floatingLongPressTimerRef.current = null;
       }, 350);
     },
-    [clearFloatingLongPressTimer, floatingControlTop, isWide],
+    [clearFloatingLongPressTimer, floatingControlSide, floatingControlTop, isWide],
   );
   const handleFloatingControlButtonPointerDown = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -5591,6 +5624,7 @@ function App() {
             ...current,
             active: false,
             pressing: false,
+            currentX: event.clientX,
             cooldownUntil,
           });
           clearFloatingCooldownState(cooldownUntil);
@@ -5600,6 +5634,7 @@ function App() {
       event.preventDefault();
       setFloatingDragState({
         ...current,
+        currentX: event.clientX,
         currentTop: clampFloatingTop(
           current.startTop + deltaY,
           floatingBounds.minTop,
@@ -5631,12 +5666,15 @@ function App() {
         floatingBounds.maxTop,
       );
       const nextSlot = nearestFloatingSlot(snappedTop, floatingSlotTops);
+      const nextSide = current.currentX < windowWidth / 2 ? 'left' : 'right';
       const cooldownUntil = Date.now() + 120;
       floatingClickCooldownUntilRef.current = cooldownUntil;
       setFloatingControlSlot(nextSlot);
-      workspaceStore.rememberGlobalState({ floatingControlSlot: nextSlot });
+      setFloatingControlSide(nextSide);
+      workspaceStore.rememberGlobalState({ floatingControlSlot: nextSlot, floatingControlSide: nextSide });
       try {
         window.localStorage.setItem(PORT_RELAY_FLOATING_SLOT_STORAGE_KEY, nextSlot);
+        window.localStorage.setItem(PORT_RELAY_FLOATING_SIDE_STORAGE_KEY, nextSide);
       } catch {
         // Ignore local storage failures in private or restricted contexts.
       }
@@ -5655,6 +5693,9 @@ function App() {
       floatingBounds.maxTop,
       floatingBounds.minTop,
       floatingSlotTops,
+      setFloatingControlSide,
+      setFloatingControlSlot,
+      windowWidth,
     ],
   );
   const cancelFloatingDrag = useCallback(
@@ -5773,7 +5814,10 @@ function App() {
           active: true,
           pressing: false,
           pointerId: current.pointerId,
+          originX: current.currentX,
           originY: current.currentY,
+          startSide: floatingControlSide,
+          currentX: current.currentX,
           startTop: floatingControlTop,
           currentTop: floatingControlTop,
           cooldownUntil: 0,
@@ -5783,6 +5827,7 @@ function App() {
     [
       clearGestureLongPressTimer,
       clearGestureMoveLongPressTimer,
+      floatingControlSide,
       floatingControlTop,
       isWide,
       setFloatingDragState,
@@ -8341,6 +8386,23 @@ function App() {
   };
 
   const handleChatFileChange = (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    if (chatSending) {
+      event.target.value = '';
+      return;
+    }
+    const files = chatFilesFromFileList(event.target.files);
+    if (files.length === 0) {
+      return;
+    }
+    const attachmentDraftKey = currentChatDraftKeyRef.current;
+    const attachmentDraftGeneration = getChatDraftGeneration(attachmentDraftKey);
+    enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration);
+    event.target.value = '';
+  };
+
+  const handleChatImageChange = (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
     if (chatSending) {
@@ -14295,6 +14357,14 @@ function App() {
               style={{ display: 'none' }}
               onChange={handleChatFileChange}
             />
+            <input
+              ref={chatImageInputRef}
+              type="file"
+              multiple
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={handleChatImageChange}
+            />
             <div
               className={`chat-composer-frame${chatComposerDragActive ? ' drag-over' : ''}`}
               onDragOver={event => {
@@ -14392,17 +14462,16 @@ function App() {
               <div className="chat-composer-input-row">
                 <button
                   type="button"
-                  className={`chat-composer-stop-trigger${selectedChatPromptRunning ? ' active' : ''}`}
+                  ref={chatPromptButtonRef}
+                  className="chat-composer-skill-trigger chat-slash-button"
                   onPointerDown={event => event.preventDefault()}
-                  onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}
-                  disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}
-                  title={selectedChatPromptRunning ? 'Cancel prompt' : 'No prompt running'}
-                  aria-label="Cancel prompt"
+                  onClick={openChatPromptMenu}
+                  title="Skills"
+                  aria-label="Open skills"
+                  aria-haspopup="listbox"
+                  aria-expanded={chatPromptMenuOpen}
                 >
-                  <span
-                    className={`codicon ${selectedChatPromptCancelling ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-stop'}`}
-                    aria-hidden="true"
-                  />
+                  <span className="chat-slash-symbol">/</span>
                 </button>
                 <div className="chat-composer-input-shell">
                   <textarea
@@ -14411,6 +14480,7 @@ function App() {
                     className="chat-composer-input"
                     value={chatComposerText}
                     readOnly={chatSending}
+                    enterKeyHint={isWide ? undefined : 'send'}
                     onChange={event => updateChatComposerText(event.target.value)}
                     onPaste={event => {
                       if (chatSending) {
@@ -14459,22 +14529,22 @@ function App() {
                           return;
                         }
                       }
-                      if (!isWindowsPlatform) {
+                      const shouldSendChatOnEnter = event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing;
+                      if (!shouldSendChatOnEnter) {
                         return;
                       }
-                      if (event.key !== 'Enter' || event.altKey || event.nativeEvent.isComposing) {
-                        return;
+                      if (!isWide || isWindowsPlatform) {
+                        event.preventDefault();
+                        if (chatSending || chatAttachmentUploadPending) {
+                          return;
+                        }
+                        sendChatMessage().catch(() => undefined);
                       }
-                      event.preventDefault();
-                      if (chatSending || chatAttachmentUploadPending) {
-                        return;
-                      }
-                      sendChatMessage().catch(() => undefined);
                     }}
                     placeholder="Send a message..."
                   />
                 </div>
-                <div className="chat-send-control">
+                <div className="chat-composer-action-column">
                   <button
                     type="button"
                     className="chat-send-button"
@@ -14484,6 +14554,20 @@ function App() {
                     aria-label="Send message"
                   >
                     <span className="codicon codicon-send" />
+                  </button>
+                  <button
+                    type="button"
+                    className={`chat-composer-stop-trigger${selectedChatPromptRunning ? ' active' : ''}`}
+                    onPointerDown={event => event.preventDefault()}
+                    onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}
+                    disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}
+                    title={selectedChatPromptRunning ? 'Cancel prompt' : 'No prompt running'}
+                    aria-label="Cancel prompt"
+                  >
+                    <span
+                      className={`codicon ${selectedChatPromptCancelling ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-stop'}`}
+                      aria-hidden="true"
+                    />
                   </button>
                 </div>
               </div>
@@ -14520,19 +14604,6 @@ function App() {
                 <div className="chat-composer-tools">
                   <button
                     type="button"
-                    ref={chatPromptButtonRef}
-                    className="chat-tool-button chat-slash-button"
-                    onPointerDown={event => event.preventDefault()}
-                    onClick={openChatPromptMenu}
-                    title="Skills"
-                    aria-label="Open skills"
-                    aria-haspopup="listbox"
-                    aria-expanded={chatPromptMenuOpen}
-                  >
-                    <span className="chat-slash-symbol">/</span>
-                  </button>
-                  <button
-                    type="button"
                     ref={chatFileMentionButtonRef}
                     className="chat-tool-button chat-mention-button"
                     onPointerDown={event => event.preventDefault()}
@@ -14559,6 +14630,22 @@ function App() {
                     aria-label="Attach file"
                   >
                     <span className="codicon codicon-new-file" />
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-tool-button chat-image-attach-button"
+                    onClick={() => {
+                      setChatPromptMenuOpen(false);
+                      setChatFileMentionMenuOpen(false);
+                      setChatConfigMenuOptionId('');
+                      setChatConfigOverflowOpen(false);
+                      chatImageInputRef.current?.click();
+                    }}
+                    disabled={chatSending}
+                    title="Attach image"
+                    aria-label="Attach image"
+                  >
+                    <span className="codicon codicon-file-media" />
                   </button>
                 </div>
                 {selectedChatConfigOptions.length > 0 ? (
@@ -15145,6 +15232,7 @@ function App() {
         className="floating-control-stack"
         data-backdrop-tone={floatingBackdropTone}
         data-drag-state={floatingDragVisualState}
+        data-side={floatingControlSide}
         style={effectiveFloatingControlStackStyle}
         onPointerDown={gestureNavigation ? undefined : beginFloatingPress}
         onPointerMove={gestureNavigation ? handleGestureNavigationPointerMove : handleFloatingPointerMove}
@@ -15734,6 +15822,7 @@ function App() {
         desktopActivityBar={desktopActivityBar}
         desktopSidebarWidth={effectiveDesktopSidebarWidth}
         floatingControlStack={floatingControlStack}
+        floatingControlSide={floatingControlSide}
         mobileSettingsScreen={mobileSettingsScreen}
         sidebar={renderSidebar()}
         main={renderMain()}
