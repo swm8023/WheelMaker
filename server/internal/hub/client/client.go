@@ -402,28 +402,10 @@ func (c *Client) SessionByID(ctx context.Context, sessionID string) (*Session, e
 	return restored, nil
 }
 
-func normalizeChatRef(source im.ChatRef) im.ChatRef {
-	return im.ChatRef{ChannelID: strings.TrimSpace(source.ChannelID), ChatID: strings.TrimSpace(source.ChatID)}
-}
-
-func hasChatRef(source im.ChatRef) bool {
-	return source.ChannelID != "" && source.ChatID != ""
-}
-
-func (c *Client) PromptToSession(ctx context.Context, sessionID string, source im.ChatRef, blocks []acp.ContentBlock) error {
+func (c *Client) PromptToSession(ctx context.Context, sessionID string, blocks []acp.ContentBlock) error {
 	sess, err := c.SessionByID(ctx, sessionID)
 	if err != nil {
 		return err
-	}
-	source = normalizeChatRef(source)
-	if hasChatRef(source) {
-		sess.setIMSource(source)
-		if err := c.bindIM(ctx, source, sess.acpSessionID); err != nil {
-			return err
-		}
-		if err := c.store.SaveRouteBinding(ctx, c.projectName, imRouteKey(source), sess.acpSessionID); err != nil {
-			return fmt.Errorf("save route binding: %w", err)
-		}
 	}
 	sess.handlePromptBlocks(blocks)
 	return nil
@@ -743,19 +725,8 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 		if err != nil {
 			return nil, err
 		}
-		if text, ok := singleTextIMPrompt(blocks); ok {
-			if cmd, args, parsed := parseCommand(text); parsed {
-				sess, err := c.SessionByID(ctx, req.SessionID)
-				if err != nil {
-					return nil, err
-				}
-				sessionID := strings.TrimSpace(req.SessionID)
-				sess.setIMSource(im.ChatRef{ChannelID: "app", ChatID: sessionID})
-				c.handleCommand(sess, "app:"+sessionID, cmd, args)
-				return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
-			}
-		}
-		if err := c.PromptToSession(ctx, req.SessionID, im.ChatRef{ChannelID: "app", ChatID: strings.TrimSpace(req.SessionID)}, blocks); err != nil {
+		sessionID := strings.TrimSpace(req.SessionID)
+		if err := c.PromptToSession(ctx, sessionID, blocks); err != nil {
 			return nil, err
 		}
 		if err := c.markSessionAttachmentsSent(attachmentRefs); err != nil {
@@ -777,7 +748,6 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, projec
 		if err != nil {
 			return nil, err
 		}
-		sess.setIMSource(im.ChatRef{ChannelID: "app", ChatID: sessionID})
 		if err := sess.cancelPrompt(); err != nil {
 			return nil, err
 		}
@@ -838,7 +808,7 @@ func (c *Client) HandleIMCommand(ctx context.Context, source im.ChatRef, cmd im.
 }
 
 func (c *Client) HandleIMInbound(ctx context.Context, event im.InboundEvent) error {
-	source := normalizeChatRef(im.ChatRef{ChannelID: event.ChannelID, ChatID: event.ChatID})
+	source := im.ChatRef{ChannelID: strings.TrimSpace(event.ChannelID), ChatID: strings.TrimSpace(event.ChatID)}
 	if source.ChannelID == "" || source.ChatID == "" {
 		return fmt.Errorf("client im: invalid source")
 	}
@@ -890,7 +860,7 @@ func (c *Client) loadSessionForIM(ctx context.Context, source im.ChatRef, routeK
 }
 
 func imRouteKey(source im.ChatRef) string {
-	source = normalizeChatRef(source)
+	source = im.ChatRef{ChannelID: strings.TrimSpace(source.ChannelID), ChatID: strings.TrimSpace(source.ChatID)}
 	return "im:" + strings.ToLower(source.ChannelID) + ":" + source.ChatID
 }
 func normalizeIMPromptBlocks(blocks []acp.ContentBlock) []acp.ContentBlock {
@@ -928,7 +898,7 @@ func singleTextIMPrompt(blocks []acp.ContentBlock) (string, bool) {
 }
 
 func (c *Client) handleIMPromptBlocks(ctx context.Context, source im.ChatRef, blocks []acp.ContentBlock) error {
-	source = normalizeChatRef(source)
+	source = im.ChatRef{ChannelID: strings.TrimSpace(source.ChannelID), ChatID: strings.TrimSpace(source.ChatID)}
 	if source.ChannelID == "" || source.ChatID == "" {
 		return fmt.Errorf("client im: invalid source")
 	}

@@ -1803,14 +1803,7 @@ func TestNormalizeIMPromptBlocks_PreservesImageAndText(t *testing.T) {
 	}
 }
 
-func TestNormalizeChatRef_TrimsFields(t *testing.T) {
-	got := normalizeChatRef(im.ChatRef{ChannelID: " feishu ", ChatID: " chat-1 "})
-	if got.ChannelID != "feishu" || got.ChatID != "chat-1" {
-		t.Fatalf("normalizeChatRef() = %#v", got)
-	}
-}
-
-func TestPromptToSession_TrimsSourceBeforeRouting(t *testing.T) {
+func TestPromptToSession_LeavesRouteBindingsUnchanged(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
@@ -1827,17 +1820,22 @@ func TestPromptToSession_TrimsSourceBeforeRouting(t *testing.T) {
 		t.Fatalf("ClientNewSession: %v", err)
 	}
 
-	err = c.PromptToSession(context.Background(), sess.acpSessionID, im.ChatRef{ChannelID: " feishu ", ChatID: " chat-1 "}, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}})
+	before, err := store.LoadRouteBindings(context.Background(), "proj1")
+	if err != nil {
+		t.Fatalf("LoadRouteBindings before: %v", err)
+	}
+
+	err = c.PromptToSession(context.Background(), sess.acpSessionID, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}})
 	if err != nil {
 		t.Fatalf("PromptToSession: %v", err)
 	}
 
-	bindings, err := store.LoadRouteBindings(context.Background(), "proj1")
+	after, err := store.LoadRouteBindings(context.Background(), "proj1")
 	if err != nil {
-		t.Fatalf("LoadRouteBindings: %v", err)
+		t.Fatalf("LoadRouteBindings after: %v", err)
 	}
-	if got := bindings["im:feishu:chat-1"]; got != sess.acpSessionID {
-		t.Fatalf("route binding = %q, want %q", got, sess.acpSessionID)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("route bindings changed: before=%v after=%v", before, after)
 	}
 }
 
@@ -7288,22 +7286,12 @@ func TestHandleMessage_Skills(t *testing.T) {
 		t.Fatalf("skills reply missing skill name: %q", reply)
 	}
 }
-func TestHandleSessionRequest_SessionSendSlashSkills(t *testing.T) {
-	mock := &mockSession{agentName: "codex", sessionID: "sess-send-skills"}
+func TestHandleSessionRequestSessionSendSlashTextIsPrompt(t *testing.T) {
+	mock := &mockSession{agentName: "codex", sessionID: "sess-send-slash"}
 	c := newTestClient(t, mock)
-	msgs := captureReplies(c)
+	published := captureSessionMessageEvents(t, c)
 
-	sess, err := c.resolveSession(testRouteKey)
-	if err != nil {
-		t.Fatalf("resolveSession: %v", err)
-	}
-	inst, ok := sess.instance.(*testInjectedInstance)
-	if !ok {
-		t.Fatalf("instance type = %T", sess.instance)
-	}
-	inst.skills = []agent.SkillDescriptor{{Name: "diagnose", Path: "D:/repo/.agents/skills/diagnose/SKILL.md"}}
-
-	payload := json.RawMessage(`{"sessionId":"sess-send-skills","text":"/skills"}`)
+	payload := json.RawMessage(`{"sessionId":"sess-send-slash","text":"/skills"}`)
 	resp, err := c.HandleSessionRequest(context.Background(), "session.send", "proj1", payload)
 	if err != nil {
 		t.Fatalf("HandleSessionRequest(session.send): %v", err)
@@ -7313,15 +7301,14 @@ func TestHandleSessionRequest_SessionSendSlashSkills(t *testing.T) {
 		t.Fatalf("response = %#v, want ok=true", resp)
 	}
 
-	if len(*msgs) == 0 {
-		t.Fatal("no reply received")
+	first := (*published)[0].payload
+	turn := publishedTurnMap(t, first)
+	content, _ := turn["content"].(string)
+	if !strings.Contains(content, `"/skills"`) {
+		t.Fatalf("first turn content = %q, want prompt text /skills", content)
 	}
-	reply := strings.Join(*msgs, "\n")
-	if !strings.Contains(reply, "Skills (1):") {
-		t.Fatalf("skills reply missing header: %q", reply)
-	}
-	if !strings.Contains(reply, "diagnose") {
-		t.Fatalf("skills reply missing skill name: %q", reply)
+	if strings.Contains(content, `"method":"system"`) {
+		t.Fatalf("slash text was handled as a system command: %q", content)
 	}
 }
 
@@ -7583,7 +7570,7 @@ func TestPromptToSessionRecordsFailedPromptDoneOnAgentError(t *testing.T) {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
 
-	if err := c.PromptToSession(context.Background(), "sess-prompt-error", im.ChatRef{ChannelID: "app", ChatID: "sess-prompt-error"}, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}}); err != nil {
+	if err := c.PromptToSession(context.Background(), "sess-prompt-error", []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}}); err != nil {
 		t.Fatalf("PromptToSession: %v", err)
 	}
 	_, turns, err := c.sessionRecorder.ReadSessionTurns(context.Background(), "sess-prompt-error", 0)
@@ -7629,7 +7616,7 @@ func TestHandleSessionRequestSessionCancelFinishesPromptAsCancelled(t *testing.T
 
 	done := make(chan error, 1)
 	go func() {
-		done <- c.PromptToSession(context.Background(), "sess-cancel-running", im.ChatRef{ChannelID: "app", ChatID: "sess-cancel-running"}, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "please stop"}})
+		done <- c.PromptToSession(context.Background(), "sess-cancel-running", []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "please stop"}})
 	}()
 	<-started
 
