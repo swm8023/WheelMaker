@@ -14615,7 +14615,7 @@ function App() {
                     title="Attach file"
                     aria-label="Attach file"
                   >
-                    <span className="codicon codicon-new-file" />
+                    <span className="codicon codicon-cloud-upload" />
                   </button>
                   <button
                     type="button"
@@ -14631,7 +14631,7 @@ function App() {
                     title="Attach image"
                     aria-label="Attach image"
                   >
-                    <span className="codicon codicon-file-media" />
+                    <span className="codicon codicon-device-camera" />
                   </button>
                 </div>
                 <div className="chat-composer-toolbar-actions">

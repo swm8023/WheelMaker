@@ -7104,9 +7104,9 @@ body,
 
 .chat-composer-input-row {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 5px;
-  min-height: 32px;
+  min-height: 30px;
   min-width: 0;
 }
 
@@ -7124,6 +7124,9 @@ body,
 }
 
 .chat-composer-stop-trigger {
+  position: absolute;
+  right: 0;
+  bottom: 0;
   width: 24px;
   height: 24px;
   flex: 0 0 auto;
@@ -7177,15 +7180,31 @@ body,
   border-radius: 0;
   background: transparent;
   color: var(--text);
-  padding: 5px 0 1px;
+  padding: 5px 6px 1px 0;
   font: inherit;
   font-size: 14px;
   line-height: 1.4;
   resize: none;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 46%, transparent) transparent;
+  scrollbar-gutter: stable;
 }
 
 .chat-composer-input:focus {
   outline: none;
+}
+
+.chat-composer-input::-webkit-scrollbar {
+  width: 4px;
+}
+
+.chat-composer-input::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-composer-input::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 42%, transparent);
 }
 
 .chat-file-mention-menu {
@@ -7277,19 +7296,20 @@ body,
 }
 
 .chat-composer-action-column {
+  align-self: flex-start;
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 4px;
 }
 
 .chat-send-button {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--accent) 54%, transparent);
   border-radius: 8px;
@@ -7310,10 +7330,12 @@ body,
 }
 
 .chat-composer-toolbar {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  padding-right: 30px;
   min-height: 24px;
   min-width: 0;
 }
@@ -7370,9 +7392,12 @@ body,
   line-height: 1;
 }
 
-.chat-attach-button,
+.chat-attach-button {
+  color: color-mix(in srgb, #4db6ac 78%, var(--text));
+}
+
 .chat-image-attach-button {
-  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+  color: color-mix(in srgb, #d7a84f 78%, var(--text));
 }
 
 .chat-tool-button:hover {
@@ -7524,7 +7549,7 @@ body,
 .chat-config-options-wrap {
   position: relative;
   min-width: 0;
-  max-width: calc(100% - 76px);
+  max-width: 100%;
 }
 
 .chat-config-options-shell {
