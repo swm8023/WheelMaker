@@ -3657,7 +3657,7 @@ function App() {
       return;
     }
     input.style.height = '0px';
-    const nextHeight = Math.max(30, Math.min(input.scrollHeight, 180));
+    const nextHeight = Math.max(32, Math.min(input.scrollHeight, 180));
     input.style.height = `${nextHeight}px`;
     input.style.overflowY = input.scrollHeight > 180 ? 'auto' : 'hidden';
   }, []);
@@ -14502,19 +14502,6 @@ function App() {
                 </div>
               ) : null}
               <div className="chat-composer-input-row">
-                <button
-                  type="button"
-                  ref={chatPromptButtonRef}
-                  className="chat-composer-skill-trigger chat-slash-button"
-                  onPointerDown={event => event.preventDefault()}
-                  onClick={openChatPromptMenu}
-                  title="Skills"
-                  aria-label="Open skills"
-                  aria-haspopup="listbox"
-                  aria-expanded={chatPromptMenuOpen}
-                >
-                  <span className="chat-slash-symbol">/</span>
-                </button>
                 <div className="chat-composer-input-shell">
                   <textarea
                     ref={chatComposerTextareaRef}
@@ -14635,6 +14622,19 @@ function App() {
                 <div className="chat-composer-tools">
                   <button
                     type="button"
+                    ref={chatPromptButtonRef}
+                    className="chat-composer-skill-trigger chat-slash-button"
+                    onPointerDown={event => event.preventDefault()}
+                    onClick={openChatPromptMenu}
+                    title="Skills"
+                    aria-label="Open skills"
+                    aria-haspopup="listbox"
+                    aria-expanded={chatPromptMenuOpen}
+                  >
+                    <span className="chat-slash-symbol">/</span>
+                  </button>
+                  <button
+                    type="button"
                     ref={chatAttachmentTrayButtonRef}
                     className="chat-tool-button chat-attachment-plus-button"
                     onPointerDown={event => event.preventDefault()}
@@ -14706,6 +14706,20 @@ function App() {
                       </button>
                     </div>
                   ) : null}
+                  <button
+                    type="button"
+                    className={`chat-composer-stop-trigger${selectedChatPromptRunning ? ' active' : ''}`}
+                    onPointerDown={event => event.preventDefault()}
+                    onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}
+                    disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}
+                    title={selectedChatPromptRunning ? 'Cancel prompt' : 'No prompt running'}
+                    aria-label="Cancel prompt"
+                  >
+                    <span
+                      className={`codicon ${selectedChatPromptCancelling ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-stop'}`}
+                      aria-hidden="true"
+                    />
+                  </button>
                 </div>
                 <div className="chat-composer-toolbar-actions">
                   {selectedChatConfigOptions.length > 0 ? (
@@ -14782,20 +14796,6 @@ function App() {
                       </div>
                     </div>
                   ) : null}
-                  <button
-                    type="button"
-                    className={`chat-composer-stop-trigger${selectedChatPromptRunning ? ' active' : ''}`}
-                    onPointerDown={event => event.preventDefault()}
-                    onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}
-                    disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}
-                    title={selectedChatPromptRunning ? 'Cancel prompt' : 'No prompt running'}
-                    aria-label="Cancel prompt"
-                  >
-                    <span
-                      className={`codicon ${selectedChatPromptCancelling ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-stop'}`}
-                      aria-hidden="true"
-                    />
-                  </button>
                 </div>
               </div>
             </div>

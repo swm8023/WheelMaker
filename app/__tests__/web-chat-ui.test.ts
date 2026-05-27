@@ -257,11 +257,11 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.chat-composer::before {');
     expect(stylesCss).not.toContain('--chat-history-bottom-buffer');
     expect(stylesCss).toMatch(
-      /\.chat-main \{[\s\S]*display: flex;[\s\S]*flex-direction: column;[\s\S]*gap: 5px;[\s\S]*\}/,
+      /\.chat-main \{[\s\S]*display: flex;[\s\S]*flex-direction: column;[\s\S]*gap: 0;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-virtuoso-footer {');
     expect(stylesCss).toMatch(
-      /\.chat-composer \{[\s\S]*position: relative;[\s\S]*z-index: 1;[\s\S]*padding: 0 14px 12px;[\s\S]*background: transparent;/,
+      /\.chat-composer \{[\s\S]*position: relative;[\s\S]*z-index: 1;[\s\S]*padding: 0 14px 8px;[\s\S]*background: transparent;/,
     );
     expect(stylesCss).not.toContain('--chat-composer-frame-top');
     expect(stylesCss).not.toContain('--chat-composer-fade-distance');
@@ -747,14 +747,14 @@ describe('web chat integration', () => {
     expect(toolsStart).toBeGreaterThanOrEqual(0);
     expect(toolsEnd).toBeGreaterThan(toolsStart);
     const toolsBlock = mainTsx.slice(toolsStart, toolsEnd);
-    expect(toolsBlock).not.toContain('chat-slash-button');
+    expect(toolsBlock).toContain('chat-slash-button');
     expect(toolsBlock).toContain('chat-attachment-plus-button');
     expect(toolsBlock).toContain('chat-attachment-action-tray');
     expect(toolsBlock).not.toContain('chat-mention-button');
     expect(toolsBlock).not.toContain('chat-attach-button');
     expect(toolsBlock).not.toContain('chat-image-attach-button');
     expect(toolsBlock).not.toContain('chat-stop-button');
-    expect(toolsBlock).not.toContain('chat-composer-stop-trigger');
+    expect(toolsBlock).toContain('chat-composer-stop-trigger');
 
     const configPillStart = mainTsx.indexOf('const renderChatConfigPill = (option: RegistrySessionConfigOption) => {');
     const configPillEnd = mainTsx.indexOf('if (tab === \'chat\')', configPillStart);
@@ -796,26 +796,28 @@ describe('web chat integration', () => {
       /button,\s*\[role='button'\],\s*\[role='menuitemradio'\],\s*\[role='option'\]\s*\{[\s\S]*-webkit-tap-highlight-color: transparent;/,
     );
     expect(stylesCss).toMatch(
-      /\.chat-composer \{[\s\S]*padding: 0 14px 12px;[\s\S]*background: transparent;/,
+      /\.chat-composer \{[\s\S]*padding: 0 14px 8px;[\s\S]*background: transparent;/,
     );
     expect(stylesCss).not.toContain('.chat-composer::before {');
     expect(stylesCss).not.toContain('--chat-composer-frame-top');
     expect(stylesCss).not.toContain('--chat-composer-fade-distance');
     expect(stylesCss).toContain('.chat-composer-frame {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-frame \{[\s\S]*gap: 0;[\s\S]*padding: 5px 6px 3px;[\s\S]*\}/,
+      /\.chat-composer-frame \{[\s\S]*gap: 8px;[\s\S]*padding: 8px 8px 4px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-input-row {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-input-row \{[\s\S]*align-items: flex-end;[\s\S]*gap: 5px;[\s\S]*min-height: 30px;[\s\S]*\}/,
+      /\.chat-composer-input-row \{[\s\S]*align-items: flex-end;[\s\S]*gap: 6px;[\s\S]*min-height: 32px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-skill-trigger {');
     expect(stylesCss).toContain('.chat-composer-action-column {');
     expect(stylesCss).toContain('.chat-composer-toolbar-actions {');
     expect(stylesCss).toContain('.chat-composer-stop-trigger {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-stop-trigger \{[\s\S]*position: absolute;[\s\S]*right: 0;[\s\S]*top: 50%;[\s\S]*transform: translateY\(-50%\);[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
+      /\.chat-composer-stop-trigger \{[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
     );
+    const stopTriggerStyleBlock = stylesCss.match(/\.chat-composer-stop-trigger \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(stopTriggerStyleBlock).not.toContain('position: absolute;');
     expect(stylesCss).toContain('.chat-composer-stop-trigger.active {');
     expect(stylesCss).not.toContain('.chat-composer-quick-trigger {');
     expect(stylesCss).not.toContain('.chat-quick-trigger-label {');
@@ -850,7 +852,7 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.chat-option-replies {');
     expect(stylesCss).not.toContain('.chat-option-reply-button {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-input \{[\s\S]*min-height: 30px;[\s\S]*padding: 5px 6px 1px 0;[\s\S]*font-size: 14px;[\s\S]*line-height: 1.4;[\s\S]*scrollbar-width: thin;[\s\S]*scrollbar-gutter: stable;[\s\S]*\}/,
+      /\.chat-composer-input \{[\s\S]*min-height: 32px;[\s\S]*padding: 5px 8px 2px;[\s\S]*font-size: 15px;[\s\S]*line-height: 1.4;[\s\S]*scrollbar-width: thin;[\s\S]*scrollbar-gutter: stable;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.chat-composer-input::-webkit-scrollbar \{[\s\S]*width: 4px;[\s\S]*\}/,
@@ -859,20 +861,21 @@ describe('web chat integration', () => {
       /\.chat-composer-input::-webkit-scrollbar-thumb \{[\s\S]*border-radius: 999px;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.chat-send-button \{[\s\S]*width: 30px;[\s\S]*height: 30px;[\s\S]*\}/,
+      /\.chat-send-button \{[\s\S]*width: 32px;[\s\S]*height: 32px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-action-column {');
     expect(stylesCss).not.toContain('.chat-cancel-button {');
     expect(stylesCss).toMatch(
-      /\.chat-send-button \.codicon \{[\s\S]*font-size: 15px;[\s\S]*\}/,
+      /\.chat-send-button \.codicon \{[\s\S]*font-size: 16px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-scroll-bottom-button {');
     expect(stylesCss).not.toContain('.chat-title-tools {');
     expect(stylesCss).not.toContain('.chat-title-option {');
     expect(stylesCss).toContain('.chat-composer-toolbar {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-toolbar \{[\s\S]*position: relative;[\s\S]*padding-right: 30px;[\s\S]*min-height: 24px;[\s\S]*\}/,
+      /\.chat-composer-toolbar \{[\s\S]*position: relative;[\s\S]*gap: 8px;[\s\S]*min-height: 24px;[\s\S]*\}/,
     );
+    expect(stylesCss).not.toMatch(/\.chat-composer-toolbar \{[\s\S]*padding-right: 30px;[\s\S]*\}/);
     expect(stylesCss).toContain('.chat-composer-tools {');
     expect(stylesCss).toContain('.chat-tool-button {');
     expect(stylesCss).toMatch(
@@ -887,7 +890,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-slash-symbol {');
     expect(stylesCss).toContain('.chat-attachment-plus-button {');
     expect(stylesCss).toContain('.chat-attachment-action-tray {');
-    expect(stylesCss).toContain('.chat-attachment-action-tray::after {');
+    expect(stylesCss).not.toContain('.chat-attachment-action-tray::after {');
     expect(stylesCss).toContain('.chat-attachment-action-button {');
     expect(stylesCss).toContain('.chat-attachment-action-label {');
     expect(stylesCss).not.toContain('.chat-mention-button {');
@@ -922,7 +925,7 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.chat-config-feedback {');
   });
 
-  test('keeps skills aligned with the text row and cancel in the bottom-right toolbar', () => {
+  test('keeps composer tools in the bottom row while send aligns with larger input text', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
@@ -933,34 +936,38 @@ describe('web chat integration', () => {
     expect(inputRowEnd).toBeGreaterThan(inputRowStart);
     const inputRow = mainTsx.slice(inputRowStart, inputRowEnd);
 
-    expect(inputRow).toContain('className="chat-composer-skill-trigger chat-slash-button"');
-    expect(inputRow).toContain('onClick={openChatPromptMenu}');
-    expect(inputRow.indexOf('chat-composer-skill-trigger')).toBeLessThan(inputRow.indexOf('className="chat-composer-input-shell"'));
+    expect(inputRow).not.toContain('className="chat-composer-skill-trigger chat-slash-button"');
+    expect(inputRow.indexOf('className="chat-composer-input-shell"')).toBeLessThan(inputRow.indexOf('className="chat-composer-action-column"'));
     expect(inputRow).toContain('className="chat-composer-action-column"');
     expect(inputRow).toContain('className="chat-send-button"');
     expect(inputRow).not.toContain('chat-composer-stop-trigger');
-    expect(mainTsx).toContain('const nextHeight = Math.max(30, Math.min(input.scrollHeight, 180));');
+    expect(mainTsx).toContain('const nextHeight = Math.max(32, Math.min(input.scrollHeight, 180));');
 
     const toolsStart = mainTsx.indexOf('className="chat-composer-tools"');
     const toolsEnd = mainTsx.indexOf('className="chat-config-options-wrap"', toolsStart);
     const toolsBlock = mainTsx.slice(toolsStart, toolsEnd);
-    expect(toolsBlock).not.toContain('chat-slash-button');
+    expect(toolsBlock).toContain('className="chat-composer-skill-trigger chat-slash-button"');
+    expect(toolsBlock).toContain('onClick={openChatPromptMenu}');
+    expect(toolsBlock.indexOf('chat-slash-button')).toBeLessThan(toolsBlock.indexOf('chat-attachment-plus-button'));
+    expect(toolsBlock.indexOf('chat-attachment-plus-button')).toBeLessThan(toolsBlock.indexOf('chat-composer-stop-trigger'));
 
     const toolbarStart = mainTsx.indexOf('className="chat-composer-toolbar"');
+    const toolbarToolsStart = mainTsx.indexOf('className="chat-composer-tools"', toolbarStart);
     const toolbarActionsStart = mainTsx.indexOf('className="chat-composer-toolbar-actions"', toolbarStart);
     const toolbarConfigStart = mainTsx.indexOf('className="chat-config-options-wrap"', toolbarActionsStart);
-    const toolbarStopStart = mainTsx.indexOf("className={`chat-composer-stop-trigger${selectedChatPromptRunning ? ' active' : ''}`}", toolbarActionsStart);
-    expect(toolbarActionsStart).toBeGreaterThan(toolbarStart);
+    expect(toolbarToolsStart).toBeGreaterThan(toolbarStart);
+    expect(toolbarActionsStart).toBeGreaterThan(toolbarToolsStart);
     expect(toolbarConfigStart).toBeGreaterThan(toolbarActionsStart);
-    expect(toolbarStopStart).toBeGreaterThan(toolbarConfigStart);
 
     expect(stylesCss).toMatch(/\.chat-composer-input-row \{[\s\S]*align-items: flex-end;[\s\S]*\}/);
-    expect(stylesCss).toMatch(/\.chat-composer-skill-trigger \{[\s\S]*width: 24px;[\s\S]*height: 30px;[\s\S]*\}/);
+    expect(stylesCss).toMatch(/\.chat-composer-skill-trigger \{[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*\}/);
     expect(stylesCss).toMatch(/\.chat-tool-button \{[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*\}/);
     expect(stylesCss).toContain('.chat-composer-toolbar-actions');
-    expect(stylesCss).toMatch(/\.chat-composer-action-column \{[\s\S]*height: 30px;[\s\S]*align-self: flex-end;[\s\S]*\}/);
-    expect(stylesCss).toMatch(/\.chat-composer-toolbar \{[\s\S]*padding-right: 30px;[\s\S]*\}/);
-    expect(stylesCss).toMatch(/\.chat-composer-stop-trigger \{[\s\S]*position: absolute;[\s\S]*right: 0;[\s\S]*top: 50%;[\s\S]*transform: translateY\(-50%\);[\s\S]*\}/);
+    expect(stylesCss).toMatch(/\.chat-composer-action-column \{[\s\S]*height: 32px;[\s\S]*align-self: flex-end;[\s\S]*\}/);
+    expect(stylesCss).toMatch(/\.chat-composer-toolbar \{[\s\S]*gap: 8px;[\s\S]*\}/);
+    const stopTriggerCssBlock = stylesCss.match(/\.chat-composer-stop-trigger \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(stopTriggerCssBlock).not.toContain('position: absolute;');
+    expect(stylesCss).toMatch(/\.chat-main \{[\s\S]*gap: 0;[\s\S]*\}/);
   });
 
   test('collapses code, file, and photo actions behind a plus tray', () => {
