@@ -278,6 +278,63 @@ func TestRelayURLAccessCodeAuthenticatesAndStripsCodeQuery(t *testing.T) {
 	}
 }
 
+func TestRelayURLAccessCodeUsesEmbeddableCookieForForwardedHTTPS(t *testing.T) {
+	c := NewController(ControllerConfig{})
+	c.mu.Lock()
+	c.slot = relaySlot{
+		Enabled:              true,
+		Status:               rp.RelayStatusOpening,
+		RelayID:              "relay-test",
+		AccessCode:           "123456",
+		AccessCodeGeneration: 1,
+	}
+	c.mu.Unlock()
+
+	req := httptest.NewRequest(http.MethodGet, "/console?__wm_relay_code=123456", nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	resp := httptest.NewRecorder()
+	c.handleDataPlane(resp, req)
+
+	setCookie := resp.Header().Get("Set-Cookie")
+	if !strings.Contains(setCookie, "SameSite=None") {
+		t.Fatalf("Set-Cookie=%q, want SameSite=None for HTTPS iframe embedding", setCookie)
+	}
+	if !strings.Contains(setCookie, "Secure") {
+		t.Fatalf("Set-Cookie=%q, want Secure for SameSite=None", setCookie)
+	}
+}
+
+func TestRelayLoginPostUsesEmbeddableCookieForForwardedHTTPS(t *testing.T) {
+	c := NewController(ControllerConfig{})
+	c.mu.Lock()
+	c.slot = relaySlot{
+		Enabled:              true,
+		Status:               rp.RelayStatusOpening,
+		RelayID:              "relay-test",
+		AccessCode:           "123456",
+		AccessCodeGeneration: 1,
+	}
+	c.mu.Unlock()
+
+	form := url.Values{"code": {"123456"}, "next": {"/console"}}
+	req := httptest.NewRequest(http.MethodPost, internalLoginPath, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	resp := httptest.NewRecorder()
+	c.handleLogin(resp, req)
+
+	setCookie := resp.Header().Get("Set-Cookie")
+	if !strings.Contains(setCookie, "SameSite=None") {
+		t.Fatalf("Set-Cookie=%q, want SameSite=None for HTTPS iframe embedding", setCookie)
+	}
+	if !strings.Contains(setCookie, "Secure") {
+		t.Fatalf("Set-Cookie=%q, want Secure for SameSite=None", setCookie)
+	}
+	if got := resp.Header().Get("Location"); got != "/console" {
+		t.Fatalf("Location=%q, want /console", got)
+	}
+}
+
 func reserveRelayTestPort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

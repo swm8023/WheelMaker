@@ -11,22 +11,33 @@ import (
 	"time"
 )
 
-func (c *Controller) setAuthCookie(w http.ResponseWriter, slot relaySlot) {
+func (c *Controller) setAuthCookie(w http.ResponseWriter, r *http.Request, slot relaySlot) {
 	expires := time.Now().Add(12 * time.Hour)
 	payload := fmt.Sprintf("%s:%d:%d", slot.RelayID, slot.AccessCodeGeneration, expires.Unix())
 	signature := c.signCookiePayload(payload)
 	value := base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + signature
+	secure := relayRequestIsHTTPS(r)
+	sameSite := http.SameSiteLaxMode
+	if secure {
+		sameSite = http.SameSiteNoneMode
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     relayCookieName,
 		Value:    value,
 		Path:     "/",
 		Expires:  expires,
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
 }
 
-func (c *Controller) clearAuthCookie(w http.ResponseWriter) {
+func (c *Controller) clearAuthCookie(w http.ResponseWriter, r *http.Request) {
+	secure := relayRequestIsHTTPS(r)
+	sameSite := http.SameSiteLaxMode
+	if secure {
+		sameSite = http.SameSiteNoneMode
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     relayCookieName,
 		Value:    "",
@@ -34,7 +45,8 @@ func (c *Controller) clearAuthCookie(w http.ResponseWriter) {
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
 }
 
@@ -77,4 +89,20 @@ func (c *Controller) signCookiePayload(payload string) string {
 	mac := hmac.New(sha256.New, c.secret)
 	_, _ = mac.Write([]byte(payload))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func relayRequestIsHTTPS(r *http.Request) bool {
+	if r != nil && r.TLS != nil {
+		return true
+	}
+	if r == nil {
+		return false
+	}
+	for _, part := range strings.Split(r.Header.Get("X-Forwarded-Proto"), ",") {
+		switch strings.ToLower(strings.TrimSpace(part)) {
+		case "https", "wss":
+			return true
+		}
+	}
+	return false
 }

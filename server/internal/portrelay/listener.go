@@ -137,7 +137,7 @@ func (c *Controller) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, relayLoginLocation(next, true), http.StatusSeeOther)
 		return
 	}
-	c.setAuthCookie(w, slot)
+	c.setAuthCookie(w, r, slot)
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
@@ -147,12 +147,12 @@ func (c *Controller) handleURLAccessCode(w http.ResponseWriter, r *http.Request,
 		http.Redirect(w, r, relayLoginLocation(next, true), http.StatusSeeOther)
 		return
 	}
-	c.setAuthCookie(w, slot)
+	c.setAuthCookie(w, r, slot)
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
 func (c *Controller) handleLogout(w http.ResponseWriter, r *http.Request) {
-	c.clearAuthCookie(w)
+	c.clearAuthCookie(w, r)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
