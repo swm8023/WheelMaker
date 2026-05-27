@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 
+function readSourceText(filePath: string): string {
+  return fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
+}
+
 function cssRuleBlock(stylesCss: string, selector: string): string {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = stylesCss.match(new RegExp(`${escapedSelector} \\{([\\s\\S]*?)\\}`));
@@ -17,8 +21,8 @@ function cssNumericProperty(stylesCss: string, selector: string, property: strin
 describe('web chat integration', () => {
   test('keeps iOS long-press session menus from selecting text or activating the row', () => {
     const projectRoot = path.join(__dirname, '..');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
-    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
     const nonSelectableSelectors = [
       '.desktop-titlebar',
       '.floating-control-stack',
@@ -57,11 +61,11 @@ describe('web chat integration', () => {
 
   test('defines registry session protocol and uses real chat UI instead of placeholder sessions', () => {
     const projectRoot = path.join(__dirname, '..');
-    const registryTypes = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'types', 'registry.ts'), 'utf8');
-    const repositoryTs = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'services', 'registryRepository.ts'), 'utf8');
-    const workspaceServiceTs = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'services', 'registryWorkspaceService.ts'), 'utf8');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
-    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+    const registryTypes = readSourceText(path.join(projectRoot, 'web', 'src', 'types', 'registry.ts'));
+    const repositoryTs = readSourceText(path.join(projectRoot, 'web', 'src', 'services', 'registryRepository.ts'));
+    const workspaceServiceTs = readSourceText(path.join(projectRoot, 'web', 'src', 'services', 'registryWorkspaceService.ts'));
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
 
     expect(registryTypes).toContain('export interface RegistrySessionSummary');
     expect(registryTypes).toContain('export interface RegistrySessionMessage');
@@ -229,7 +233,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const attachmentDraftGeneration = getChatDraftGeneration(attachmentDraftKey);');
     expect(mainTsx).toContain('appendChatAttachments(');
     expect(mainTsx).not.toContain('chatAttachmentUploadQueueRef.current = chatAttachmentUploadQueueRef.current');
-    expect(mainTsx).toContain("function isChatAttachmentUploadPending(attachment: ChatAttachment): boolean {\n  return attachment.status === 'uploading';\n}");
+    expect(mainTsx).toMatch(
+      /function isChatAttachmentUploadPending\(attachment: ChatAttachment\): boolean \{\r?\n  return attachment\.status === 'uploading';\r?\n\}/,
+    );
     expect(mainTsx).toContain('const sourceAttachments = options.attachmentsOverride ?? chatAttachments;');
     expect(mainTsx).toContain('blocksOverride?: RegistryChatContentBlock[];');
     expect(mainTsx).toContain('const blocks: RegistryChatContentBlock[] = [];');
@@ -513,7 +519,7 @@ describe('web chat integration', () => {
 
   test('chat breadcrumb title uses the selected session project', () => {
     const projectRoot = path.join(__dirname, '..');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
 
     const chatProjectNameStart = mainTsx.indexOf('const chatBreadcrumbProjectName = useMemo(');
     const chatLabelStart = mainTsx.indexOf('const chatBreadcrumbLabel = useMemo(', chatProjectNameStart);
@@ -543,8 +549,8 @@ describe('web chat integration', () => {
 
   test('chat drawer header keeps tools left and hub browser right', () => {
     const projectRoot = path.join(__dirname, '..');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
-    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
 
     expect(mainTsx).toContain('const [chatHubMenuOpen, setChatHubMenuOpen] = useState(false);');
     expect(mainTsx).toContain('const chatHubMenuRef = useRef<HTMLDivElement | null>(null);');
@@ -609,8 +615,8 @@ describe('web chat integration', () => {
 
   test('chat composer is a unified command frame with compact custom config pills', () => {
     const projectRoot = path.join(__dirname, '..');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
-    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
 
     expect(mainTsx).toContain('const CHAT_CONFIG_INLINE_LIMIT = 3;');
     expect(mainTsx).not.toContain('CHAT_QUICK_REPLY_OPTIONS');
@@ -927,8 +933,8 @@ describe('web chat integration', () => {
 
   test('keeps composer tools in the bottom row while send aligns with larger input text', () => {
     const projectRoot = path.join(__dirname, '..');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
-    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
 
     const inputRowStart = mainTsx.indexOf('className="chat-composer-input-row"');
     const inputRowEnd = mainTsx.indexOf('{chatFileMentionMenuOpen ?', inputRowStart);
@@ -972,8 +978,8 @@ describe('web chat integration', () => {
 
   test('collapses code, file, and photo actions behind a plus tray', () => {
     const projectRoot = path.join(__dirname, '..');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
-    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
 
     expect(mainTsx).toContain('const chatImageInputRef = useRef<HTMLInputElement | null>(null);');
     expect(mainTsx).toContain('const chatAttachmentTrayRef = useRef<HTMLDivElement | null>(null);');
@@ -1021,7 +1027,7 @@ describe('web chat integration', () => {
 
   test('uses mobile Enter as send while keeping modified Enter and IME composition from sending', () => {
     const projectRoot = path.join(__dirname, '..');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
 
     expect(mainTsx).toContain("enterKeyHint={isWide ? undefined : 'send'}");
     expect(mainTsx).toContain("const shouldSendChatOnEnter = event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing;");
@@ -1033,7 +1039,7 @@ describe('web chat integration', () => {
 
   test('keeps the mobile drawer wide while preserving floating control clicks and backdrop dismissal', () => {
     const projectRoot = path.join(__dirname, '..');
-    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
 
     const backdropLayer = cssNumericProperty(stylesCss, '.drawer-overlay', 'z-index');
     const drawerLayer = cssNumericProperty(stylesCss, '.drawer', 'z-index');
@@ -1063,8 +1069,8 @@ describe('web chat integration', () => {
 
   test('keeps the mobile three-tab floating nav and drawer button translucent over content', () => {
     const projectRoot = path.join(__dirname, '..');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
-    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
 
     expect(mainTsx).toContain('data-backdrop-tone={floatingBackdropTone}');
     expect(mainTsx).toContain('requestFloatingBackdropToneMeasure');
@@ -1079,8 +1085,8 @@ describe('web chat integration', () => {
 
   test('mobile chat drawer uses a cross-project project session sheet', () => {
     const projectRoot = path.join(__dirname, '..');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
-    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
 
     expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | 'portRelay' | null;");
     expect(mainTsx).toContain('const [settingsDetailView, setSettingsDetailView] = useState<SettingsDetailView>(null);');
@@ -1149,8 +1155,8 @@ describe('web chat integration', () => {
 
   test('wide layout uses a project session rail instead of the header project picker', () => {
     const projectRoot = path.join(__dirname, '..');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
-    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
 
     expect(mainTsx).not.toContain('WIDE_PROJECT_SESSION_LIMIT');
     expect(mainTsx).toContain('const PROJECT_PIN_LONG_PRESS_MS = 450;');
@@ -1427,7 +1433,7 @@ describe('web chat integration', () => {
 
   test('wide project session rail actions use project-scoped chat flows', () => {
     const projectRoot = path.join(__dirname, '..');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
 
     expect(mainTsx).toContain('const selectWideProjectSession = async (targetProjectId: string, sessionId: string) => {');
     expect(mainTsx).toContain('const selectProjectChatSession = async (');
@@ -1454,8 +1460,8 @@ describe('web chat integration', () => {
 
   test('does not rewrite removed codexapp agent names in web payloads', () => {
     const projectRoot = path.join(__dirname, '..');
-    const repositoryTs = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'services', 'registryRepository.ts'), 'utf8');
-    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const repositoryTs = readSourceText(path.join(projectRoot, 'web', 'src', 'services', 'registryRepository.ts'));
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
 
     expect(repositoryTs).toContain('function normalizeAgentType(agentType: unknown): string | undefined');
     expect(repositoryTs).not.toContain("return normalized.toLowerCase() === 'codexapp' ? 'codex' : normalized;");
