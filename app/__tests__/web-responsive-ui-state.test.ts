@@ -2,6 +2,67 @@ import fs from 'fs';
 import path from 'path';
 
 describe('web responsive ui state', () => {
+  test('resolves mobile floating control side with a center hysteresis band', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const modulePath = path.join(projectRoot, 'web', 'src', 'services', 'mobileFloatingControls.ts');
+
+    expect(fs.existsSync(modulePath)).toBe(true);
+
+    const {
+      FLOATING_CONTROL_SIDE_HYSTERESIS_PX,
+      resolveFloatingControlDragSide,
+    } = require(modulePath);
+
+    expect(FLOATING_CONTROL_SIDE_HYSTERESIS_PX).toBe(24);
+    expect(resolveFloatingControlDragSide('right', 377, 800)).toBe('right');
+    expect(resolveFloatingControlDragSide('right', 375, 800)).toBe('left');
+    expect(resolveFloatingControlDragSide('left', 423, 800)).toBe('left');
+    expect(resolveFloatingControlDragSide('left', 425, 800)).toBe('right');
+  });
+
+  test('uses a best-effort mobile haptic helper around navigator vibration', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const modulePath = path.join(projectRoot, 'web', 'src', 'services', 'mobileHaptics.ts');
+
+    expect(fs.existsSync(modulePath)).toBe(true);
+
+    const {
+      MOBILE_HAPTIC_LIGHT_MS,
+      triggerMobileHaptic,
+    } = require(modulePath);
+    const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+
+    try {
+      const vibrate = jest.fn();
+      Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        value: { vibrate },
+      });
+      triggerMobileHaptic();
+      triggerMobileHaptic(8);
+      expect(vibrate).toHaveBeenNthCalledWith(1, MOBILE_HAPTIC_LIGHT_MS);
+      expect(vibrate).toHaveBeenNthCalledWith(2, 8);
+
+      Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        value: { vibrate: () => { throw new Error('unsupported'); } },
+      });
+      expect(() => triggerMobileHaptic()).not.toThrow();
+
+      Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        value: {},
+      });
+      expect(() => triggerMobileHaptic()).not.toThrow();
+    } finally {
+      if (originalNavigator) {
+        Object.defineProperty(globalThis, 'navigator', originalNavigator);
+      } else {
+        delete (globalThis as { navigator?: unknown }).navigator;
+      }
+    }
+  });
+
   test('centralizes viewport layout mode resolution at the 900px shell breakpoint', () => {
     const projectRoot = path.join(__dirname, '..');
     const modulePath = path.join(projectRoot, 'web', 'src', 'services', 'responsiveLayout.ts');

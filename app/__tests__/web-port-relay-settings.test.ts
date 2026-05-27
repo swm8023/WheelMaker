@@ -55,7 +55,10 @@ describe('port relay settings UI source structure', () => {
     expect(mainTsx).toContain('originX: event.clientX,');
     expect(mainTsx).toContain('startSide: floatingControlSide,');
     expect(mainTsx).toContain('currentX: event.clientX,');
-    expect(mainTsx).toContain("const nextSide = current.currentX < windowWidth / 2 ? 'left' : 'right';");
+    expect(mainTsx).toContain("import { resolveFloatingControlDragSide } from './services/mobileFloatingControls';");
+    expect(mainTsx).toContain('resolveFloatingControlDragSide(');
+    expect(mainTsx).toContain('floatingControlSideRef.current');
+    expect(mainTsx).not.toContain("const nextSide = current.currentX < windowWidth / 2 ? 'left' : 'right';");
     expect(mainTsx).toContain("dispatchWorkspaceUi({ type: 'mobile/setFloatingControlSide', next });");
     expect(mainTsx).toContain('const [portRelayFrameOpen, setPortRelayFrameOpen] = useState(false);');
     expect(mainTsx).toContain('const [portRelayFrameAutoOpenPending, setPortRelayFrameAutoOpenPending] = useState(false);');

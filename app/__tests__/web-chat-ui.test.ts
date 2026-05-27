@@ -334,6 +334,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const CHAT_CONFIG_PRIORITY_IDS = [');
     expect(mainTsx).toContain("const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought']");
     expect(mainTsx).toContain("const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;");
+    expect(mainTsx).toContain("import { triggerMobileHaptic } from './services/mobileHaptics';");
+    expect(mainTsx).toContain("import { resolveFloatingControlDragSide } from './services/mobileFloatingControls';");
+    expect(mainTsx).not.toContain('navigator.vibrate?.(12)');
     expect(mainTsx).not.toContain('className="header-bubble"');
     expect(mainTsx).toContain('className="drawer-project-header"');
     expect(mainTsx).toContain('className="drawer-project-pill"');
@@ -362,6 +365,14 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="floating-control-stack"');
     expect(mainTsx).toContain('className="floating-nav-group"');
     expect(mainTsx).toContain('className="drawer-toggle-bubble"');
+    expect(mainTsx).toContain('const floatingControlSideRef = useRef(floatingControlSide);');
+    expect(mainTsx).toContain('floatingControlSideRef.current = floatingControlSide;');
+    expect(mainTsx).toContain('const closeMobileDrawerCompanionOverlays = useCallback(() => {');
+    expect(mainTsx).toContain('const handleMobileBreadcrumbProjectClick = useCallback(() => {');
+    expect(mainTsx).toContain('closeMobileDrawerCompanionOverlays();');
+    expect(mainTsx).toContain('setDrawerOpen(open => !open);');
+    expect(mainTsx).toContain('className="breadcrumb-project-button breadcrumb-project-name"');
+    expect(mainTsx).toContain('onClick={handleMobileBreadcrumbProjectClick}');
     expect(mainTsx).toContain('const handleFloatingControlButtonPointerDown = useCallback(');
     expect(mainTsx).toMatch(
       /const handleFloatingControlButtonPointerDown = useCallback\([\s\S]*?beginFloatingPress\(event\);[\s\S]*?event\.stopPropagation\(\);/,
@@ -382,9 +393,27 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const floatingControlSlot = workspaceUiState.mobile.floatingControlSlot;');
     expect(mainTsx).toContain('const floatingDragState = workspaceUiState.transient.floatingDragState as FloatingDragState | null;');
     expect(mainTsx).toContain('const floatingKeyboardOffset = workspaceUiState.transient.floatingKeyboardOffset;');
+    const floatingLongPressStart = mainTsx.indexOf('floatingLongPressTimerRef.current = window.setTimeout(() => {');
+    const floatingLongPressEnd = mainTsx.indexOf('}, 350);', floatingLongPressStart);
+    expect(floatingLongPressStart).toBeGreaterThanOrEqual(0);
+    expect(floatingLongPressEnd).toBeGreaterThan(floatingLongPressStart);
+    const floatingLongPressBlock = mainTsx.slice(floatingLongPressStart, floatingLongPressEnd);
+    expect(floatingLongPressBlock).toContain('closeMobileDrawerCompanionOverlays();');
+    expect(floatingLongPressBlock).toContain('triggerMobileHaptic();');
+    const floatingMoveStart = mainTsx.indexOf('const handleFloatingPointerMove = useCallback(');
+    const floatingMoveEnd = mainTsx.indexOf('const finishFloatingDrag = useCallback(', floatingMoveStart);
+    expect(floatingMoveStart).toBeGreaterThanOrEqual(0);
+    expect(floatingMoveEnd).toBeGreaterThan(floatingMoveStart);
+    const floatingMoveBlock = mainTsx.slice(floatingMoveStart, floatingMoveEnd);
+    expect(floatingMoveBlock).toContain('resolveFloatingControlDragSide(');
+    expect(floatingMoveBlock).toContain('floatingControlSideRef.current');
+    expect(floatingMoveBlock).toContain('setFloatingControlSide(nextSide);');
+    expect(floatingMoveBlock).toContain('window.localStorage.setItem(PORT_RELAY_FLOATING_SIDE_STORAGE_KEY, nextSide);');
+    expect(floatingMoveBlock).toContain('triggerMobileHaptic();');
+    expect(floatingMoveBlock).toContain('closeMobileDrawerCompanionOverlays();');
     expect(mainTsx).not.toContain('style={narrowContentInsetStyle}');
     expect(mainTsx).toContain('className="breadcrumb-title"');
-    expect(mainTsx).toContain('className="breadcrumb-project-name"');
+    expect(mainTsx).toContain('className="breadcrumb-project-button breadcrumb-project-name"');
     expect(mainTsx).toContain('No Selected Session');
     expect(mainTsx).toContain('No Selected Diff');
     expect(mainTsx).toContain('data-active={drawerOpen}');
@@ -500,6 +529,8 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('-webkit-tap-highlight-color: transparent;');
     expect(stylesCss).toContain('.breadcrumb-title {');
     expect(stylesCss).toContain('.breadcrumb-project-name {');
+    expect(stylesCss).toContain('.breadcrumb-project-button {');
+    expect(stylesCss).toContain('.breadcrumb-project-button:hover {');
     expect(stylesCss).not.toContain('max-width: min(42%, 160px);');
     expect(stylesCss).toMatch(
       /\.breadcrumb-project-name \{[\s\S]*flex: 0 0 auto;[\s\S]*max-width: none;[\s\S]*border: 1px solid color-mix\(in srgb, var\(--accent\) 54%, transparent\);[\s\S]*border-radius: 8px;[\s\S]*background: color-mix\(in srgb, var\(--accent\) 13%, var\(--panel\)\);[\s\S]*color: color-mix\(in srgb, var\(--accent\) 78%, var\(--text\)\);[\s\S]*\}/,

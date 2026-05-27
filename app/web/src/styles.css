@@ -2638,6 +2638,22 @@ body,
   color: color-mix(in srgb, var(--accent) 78%, var(--text));
 }
 
+.breadcrumb-project-button {
+  appearance: none;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.breadcrumb-project-button:hover {
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
+}
+
+.breadcrumb-project-button:active {
+  transform: translateY(1px);
+}
+
 .breadcrumb-separator {
   flex: 0 0 auto;
   color: var(--muted);

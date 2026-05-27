@@ -126,6 +126,8 @@ import {
 } from './chat/chatSelectionGuard';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
+import { triggerMobileHaptic } from './services/mobileHaptics';
+import { resolveFloatingControlDragSide } from './services/mobileFloatingControls';
 import {
   GESTURE_LONG_PRESS_MS,
   GESTURE_MOVE_LONG_PRESS_MS,
@@ -2966,6 +2968,7 @@ function App() {
   const floatingControlStackRef = useRef<HTMLDivElement | null>(null);
   const [floatingBackdropTone, setFloatingBackdropTone] = useState<FloatingBackdropTone>('dark');
   const floatingBackdropToneRef = useRef<FloatingBackdropTone>('dark');
+  const floatingControlSideRef = useRef(floatingControlSide);
   const floatingBackdropToneMeasuredAtRef = useRef(0);
   const floatingBackdropToneRafRef = useRef<number | null>(null);
   const floatingBackdropToneTimerRef = useRef<number | null>(null);
@@ -4594,6 +4597,9 @@ function App() {
     floatingDragStateRef.current = floatingDragState;
   }, [floatingDragState]);
   useEffect(() => {
+    floatingControlSideRef.current = floatingControlSide;
+  }, [floatingControlSide]);
+  useEffect(() => {
     gestureNavStateRef.current = gestureNavState;
   }, [gestureNavState]);
   useEffect(() => {
@@ -5352,10 +5358,32 @@ function App() {
     () => splitPathForDisplay(selectedDiff).fileName || 'No Selected Diff',
     [selectedDiff],
   );
+  const closeMobileDrawerCompanionOverlays = useCallback(() => {
+    setChatQuickSwitchMenuOpen(false);
+    setPortRelayTargetMenuOpen(false);
+    setChatPromptMenuOpen(false);
+    setChatFileMentionMenuOpen(false);
+    setChatAttachmentTrayOpen(false);
+    setChatConfigMenuOptionId('');
+    setChatConfigOverflowOpen(false);
+    setChatHubMenuOpen(false);
+  }, [setChatConfigOverflowOpen]);
+  const handleMobileBreadcrumbProjectClick = useCallback(() => {
+    closeMobileDrawerCompanionOverlays();
+    setDrawerOpen(open => !open);
+  }, [closeMobileDrawerCompanionOverlays, setDrawerOpen]);
   const renderBreadcrumbTitle = useCallback(
     (projectName: string, label: string) => (
       <div className="breadcrumb-title">
-        <span className="breadcrumb-project-name">{projectName}</span>
+        <button
+          type="button"
+          className="breadcrumb-project-button breadcrumb-project-name"
+          onClick={handleMobileBreadcrumbProjectClick}
+          title="Toggle workspace drawer"
+          aria-label="Toggle workspace drawer"
+        >
+          {projectName}
+        </button>
         <span className="breadcrumb-separator" aria-hidden="true">
           &gt;
         </span>
@@ -5364,7 +5392,7 @@ function App() {
         </span>
       </div>
     ),
-    [],
+    [handleMobileBreadcrumbProjectClick],
   );
   const renderChatHubSummary = useCallback(() => {
     const hubCount = registryHubs.length;
@@ -5600,6 +5628,9 @@ function App() {
         cooldownUntil: 0,
       });
       floatingLongPressTimerRef.current = window.setTimeout(() => {
+        closeMobileDrawerCompanionOverlays();
+        setDrawerOpen(false);
+        triggerMobileHaptic();
         setFloatingDragState(prev =>
           prev && prev.pointerId === event.pointerId
             ? { ...prev, active: true, pressing: false }
@@ -5608,7 +5639,14 @@ function App() {
         floatingLongPressTimerRef.current = null;
       }, 350);
     },
-    [clearFloatingLongPressTimer, floatingControlSide, floatingControlTop, isWide],
+    [
+      clearFloatingLongPressTimer,
+      closeMobileDrawerCompanionOverlays,
+      floatingControlSide,
+      floatingControlTop,
+      isWide,
+      setDrawerOpen,
+    ],
   );
   const handleFloatingControlButtonPointerDown = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -5674,6 +5712,24 @@ function App() {
         return;
       }
       event.preventDefault();
+      const currentSide = floatingControlSideRef.current;
+      const nextSide = resolveFloatingControlDragSide(
+        currentSide,
+        event.clientX,
+        windowWidth,
+      );
+      if (nextSide !== currentSide) {
+        floatingControlSideRef.current = nextSide;
+        setFloatingControlSide(nextSide);
+        workspaceStore.rememberGlobalState({ floatingControlSide: nextSide });
+        try {
+          window.localStorage.setItem(PORT_RELAY_FLOATING_SIDE_STORAGE_KEY, nextSide);
+        } catch {
+          // Ignore local storage failures in private or restricted contexts.
+        }
+        closeMobileDrawerCompanionOverlays();
+        triggerMobileHaptic();
+      }
       setFloatingDragState({
         ...current,
         currentX: event.clientX,
@@ -5685,10 +5741,13 @@ function App() {
       });
     },
     [
+      closeMobileDrawerCompanionOverlays,
       clearFloatingCooldownState,
       clearFloatingLongPressTimer,
       floatingBounds.maxTop,
       floatingBounds.minTop,
+      setFloatingControlSide,
+      windowWidth,
     ],
   );
   const finishFloatingDrag = useCallback(
@@ -5708,7 +5767,7 @@ function App() {
         floatingBounds.maxTop,
       );
       const nextSlot = nearestFloatingSlot(snappedTop, floatingSlotTops);
-      const nextSide = current.currentX < windowWidth / 2 ? 'left' : 'right';
+      const nextSide = floatingControlSideRef.current;
       const cooldownUntil = Date.now() + 120;
       floatingClickCooldownUntilRef.current = cooldownUntil;
       setFloatingControlSlot(nextSlot);
@@ -5852,6 +5911,9 @@ function App() {
         clearGestureLongPressTimer();
         gestureNavStateRef.current = null;
         setGestureNavState(null);
+        closeMobileDrawerCompanionOverlays();
+        setDrawerOpen(false);
+        triggerMobileHaptic();
         setFloatingDragState({
           active: true,
           pressing: false,
@@ -5869,9 +5931,11 @@ function App() {
     [
       clearGestureLongPressTimer,
       clearGestureMoveLongPressTimer,
+      closeMobileDrawerCompanionOverlays,
       floatingControlSide,
       floatingControlTop,
       isWide,
+      setDrawerOpen,
       setFloatingDragState,
     ],
   );
@@ -6387,7 +6451,7 @@ function App() {
       projectPinLongPressTimerRef.current = window.setTimeout(() => {
         projectPinLongPressTimerRef.current = null;
         projectPinLongPressTargetRef.current = targetProjectId;
-        try { navigator.vibrate?.(12); } catch { /* ignore */ }
+        triggerMobileHaptic();
         togglePinnedProject(targetProjectId);
       }, PROJECT_PIN_LONG_PRESS_MS);
     },
@@ -6455,7 +6519,7 @@ function App() {
           targetProjectId,
           sessionId,
         );
-        try { navigator.vibrate?.(12); } catch { /* ignore */ }
+        triggerMobileHaptic();
         setProjectSessionActionMenu({
           projectId: targetProjectId,
           sessionId,
