@@ -1095,11 +1095,13 @@ body,
 
 @media (max-width: 560px) {
   .npm-update-disclosure {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
   }
 
   .npm-update-action-btn {
-    width: 100%;
+    min-width: 78px;
+    padding: 0 8px;
   }
 }
 

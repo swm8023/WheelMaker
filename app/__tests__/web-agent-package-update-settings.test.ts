@@ -151,6 +151,28 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).not.toContain('disabled={pending || agentPackageAnyOperationRunning}');
   });
 
+  test('shows npm hub Update All only from the expanded summary row', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    const disclosureStart = mainTsx.indexOf('className="npm-update-disclosure"');
+    const bodyStart = mainTsx.indexOf('className="npm-update-body"', disclosureStart);
+    expect(disclosureStart).toBeGreaterThanOrEqual(0);
+    expect(bodyStart).toBeGreaterThan(disclosureStart);
+
+    const disclosureBlock = mainTsx.slice(disclosureStart, bodyStart);
+    const expandedGateIndex = disclosureBlock.indexOf('{npmExpanded ? (');
+    const actionIndex = disclosureBlock.indexOf('className="npm-update-action-btn"');
+    expect(expandedGateIndex).toBeGreaterThanOrEqual(0);
+    expect(actionIndex).toBeGreaterThan(expandedGateIndex);
+    expect(disclosureBlock).toContain("npmHubUpdatePending ? 'Updating...' : 'Update All'");
+
+    const mobileNpmBlock = stylesCss.match(/@media \(max-width: 560px\) \{[\s\S]*?\.wheelmaker-update-panel \{/m)?.[0] ?? '';
+    expect(mobileNpmBlock).not.toContain('grid-template-columns: 1fr;');
+    expect(mobileNpmBlock).not.toContain('width: 100%;');
+  });
+
   test('makes WheelMaker release identity and SHA rows visually distinct', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');

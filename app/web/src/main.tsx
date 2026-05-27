@@ -12154,14 +12154,16 @@ function App() {
                       <span className="npm-update-count">{npmPackageUpdateSummary(npmUpdateTargets.length)}</span>
                       <span className="npm-update-total">{hub?.packages.length ?? 0} packages</span>
                     </button>
-                    <button
-                      type="button"
-                      className="npm-update-action-btn"
-                      disabled={npmUpdateTargets.length === 0 || npmActionDisabled}
-                      onClick={() => requestAgentPackageHubUpdate(card.hubId, npmUpdateTargets)}
-                    >
-                      {npmHubUpdatePending ? 'Updating...' : 'Update All'}
-                    </button>
+                    {npmExpanded ? (
+                      <button
+                        type="button"
+                        className="npm-update-action-btn"
+                        disabled={npmUpdateTargets.length === 0 || npmActionDisabled}
+                        onClick={() => requestAgentPackageHubUpdate(card.hubId, npmUpdateTargets)}
+                      >
+                        {npmHubUpdatePending ? 'Updating...' : 'Update All'}
+                      </button>
+                    ) : null}
                   </div>
                   {npmExpanded ? (
                     <div className="npm-update-body">
