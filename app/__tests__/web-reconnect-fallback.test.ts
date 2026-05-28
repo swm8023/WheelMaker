@@ -36,10 +36,11 @@ describe('web reconnect fallback behavior', () => {
       'const pwaFoundation = initializePWAFoundation();',
     );
     expect(mainTsx).toContain(
-      'const supervisor = pwaFoundation.createConnectionSupervisor({',
+      'const supervisor = pwaFoundation.createConnectionSupervisor(',
     );
     expect(mainTsx).toContain('disconnectForSupervisor(reason);');
     expect(mainTsx).toContain('await connect({ silentReconnect: true });');
+    expect(mainTsx).toContain('shouldDisconnectOnBackground: () => !isVoiceInputActive(),');
   });
 
   test('triggers local push notification for incoming chat messages', () => {

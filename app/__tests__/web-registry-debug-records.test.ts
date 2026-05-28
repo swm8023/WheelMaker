@@ -53,6 +53,7 @@ describe('registry debug records', () => {
   test('records, correlates, filters, and clears debug entries', () => {
     const store = createRegistryDebugStore(() => 1000);
     store.setEnabled(true);
+    const sessionSendRaw = '{"requestId":7,"type":"request","method":"session.send","projectId":"project-a","payload":{"sessionId":"sess-a","text":"hello"}}';
 
     store.recordOutbound({
       envelope: {
@@ -62,7 +63,7 @@ describe('registry debug records', () => {
         projectId: 'project-a',
         payload: {sessionId: 'sess-a', text: 'hello'},
       },
-      raw: '{"requestId":7}',
+      raw: sessionSendRaw,
     });
     store.recordInboundEnvelope({
       envelope: {
@@ -100,7 +101,7 @@ describe('registry debug records', () => {
       requestId: 7,
       projectId: 'project-a',
       sessionIds: ['sess-a'],
-      raw: '{"requestId":7}',
+      raw: sessionSendRaw,
     });
     expect(records[1]).toMatchObject({
       direction: 'in',

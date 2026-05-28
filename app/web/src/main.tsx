@@ -8507,6 +8507,10 @@ function App() {
     void cancelVoiceInput('gesture');
   };
 
+  const isVoiceInputActive = () => (
+    voiceRecordingRef.current || !!voiceStreamIdRef.current
+  );
+
   const finishVoiceInput = async () => {
     const streamId = voiceStreamIdRef.current;
     logVoiceInputState('debug', 'finish_requested', {streamIdPresent: !!streamId});
@@ -9004,19 +9008,24 @@ function App() {
   };
 
   useEffect(() => {
-    const supervisor = pwaFoundation.createConnectionSupervisor({
-      connect: async () => {
-        const canSilentReconnect =
-          !!addressRef.current.trim() && !!projectIdRef.current;
-        if (!canSilentReconnect) {
-          return;
-        }
-        await connect({ silentReconnect: true });
+    const supervisor = pwaFoundation.createConnectionSupervisor(
+      {
+        connect: async () => {
+          const canSilentReconnect =
+            !!addressRef.current.trim() && !!projectIdRef.current;
+          if (!canSilentReconnect) {
+            return;
+          }
+          await connect({ silentReconnect: true });
+        },
+        disconnect: reason => {
+          disconnectForSupervisor(reason);
+        },
       },
-      disconnect: reason => {
-        disconnectForSupervisor(reason);
+      {
+        shouldDisconnectOnBackground: () => !isVoiceInputActive(),
       },
-    });
+    );
     supervisor.start();
     return () => {
       supervisor.stop();

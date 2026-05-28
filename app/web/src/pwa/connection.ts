@@ -5,6 +5,7 @@ export type ConnectionHooks = {
 
 export type ForegroundConnectionSupervisorOptions = {
   reconnectDelayMs?: number;
+  shouldDisconnectOnBackground?: () => boolean;
 };
 
 export class ForegroundConnectionSupervisor {
@@ -27,7 +28,7 @@ export class ForegroundConnectionSupervisor {
       setTimeoutImpl: setTimeout,
       clearTimeoutImpl: clearTimeout,
     },
-    options: ForegroundConnectionSupervisorOptions = {},
+    private readonly options: ForegroundConnectionSupervisorOptions = {},
   ) {
     this.reconnectDelayMs = options.reconnectDelayMs ?? 1200;
   }
@@ -55,6 +56,9 @@ export class ForegroundConnectionSupervisor {
     if (!this.started) return;
     if (this.env.document?.hidden) {
       this.clearReconnectTimer();
+      if (this.options.shouldDisconnectOnBackground?.() === false) {
+        return;
+      }
       this.hooks.disconnect('background');
       return;
     }
