@@ -15,6 +15,8 @@ type ActivePointer = {
   pointerId: number;
   startY: number;
   cancelIntent: boolean;
+  startSettled: boolean;
+  pendingAction: 'finish' | 'cancel' | null;
 };
 
 export function VoiceInputButton({
@@ -37,20 +39,28 @@ export function VoiceInputButton({
     }
   };
 
+  const runTerminalAction = (action: 'finish' | 'cancel') => {
+    if (action === 'cancel') {
+      void Promise.resolve(onCancel());
+      return;
+    }
+    void Promise.resolve(onFinish());
+  };
+
   const finishPointer = (event: React.PointerEvent<HTMLButtonElement>, forceCancel: boolean) => {
     const pointer = pointerRef.current;
     if (!pointer || pointer.pointerId !== event.pointerId) {
       return;
     }
-    pointerRef.current = null;
     event.currentTarget.releasePointerCapture?.(event.pointerId);
-    const shouldCancel = forceCancel || pointer.cancelIntent;
+    const action = forceCancel || pointer.cancelIntent ? 'cancel' : 'finish';
     setNextCancelIntent(false);
-    if (shouldCancel) {
-      void Promise.resolve(onCancel());
+    if (!pointer.startSettled) {
+      pointer.pendingAction = action;
       return;
     }
-    void Promise.resolve(onFinish());
+    pointerRef.current = null;
+    runTerminalAction(action);
   };
 
   return (
@@ -71,9 +81,31 @@ export function VoiceInputButton({
           pointerId: event.pointerId,
           startY: event.clientY,
           cancelIntent: false,
+          startSettled: false,
+          pendingAction: null,
         };
         setNextCancelIntent(false);
-        void Promise.resolve(onStart());
+        const pointer = pointerRef.current;
+        void Promise.resolve(onStart())
+          .then(() => {
+            if (pointerRef.current !== pointer) {
+              return;
+            }
+            pointer.startSettled = true;
+            if (!pointer.pendingAction) {
+              return;
+            }
+            const action = pointer.pendingAction;
+            pointerRef.current = null;
+            setNextCancelIntent(false);
+            runTerminalAction(action);
+          })
+          .catch(() => {
+            if (pointerRef.current === pointer) {
+              pointerRef.current = null;
+              setNextCancelIntent(false);
+            }
+          });
       }}
       onPointerMove={event => {
         const pointer = pointerRef.current;
