@@ -1,443 +1,192 @@
-# Registry Speech Input Implementation Plan
+# Registry 语音输入实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **给执行代理：** 实现本计划时必须使用 `subagent-driven-development`（优先）或 `executing-plans`，按任务逐项执行并更新状态。
 
-**Goal:** 在 Chat 中实现用户自带火山引擎 API Key 的豆包流式语音输入，录音内容经 Registry 代理给火山引擎，识别文本实时写回当前输入框。
+**目标：** 在 Chat 中实现用户自带火山引擎 API Key 的豆包流式语音输入。浏览器录音后把音频流发送给 Registry，Registry 代理接入火山引擎豆包流式语音识别 2.0，并把识别文本实时写回当前输入框。
 
-**Architecture:** 第一版沿用现有 Registry `/ws` JSON envelope，浏览器以 Base64 PCM chunk 发送语音，Registry 转换为火山引擎二进制/gzip WebSocket 协议。前端语音设置、录音状态机、音频采集、Registry speech client、录音按钮和录音状态条都放到独立 `features/speech/` 模块；现有 `main.tsx` 只做状态接线和组件挂载。
+**架构：** 第一版沿用现有 Registry `/ws` JSON envelope。浏览器以 Base64 PCM chunk 发送语音；Registry 负责转换为火山引擎二进制 gzip WebSocket 协议。前端语音设置、录音状态机、音频采集、Registry speech client、录音按钮和录音状态条都放到独立 `features/speech/` 模块；现有 `main.tsx` 只做状态接线和组件挂载。
 
-**Tech Stack:** Go 1.26, gorilla/websocket, React 19, TypeScript, CSS, Jest, Web Audio API.
+**技术栈：** Go 1.26、gorilla/websocket、React 19、TypeScript、CSS、Jest、Web Audio API。
 
 ---
 
-## File Structure
+## 文件结构
 
-- Create: `server/internal/registry/speech_protocol.go`
-  - Registry-local speech 方法名、payload struct、脱敏 helper、Volcengine 常量。
-- Create: `server/internal/registry/speech_service.go`
+- 新增 `server/internal/registry/speech_protocol.go`
+  - Registry 本地 speech 方法名、payload struct、脱敏 helper、Volcengine 常量。
+- 新增 `server/internal/registry/speech_service.go`
   - 每个 Registry client connection 的 speech stream 生命周期、Base64 解码、finish/cancel、事件回写。
-- Create: `server/internal/registry/speech_volcengine.go`
+- 新增 `server/internal/registry/speech_volcengine.go`
   - 火山引擎 WebSocket 握手、二进制/gzip frame 编解码、response text 解析。
-- Modify: `server/internal/registry/server.go`
+- 修改 `server/internal/registry/server.go`
   - 初始化 speech service；在主 dispatch 中接入 `speech.*`；disconnect 时清理 stream。
-- Modify: `server/internal/protocol/registry_methods.go`
+- 修改 `server/internal/protocol/registry_methods.go`
   - 添加 `speech.start/chunk/finish/cancel` 客户端方法描述。
-- Create: `server/internal/registry/speech_test.go`
+- 新增 `server/internal/registry/speech_test.go`
   - Registry-local dispatch、脱敏、chunk validation、fake provider lifecycle 测试。
-- Create: `server/internal/registry/speech_volcengine_test.go`
+- 新增 `server/internal/registry/speech_volcengine_test.go`
   - 火山 frame 编解码和 transcript extraction 测试。
-- Create: `app/web/src/features/speech/speechSettings.ts`
+- 新增 `app/web/src/features/speech/speechSettings.ts`
   - 前端 speech settings 类型、默认值、模型选项、脱敏导出。
-- Create: `app/web/src/features/speech/registrySpeechClient.ts`
+- 新增 `app/web/src/features/speech/registrySpeechClient.ts`
   - 封装 `speech.start/chunk/finish/cancel` request 和 `speech.transcript/error` event subscription。
-- Create: `app/web/src/features/speech/audioCapture.ts`
+- 新增 `app/web/src/features/speech/audioCapture.ts`
   - `getUserMedia`、Float32 到 16kHz mono int16 PCM、Base64 chunk 工具。
-- Create: `app/web/src/features/speech/useVoiceInputController.ts`
+- 新增 `app/web/src/features/speech/useVoiceInputController.ts`
   - 长按、上滑取消、release finish、transcript replacement state machine。
-- Create: `app/web/src/features/speech/VoiceInputButton.tsx`
+- 新增 `app/web/src/features/speech/VoiceInputButton.tsx`
   - composer 右侧 mic button，pointer capture。
-- Create: `app/web/src/features/speech/VoiceRecordingBar.tsx`
+- 新增 `app/web/src/features/speech/VoiceRecordingBar.tsx`
   - 录音时替换 composer bottom strip 的计时/波形/取消状态 UI。
-- Modify: `app/web/src/services/workspacePersistence.ts`
+- 修改 `app/web/src/services/workspacePersistence.ts`
   - 持久化 `speechSettings`，database dump 中脱敏 API Key。
-- Modify: `app/web/src/debug/registryDebug.ts`
+- 修改 `app/web/src/debug/registryDebug.ts`
   - outbound/inbound debug 中脱敏 `speech.start.apiKey`，摘要化 `speech.chunk.pcm`。
-- Modify: `app/web/src/types/registry.ts`
+- 修改 `app/web/src/types/registry.ts`
   - 添加 speech payload/event 类型。
-- Modify: `app/web/src/services/registryClient.ts`
-  - 在 websocket boundary debug 前使用 speech redaction。
-- Modify: `app/web/src/main.tsx`
+- 修改 `app/web/src/services/registryRepository.ts`
+  - 添加 speech request 方法。
+- 修改 `app/web/src/services/registryWorkspaceService.ts`
+  - 添加 speech request 的 Workspace service 代理方法。
+- 修改 `app/web/src/main.tsx`
   - Chat 设置挂载、speech controller 接线、send button/mic button 切换、录音条挂载、textarea recording readonly。
-- Modify: `app/web/src/styles.css`
+- 修改 `app/web/src/styles.css`
   - mic button、recording bar、音量动画、取消状态样式。
-- Create: `app/__tests__/web-speech-settings.test.ts`
+- 新增 `app/__tests__/web-speech-settings.test.ts`
   - speech settings 持久化、模型选项、dump 脱敏源结构测试。
-- Create: `app/__tests__/web-speech-client.test.ts`
+- 新增 `app/__tests__/web-speech-client.test.ts`
   - Registry speech client 和 debug redaction 测试。
-- Create: `app/__tests__/web-speech-audio.test.ts`
+- 新增 `app/__tests__/web-speech-audio.test.ts`
   - PCM/Base64 工具测试。
-- Create: `app/__tests__/web-voice-input-controller.test.ts`
+- 新增 `app/__tests__/web-voice-input-controller.test.ts`
   - transcript replacement、cancel restore、gesture threshold state 测试。
-- Modify: `app/__tests__/web-chat-ui.test.ts`
+- 修改 `app/__tests__/web-chat-ui.test.ts`
   - Chat settings 与 composer voice UI source-structure 测试。
 
 ---
 
-### Task 1: Plan and Guardrail Commit
+## 任务 1：保存计划与保护性检查
 
-**Files:**
-- Create: `docs/superpowers/plans/2026-05-28-registry-speech-input.md`
+- [x] 保存本实现计划到 `docs/superpowers/plans/2026-05-28-registry-speech-input.md`。
+- [x] 执行未完成标记扫描，预期无匹配。
 
-- [ ] **Step 1: Save this implementation plan**
+## 任务 2：Registry speech 协议与脱敏
 
-Use `apply_patch` to create this file.
-
-- [ ] **Step 2: Review for unfinished markers**
-
-Run:
-
-```powershell
-rg -n "TO(DO)|TB(D)|\?\?" docs\superpowers\plans\2026-05-28-registry-speech-input.md
-```
-
-Expected: no matches.
-
-### Task 2: Registry Speech Protocol and Redaction
-
-**Files:**
-- Modify: `server/internal/protocol/registry_methods.go`
-- Create: `server/internal/registry/speech_protocol.go`
-- Create: `server/internal/registry/speech_test.go`
-
-- [ ] **Step 1: Write failing protocol tests**
-
-Add tests that assert:
-
-```go
-if !methodAllowed("client", "speech.start") { t.Fatal("client should call speech.start") }
-if methodAllowed("hub", "speech.start") { t.Fatal("hub must not call speech.start") }
-redacted := redactSpeechPayload("speech.start", speechStartPayload{APIKey: "secret"})
-```
-
-Expected redacted payload has `apiKey: "[redacted]"`.
-
-- [ ] **Step 2: Run failing Registry tests**
-
-Run:
+- [x] 先写失败测试，覆盖 client-only 方法权限和 `speech.start` API Key 脱敏。
+- [x] 运行失败测试：
 
 ```powershell
 go test ./internal/registry -run Speech
 ```
 
-Expected: FAIL because speech methods and redaction helpers do not exist.
+- [x] 添加 `speech.start`、`speech.chunk`、`speech.finish`、`speech.cancel` 协议描述，仅允许 client 调用。
+- [x] 添加 `speech_protocol.go`，包含 payload struct、方法判断和脱敏 helper。
+- [x] 重跑 Registry speech 测试并通过。
 
-- [ ] **Step 3: Add method descriptors and protocol structs**
+## 任务 3：Registry stream 生命周期与 fake provider
 
-Add `speech.start`, `speech.chunk`, `speech.finish`, `speech.cancel` constants to protocol descriptors with client role only, then implement `speech_protocol.go` with `speechStartPayload`, `speechChunkPayload`, `speechTranscriptPayload`, `speechErrorPayload`, `redactSpeechPayload`, and `isSpeechRequestMethod`.
+- [x] 先写失败生命周期测试，覆盖真实 `/ws` 上的 start/chunk/transcript/finish。
+- [x] 覆盖 bad Base64 返回 `INVALID_ARGUMENT`。
+- [x] 覆盖 websocket disconnect 时取消 stream。
+- [x] 实现 `speechProvider`、`speechProviderStream`、`speechEventSink` 接口和 `speechService`。
+- [x] 在 `server.go` 初始化 speech service、分发 `speech.*`、disconnect 时清理。
+- [x] 重跑 Registry speech 测试并通过。
 
-- [ ] **Step 4: Run Registry protocol tests**
+## 任务 4：火山引擎 frame codec 与 provider
 
-Run:
-
-```powershell
-go test ./internal/registry -run Speech
-```
-
-Expected: PASS.
-
-### Task 3: Registry Stream Lifecycle With Fake Provider
-
-**Files:**
-- Modify: `server/internal/registry/server.go`
-- Create/modify: `server/internal/registry/speech_service.go`
-- Modify: `server/internal/registry/speech_test.go`
-
-- [ ] **Step 1: Write failing lifecycle tests**
-
-Test over real `/ws`:
-
-```go
-client sends speech.start with apiKey -> receives response streamId
-client sends speech.chunk with base64 pcm -> fake provider receives bytes
-fake provider emits transcript -> client receives speech.transcript event
-client sends speech.finish -> fake provider closes and response ok
-```
-
-Also test bad Base64 returns `INVALID_ARGUMENT`, and disconnect cancels the fake stream.
-
-- [ ] **Step 2: Run failing lifecycle tests**
-
-Run:
-
-```powershell
-go test ./internal/registry -run Speech
-```
-
-Expected: FAIL because dispatch and service do not exist.
-
-- [ ] **Step 3: Implement speech service**
-
-Implement:
-
-```go
-type speechProvider interface {
-  Start(ctx context.Context, req speechProviderStartRequest, events speechEventSink) (speechProviderStream, error)
-}
-type speechProviderStream interface {
-  WriteAudio(ctx context.Context, pcm []byte) error
-  Finish(ctx context.Context) error
-  Cancel()
-}
-```
-
-`speechService` owns active streams by `connectionID + streamID`, validates ownership, decodes Base64 chunks, writes transcript/error events through `peer.write`, and cleans streams on finish/cancel/disconnect.
-
-- [ ] **Step 4: Wire Registry dispatch**
-
-In `server.go`, initialize `s.speech = newSpeechService(defaultVolcengineSpeechProvider())`; before generic forward dispatch, handle `isSpeechRequestMethod(in.Method)` with `s.speech.handleRequest(state, in)`. In disconnect cleanup, call `s.speech.cancelConnection(state.id)`.
-
-- [ ] **Step 5: Run lifecycle tests**
-
-Run:
-
-```powershell
-go test ./internal/registry -run Speech
-```
-
-Expected: PASS.
-
-### Task 4: Volcengine Frame Codec and Provider
-
-**Files:**
-- Create: `server/internal/registry/speech_volcengine.go`
-- Create: `server/internal/registry/speech_volcengine_test.go`
-
-- [ ] **Step 1: Write failing codec tests**
-
-Test that:
-
-```go
-buildVolcengineFullClientRequest(...)
-```
-
-emits a header with version 1, header size 1, full client request type, JSON serialization, gzip compression, big-endian payload size; audio frame uses audio-only type and gzip compression; final audio frame sets the final flag; response parser extracts `result.text`.
-
-- [ ] **Step 2: Run failing codec tests**
-
-Run:
+- [x] 先写失败 codec 测试，覆盖 full client request header、gzip JSON payload、audio frame、final audio frame、response parser。
+- [x] 运行失败测试：
 
 ```powershell
 go test ./internal/registry -run Volcengine
 ```
 
-Expected: FAIL because codec functions do not exist.
+- [x] 实现 `volcengineSpeechProvider`，使用以下握手头：
 
-- [ ] **Step 3: Implement Volcengine provider**
-
-Implement `volcengineSpeechProvider` using `websocket.DefaultDialer.Dial` with headers:
-
-```go
+```text
 X-Api-Key: <user key>
 X-Api-Resource-Id: volc.seedasr.sauc.duration
 X-Api-Request-Id: <generated id>
 X-Api-Sequence: -1
 ```
 
-Send full client request first, then audio-only frames, then final audio-only frame on finish. A read goroutine parses server full responses and emits `speech.transcript`; error frames become `speech.error`.
+- [x] 发送 full client request、audio-only frames、finish final frame。
+- [x] read loop 解析 `speech.transcript` 和 `speech.error`。
+- [x] 重跑 Volcengine 测试并通过。
 
-- [ ] **Step 4: Run Volcengine tests**
+## 任务 5：Web speech 设置、持久化与 debug 脱敏
 
-Run:
-
-```powershell
-go test ./internal/registry -run Volcengine
-```
-
-Expected: PASS.
-
-### Task 5: Web Speech Settings, Persistence, and Debug Redaction
-
-**Files:**
-- Create: `app/web/src/features/speech/speechSettings.ts`
-- Modify: `app/web/src/services/workspacePersistence.ts`
-- Modify: `app/web/src/debug/registryDebug.ts`
-- Modify: `app/web/src/services/registryClient.ts`
-- Create: `app/__tests__/web-speech-settings.test.ts`
-- Create: `app/__tests__/web-speech-client.test.ts`
-
-- [ ] **Step 1: Write failing Jest tests**
-
-Tests assert:
-
-```ts
-DEFAULT_SPEECH_SETTINGS.enabled === false
-SPEECH_MODEL_OPTIONS[0].resourceId === 'volc.seedasr.sauc.duration'
-workspacePersistence contains speechSettings and redacts volcengineApiKey in dumpDatabase()
-debug record for speech.start does not contain raw apiKey
-debug record for speech.chunk does not contain raw pcm
-```
-
-- [ ] **Step 2: Run failing Jest tests**
-
-Run:
+- [x] 先写失败 Jest 测试，覆盖默认设置、模型 resource ID、持久化、database dump 脱敏。
+- [x] 覆盖 debug record 中 `speech.start` 不含原始 API Key、`speech.chunk` 不含原始 PCM。
+- [x] 实现 `speechSettings.ts`、`workspacePersistence.ts`、`registryDebug.ts`。
+- [x] 重跑聚焦 Jest 测试并通过：
 
 ```powershell
 npm test -- --runTestsByPath __tests__/web-speech-settings.test.ts __tests__/web-speech-client.test.ts --runInBand
 ```
 
-Expected: FAIL because speech settings and redaction do not exist.
+## 任务 6：Web 音频采集与语音控制器模块
 
-- [ ] **Step 3: Implement settings and redaction**
-
-Add `speechSettings` to persisted global state and sanitize it through `normalizeSpeechSettings`. Persist it as one JSON global key. In database dump, replace `volcengineApiKey` with `[redacted]`. Add `redactRegistryDebugEnvelope` so debug captures redact API key and summarize PCM before records are stored.
-
-- [ ] **Step 4: Run Jest tests**
-
-Run:
-
-```powershell
-npm test -- --runTestsByPath __tests__/web-speech-settings.test.ts __tests__/web-speech-client.test.ts --runInBand
-```
-
-Expected: PASS.
-
-### Task 6: Web Audio and Voice Controller Modules
-
-**Files:**
-- Create: `app/web/src/features/speech/audioCapture.ts`
-- Create: `app/web/src/features/speech/registrySpeechClient.ts`
-- Create: `app/web/src/features/speech/useVoiceInputController.ts`
-- Create: `app/__tests__/web-speech-audio.test.ts`
-- Create: `app/__tests__/web-voice-input-controller.test.ts`
-
-- [ ] **Step 1: Write failing module tests**
-
-Tests assert:
-
-```ts
-floatTo16BitPCM(new Float32Array([-1, 0, 1])) // clamps to int16 little-endian
-base64FromBytes(new Uint8Array([1, 2, 3])) === 'AQID'
-replaceVoiceSegment('hi world', 3, 8, 'there') === 'hi there'
-cancel restores baseText
-swipe up beyond threshold changes gesture state to cancel
-```
-
-- [ ] **Step 2: Run failing module tests**
-
-Run:
+- [x] 先写失败模块测试，覆盖 `floatTo16BitPCM`、`base64FromBytes`、`replaceVoiceSegment`、cancel restore、上滑取消阈值。
+- [x] 实现纯工具和 Registry speech client。
+- [x] 实现浏览器麦克风采集：`getUserMedia`、Web Audio、重采样到 16kHz mono int16 PCM、Base64 chunk。
+- [x] 重跑模块测试并通过：
 
 ```powershell
 npm test -- --runTestsByPath __tests__/web-speech-audio.test.ts __tests__/web-voice-input-controller.test.ts --runInBand
 ```
 
-Expected: FAIL because modules do not exist.
+## 任务 7：Chat composer UI 接线
 
-- [ ] **Step 3: Implement modules**
-
-Implement reusable pure helpers first, then the hook:
-
-```ts
-export function replaceVoiceSegment(baseText: string, insertStart: number, insertEnd: number, voiceText: string): string
-export function resolveVoiceGestureState(startY: number, currentY: number, threshold = 52): 'recording' | 'cancel'
-export function floatTo16BitPCM(input: Float32Array): ArrayBuffer
-```
-
-`registrySpeechClient` wraps `RegistryClient.request`, subscribes to speech events, and exposes typed callbacks.
-
-- [ ] **Step 4: Run module tests**
-
-Run:
-
-```powershell
-npm test -- --runTestsByPath __tests__/web-speech-audio.test.ts __tests__/web-voice-input-controller.test.ts --runInBand
-```
-
-Expected: PASS.
-
-### Task 7: Composer UI Wiring
-
-**Files:**
-- Create: `app/web/src/features/speech/VoiceInputButton.tsx`
-- Create: `app/web/src/features/speech/VoiceRecordingBar.tsx`
-- Modify: `app/web/src/main.tsx`
-- Modify: `app/web/src/styles.css`
-- Modify: `app/__tests__/web-chat-ui.test.ts`
-
-- [ ] **Step 1: Write failing UI source tests**
-
-Tests assert:
-
-```ts
-main.tsx imports VoiceInputButton and VoiceRecordingBar
-Chat settings include Voice Input, Volcengine API Key, Doubao Streaming ASR 2.0
-send button is conditionally replaced by VoiceInputButton when speechSettings.enabled
-textarea readOnly includes voice recording state
-toolbar area conditionally renders VoiceRecordingBar while recording
-styles contain .voice-input-button and .voice-recording-bar
-```
-
-- [ ] **Step 2: Run failing UI tests**
-
-Run:
+- [x] 先写失败 UI source 测试，覆盖 Chat 设置、语音按钮、录音条、textarea readonly、CSS class。
+- [x] 实现 `VoiceInputButton` 和 `VoiceRecordingBar`。
+- [x] 在 Chat 设置中添加 Voice Input、Volcengine API Key、Speech Model。
+- [x] 开启语音输入后，用 mic button 替换发送按钮。
+- [x] 录音期间用 `VoiceRecordingBar` 替换底部 toolbar，并把 transcript 实时写回输入框。
+- [x] 松手 finish，上滑 cancel 并恢复录音前文本。
+- [x] 重跑 UI 测试并通过：
 
 ```powershell
 npm test -- --runTestsByPath __tests__/web-chat-ui.test.ts --runInBand
 ```
 
-Expected: FAIL because UI is not wired.
+## 任务 8：完整验证
 
-- [ ] **Step 3: Implement UI wiring**
-
-Add Chat settings rows, initialize speech settings from persistence, persist changes through workspace store, create speech client from the active Registry repository/client path, and replace the send button with `VoiceInputButton` when enabled. Render `VoiceRecordingBar` instead of composer toolbar while recording.
-
-- [ ] **Step 4: Run UI tests**
-
-Run:
-
-```powershell
-npm test -- --runTestsByPath __tests__/web-chat-ui.test.ts --runInBand
-```
-
-Expected: PASS.
-
-### Task 8: Full Verification
-
-**Files:** all touched files.
-
-- [ ] **Step 1: Run focused Go tests**
-
-Run:
+- [x] 运行 Go 聚焦测试：
 
 ```powershell
 go test ./internal/protocol ./internal/registry
 ```
 
-Expected: PASS.
-
-- [ ] **Step 2: Run focused web tests**
-
-Run:
+- [x] 运行前端聚焦测试：
 
 ```powershell
 npm test -- --runTestsByPath __tests__/web-speech-settings.test.ts __tests__/web-speech-client.test.ts __tests__/web-speech-audio.test.ts __tests__/web-voice-input-controller.test.ts __tests__/web-chat-ui.test.ts --runInBand
 ```
 
-Expected: PASS.
-
-- [ ] **Step 3: Run TypeScript check**
-
-Run:
+- [x] 运行 TypeScript 检查：
 
 ```powershell
 npm run tsc:web
 ```
 
-Expected: PASS.
-
-- [ ] **Step 4: Run full Go tests**
-
-Run:
+- [x] 运行完整 Go 测试：
 
 ```powershell
 go test ./...
 ```
 
-Expected: PASS.
-
-- [ ] **Step 5: Build web**
-
-Run:
+- [x] 构建 Web：
 
 ```powershell
 npm run build:web
 ```
 
-Expected: PASS and output under `~/.wheelmaker/web`.
-
 ---
 
-## Self-Review
+## 自检
 
-- Spec coverage: settings, Base64 `/ws`, Registry-local protocol, Volcengine proxy, transcript replacement, cancel gesture, debug redaction, code split, tests, and manual verification all map to tasks.
-- Unfinished-marker scan: no standard unfinished markers or incomplete sections should remain.
-- Type consistency: speech method names are `speech.start`, `speech.chunk`, `speech.finish`, `speech.cancel`; event names are `speech.transcript`, `speech.error`; model resource ID is `volc.seedasr.sauc.duration`.
+- 需求覆盖：用户自带 API Key、Registry 代理、Base64 PCM、火山引擎二进制协议、实时 transcript 写入、上滑取消、录音条 UI、debug 脱敏、代码拆分和测试均已覆盖。
+- 方法名一致：`speech.start`、`speech.chunk`、`speech.finish`、`speech.cancel`；事件名 `speech.transcript`、`speech.error`。
+- 模型资源 ID：`volc.seedasr.sauc.duration`。
+- 第一版音频传输：仍走 Registry JSON envelope + Base64；后续如需要降低带宽开销，可单独升级为二进制 websocket frame。
