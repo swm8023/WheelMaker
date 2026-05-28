@@ -1248,6 +1248,8 @@ describe('web chat integration', () => {
     expect(chatSection).toContain('className="voice-input-settings-nested"');
     expect(chatSection).toContain('API Key');
     expect(chatSection).toContain('Model');
+    expect(chatSection).toContain('type="text"');
+    expect(chatSection).not.toContain('type="password"');
     expect(chatSection).not.toContain('Volcengine API Key');
     expect(chatSection).not.toContain('Speech Model');
     expect(chatSection).not.toContain("setSettingsDetailView('voiceInput')");

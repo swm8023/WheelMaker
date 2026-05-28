@@ -12977,7 +12977,7 @@ function App() {
                 </span>
                 <input
                   className="sidebar-setting-input"
-                  type="password"
+                  type="text"
                   autoComplete="off"
                   spellCheck={false}
                   value={speechSettings.volcengineApiKey}
