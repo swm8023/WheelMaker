@@ -14940,7 +14940,7 @@ function App() {
                     <VoiceInputButton
                       recording={voiceRecording}
                       disabled={chatAttachmentUploadPending}
-                      readOnly={chatSending || voiceRecording}
+                      readOnly={chatSending}
                       onStart={startVoiceInput}
                       onFinish={finishVoiceInput}
                       onCancel={cancelVoiceInputByGesture}

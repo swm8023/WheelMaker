@@ -61,6 +61,38 @@ body,
   height: 100%;
   background: var(--bg);
   color: var(--text);
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable='true'],
+[contenteditable='true'] *,
+.chat-main-message,
+.chat-main-message *,
+.chat-prompt-user,
+.chat-prompt-user *,
+.thinking-content,
+.thinking-content *,
+.wm-shiki-line-content,
+.wm-shiki-line-content *,
+.settings-skills-marketplace-url {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.chat-main-message .chat-option-reply-inline-button,
+.chat-main-message .chat-option-reply-inline-button *,
+.chat-main-message .chat-option-reply-static,
+.chat-main-message .chat-option-reply-static *,
+.chat-main-message .chat-confirmation-reply-action,
+.chat-main-message .chat-confirmation-reply-action * {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .page {

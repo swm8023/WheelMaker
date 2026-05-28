@@ -11,6 +11,16 @@ function cssRuleBlock(stylesCss: string, selector: string): string {
   return match?.[1] ?? '';
 }
 
+function cssRuleBlockContainingSelector(stylesCss: string, selector: string): string {
+  for (const match of stylesCss.matchAll(/([^{}]+)\{([\s\S]*?)\}/g)) {
+    const selectors = match[1].split(',').map((item) => item.trim());
+    if (selectors.includes(selector)) {
+      return match[2];
+    }
+  }
+  return '';
+}
+
 function cssNumericProperty(stylesCss: string, selector: string, property: string): number {
   const block = cssRuleBlock(stylesCss, selector);
   const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -57,6 +67,80 @@ describe('web chat integration', () => {
       'projectSessionLongPressTargetRef.current = projectSessionActionKey(targetProjectId, normalizedSessionId);',
     );
     expect(contextMenuBody).not.toContain("projectSessionLongPressTargetRef.current = '';");
+  });
+
+  test('defaults app chrome to non-selectable while preserving content text selection', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
+    const shikiRenderer = readSourceText(path.join(projectRoot, 'web', 'src', 'services', 'shikiRenderer.ts'));
+    const appSurfaceSelectors = ['.page', '.workspace'];
+
+    for (const selector of appSurfaceSelectors) {
+      const block = cssRuleBlockContainingSelector(stylesCss, selector);
+      expect(block).toContain('-webkit-touch-callout: none;');
+      expect(block).toContain('-webkit-user-select: none;');
+      expect(block).toContain('user-select: none;');
+    }
+
+    const selectableTextSelectors = [
+      'input',
+      'textarea',
+      "[contenteditable='true']",
+      "[contenteditable='true'] *",
+      '.chat-main-message',
+      '.chat-main-message *',
+      '.chat-prompt-user',
+      '.chat-prompt-user *',
+      '.thinking-content',
+      '.thinking-content *',
+      '.wm-shiki-line-content',
+      '.wm-shiki-line-content *',
+      '.settings-skills-marketplace-url',
+    ];
+
+    for (const selector of selectableTextSelectors) {
+      const block = cssRuleBlockContainingSelector(stylesCss, selector);
+      expect(block).toContain('-webkit-user-select: text;');
+      expect(block).toContain('user-select: text;');
+    }
+
+    const nonContentSelectors = [
+      '.chat-main-message .chat-option-reply-inline-button',
+      '.chat-main-message .chat-option-reply-inline-button *',
+      '.chat-main-message .chat-option-reply-static',
+      '.chat-main-message .chat-option-reply-static *',
+      '.chat-main-message .chat-confirmation-reply-action',
+      '.chat-main-message .chat-confirmation-reply-action *',
+      '.chat-option-reply-inline-button',
+      '.chat-confirmation-reply-action',
+      '.chat-prompt-attachment-strip',
+      '.diff-inline .wm-shiki-diff-gutter',
+    ];
+
+    for (const selector of nonContentSelectors) {
+      const block = cssRuleBlockContainingSelector(stylesCss, selector);
+      expect(block).not.toContain('-webkit-user-select: text;');
+      expect(block).not.toContain('user-select: text;');
+    }
+
+    const chatReplyChromeSelectors = [
+      '.chat-main-message .chat-option-reply-inline-button',
+      '.chat-main-message .chat-option-reply-inline-button *',
+      '.chat-main-message .chat-option-reply-static',
+      '.chat-main-message .chat-option-reply-static *',
+      '.chat-main-message .chat-confirmation-reply-action',
+      '.chat-main-message .chat-confirmation-reply-action *',
+    ];
+
+    for (const selector of chatReplyChromeSelectors) {
+      const block = cssRuleBlockContainingSelector(stylesCss, selector);
+      expect(block).toContain('-webkit-touch-callout: none;');
+      expect(block).toContain('-webkit-user-select: none;');
+      expect(block).toContain('user-select: none;');
+    }
+
+    expect(shikiRenderer).toContain("className: ['wm-shiki-line-number']");
+    expect(shikiRenderer).toContain('user-select:none');
   });
 
   test('defines registry session protocol and uses real chat UI instead of placeholder sessions', () => {
@@ -1163,7 +1247,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('onStart={startVoiceInput}');
     expect(mainTsx).toContain('onFinish={finishVoiceInput}');
     expect(mainTsx).toContain('onCancel={cancelVoiceInputByGesture}');
-    expect(mainTsx).toContain('readOnly={chatSending || voiceRecording}');
+    expect(mainTsx).toContain('readOnly={chatSending}');
     expect(mainTsx).toContain('voiceRecording ? (');
     expect(mainTsx).toContain('<VoiceRecordingBar');
 

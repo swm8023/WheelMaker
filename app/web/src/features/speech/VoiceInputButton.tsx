@@ -1,6 +1,8 @@
 import React, {useRef, useState} from 'react';
 import {resolveVoiceGestureState} from './useVoiceInputController';
 
+const VOICE_TAP_LOCK_MS = 260;
+
 export type VoiceInputButtonProps = {
   disabled?: boolean;
   readOnly?: boolean;
@@ -11,12 +13,15 @@ export type VoiceInputButtonProps = {
   onCancelIntentChange?: (cancelIntent: boolean) => void;
 };
 
+type PointerAction = 'finish' | 'cancel' | 'lock';
+
 type ActivePointer = {
   pointerId: number;
   startY: number;
+  startTime: number;
   cancelIntent: boolean;
   startSettled: boolean;
-  pendingAction: 'finish' | 'cancel' | null;
+  pendingAction: PointerAction | null;
 };
 
 export function VoiceInputButton({
@@ -39,7 +44,10 @@ export function VoiceInputButton({
     }
   };
 
-  const runTerminalAction = (action: 'finish' | 'cancel') => {
+  const runTerminalAction = (action: PointerAction) => {
+    if (action === 'lock') {
+      return;
+    }
     if (action === 'cancel') {
       void Promise.resolve(onCancel());
       return;
@@ -47,13 +55,31 @@ export function VoiceInputButton({
     void Promise.resolve(onFinish());
   };
 
-  const finishPointer = (event: React.PointerEvent<HTMLButtonElement>, forceCancel: boolean) => {
+  const resolvePointerAction = (
+    pointer: ActivePointer,
+    event: React.PointerEvent<HTMLButtonElement>,
+    source: 'up' | 'cancel',
+  ): PointerAction => {
+    if (pointer.cancelIntent) {
+      return 'cancel';
+    }
+    if (source === 'cancel') {
+      return 'lock';
+    }
+    const elapsedMs = Math.max(0, event.timeStamp - pointer.startTime);
+    return elapsedMs < VOICE_TAP_LOCK_MS ? 'lock' : 'finish';
+  };
+
+  const finishPointer = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    source: 'up' | 'cancel',
+  ) => {
     const pointer = pointerRef.current;
     if (!pointer || pointer.pointerId !== event.pointerId) {
       return;
     }
     event.currentTarget.releasePointerCapture?.(event.pointerId);
-    const action = forceCancel || pointer.cancelIntent ? 'cancel' : 'finish';
+    const action = resolvePointerAction(pointer, event, source);
     setNextCancelIntent(false);
     if (!pointer.startSettled) {
       pointer.pendingAction = action;
@@ -72,14 +98,22 @@ export function VoiceInputButton({
       title={recording ? 'Finish voice input' : 'Voice input'}
       onContextMenu={event => event.preventDefault()}
       onPointerDown={event => {
-        if (disabled || readOnly || pointerRef.current) {
+        if (disabled || pointerRef.current) {
           return;
         }
         event.preventDefault();
+        if (recording) {
+          void Promise.resolve(onFinish());
+          return;
+        }
+        if (readOnly) {
+          return;
+        }
         event.currentTarget.setPointerCapture?.(event.pointerId);
         pointerRef.current = {
           pointerId: event.pointerId,
           startY: event.clientY,
+          startTime: event.timeStamp,
           cancelIntent: false,
           startSettled: false,
           pendingAction: null,
@@ -117,8 +151,8 @@ export function VoiceInputButton({
           setNextCancelIntent(next);
         }
       }}
-      onPointerUp={event => finishPointer(event, false)}
-      onPointerCancel={event => finishPointer(event, true)}
+      onPointerUp={event => finishPointer(event, 'up')}
+      onPointerCancel={event => finishPointer(event, 'cancel')}
       onPointerLeave={event => {
         const pointer = pointerRef.current;
         if (!pointer || pointer.pointerId !== event.pointerId) {
