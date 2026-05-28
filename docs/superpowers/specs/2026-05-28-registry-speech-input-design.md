@@ -1,120 +1,120 @@
-# Registry Speech Input Design
+# Registry 语音输入设计
 
-Date: 2026-05-28
+日期：2026-05-28
 
-## Context
+## 背景
 
-WheelMaker should support streaming speech input in Chat using Volcengine Doubao Streaming ASR 2.0. The user enters their own Volcengine API key in the Workspace Web UI. The first implementation should avoid deployment changes such as Nginx route updates and should not require Hub involvement.
+WheelMaker 需要在 Chat 中支持流式语音输入，识别服务使用火山引擎豆包流式语音识别 2.0。用户在 Workspace Web UI 中填写自己的火山引擎 API Key。第一版实现应避免调整部署配置，例如不新增 Nginx 路由，也不依赖 Hub。
 
-The current Registry browser connection uses the existing `/ws` JSON envelope. That path currently reads JSON messages, so it is not ready for raw binary audio frames. Volcengine's streaming ASR WebSocket also requires custom handshake headers such as `X-Api-Key`, `X-Api-Resource-Id`, `X-Api-Request-Id`, and `X-Api-Sequence`, which browser WebSocket APIs cannot set directly. Therefore the Registry must proxy the Volcengine connection.
+当前浏览器到 Registry 的连接使用已有 `/ws` JSON envelope。这个路径现在按 JSON 读取消息，不适合直接接收原始二进制音频帧。火山引擎流式 ASR WebSocket 还要求在握手阶段设置 `X-Api-Key`、`X-Api-Resource-Id`、`X-Api-Request-Id`、`X-Api-Sequence` 等自定义 header，而浏览器 WebSocket API 不能设置这些 header。因此，火山引擎连接必须由 Registry 代理。
 
-## Goals
+## 目标
 
-- Add a Chat voice-input mode that streams microphone audio to Registry while the user holds the mic button.
-- Stream ASR text back into the current Chat input in real time.
-- Let each user provide their own Volcengine API key in Chat settings.
-- Use Doubao Streaming ASR 2.0 postpaid mode for the first version.
-- Keep the implementation split into focused files/modules instead of adding large blocks to existing Registry or UI files.
-- Avoid Nginx and deployment changes in the first version.
+- 在 Chat 中增加语音输入模式：用户按住麦克风按钮时，浏览器把麦克风音频流式发送给 Registry。
+- ASR 返回内容实时插入当前 Chat 输入框。
+- 用户可以在 Chat 设置中填写自己的火山引擎 API Key。
+- 第一版使用豆包流式语音识别 2.0 后付费模式。
+- 实现必须拆成边界清晰的文件和模块，避免把大段逻辑塞进现有 Registry 或 UI 大文件。
+- 第一版不改 Nginx 和部署配置。
 
-## Non-Goals
+## 非目标
 
-- No direct browser-to-Volcengine connection.
-- No Hub, marketplace, Registry package publishing, or Desktop bridge dependency.
-- No dedicated binary Registry speech WebSocket in the first version.
-- No multi-provider speech abstraction until another provider is actually added.
-- No server-side persistence of API keys or recorded audio.
+- 不做浏览器直连火山引擎。
+- 不放到 Hub、市场、Registry 包发布流程，也不依赖 Desktop bridge。
+- 第一版不新增专用的二进制 Registry 语音 WebSocket。
+- 在确实新增第二个语音供应商之前，不抽象多供应商语音框架。
+- Registry 不持久化 API Key 或录音音频。
 
-## Product Decisions
+## 产品决策
 
-### Settings
+### 设置
 
-Add Chat settings for speech input:
+在 Chat 设置中新增语音输入配置：
 
-- `Voice Input` toggle.
-- `Volcengine API Key` password field.
-- `Speech Model` select with a single option for now:
-  - Label: `Doubao Streaming ASR 2.0`
-  - Resource ID: `volc.seedasr.sauc.duration`
+- `Voice Input` 开关。
+- `Volcengine API Key` 密码输入框。
+- `Speech Model` 下拉选择，目前只有一个选项：
+  - Label：`Doubao Streaming ASR 2.0`
+  - Resource ID：`volc.seedasr.sauc.duration`
 
-The API key is stored in browser-local persistent settings, matching the user decision for this feature. It must be excluded from debug database dumps and redacted anywhere settings are displayed for diagnostics.
+API Key 按本功能已确认的方案存储在浏览器本地持久化设置里。调试数据库导出必须排除或脱敏这个字段，任何诊断展示也必须脱敏。
 
-### Composer Interaction
+### 输入框交互
 
-When `Voice Input` is disabled, the right composer action remains the current send button.
+当 `Voice Input` 关闭时，输入框右侧操作按钮保持当前发送按钮。
 
-When `Voice Input` is enabled, the right composer action becomes a mic button on both desktop and mobile, even if there is typed text or attachments. Sending remains available through keyboard and IME send behavior. This keeps desktop and mobile behavior consistent.
+当 `Voice Input` 开启时，桌面端和移动端的右侧操作按钮都变成麦克风按钮，即使当前已有文本或附件也保持为麦克风。发送仍通过键盘或输入法发送行为完成。这样可以保持桌面端和移动端一致。
 
-Mic behavior:
+麦克风按钮行为：
 
-- Long press starts recording.
-- Release finishes recording.
-- Swipe up cancels the entire voice input for that recording.
-- `Esc`, composer blur, Registry disconnect, or fatal stream errors cancel and restore the previous input.
+- 长按开始录音。
+- 松手结束录音。
+- 上滑取消本次语音输入的全部内容。
+- `Esc`、输入框失焦、Registry 断开、或致命流式错误都会取消录音并恢复原输入。
 
-During recording, the composer bottom strip is replaced by a stronger voice-recording state instead of only changing the icon. It should show a timer, audio-level animation, and release/cancel guidance. When the swipe-up threshold is crossed, it changes to a cancel state before release.
+录音期间，输入框底部整条区域应切换成更强的语音录入状态，而不是只改变麦克风图标。这个状态需要展示计时器、音量或声波动画，以及“松手完成 / 上滑取消”一类的提示。上滑超过取消阈值后，松手前就切换到取消状态。
 
-### Transcript Insertion
+### 识别文本插入
 
-At recording start, capture:
+录音开始时捕获：
 
 - `baseText`
 - `insertStart`
 - `insertEnd`
 
-Each `speech.transcript` event updates one voice segment in the composer:
+每次收到 `speech.transcript` 事件时，只替换当前录音对应的那一段文本：
 
 ```text
 nextText = baseText[0:insertStart] + voiceText + baseText[insertEnd:]
 ```
 
-The transcript should be treated as the current full text for the active recording, not as an append-only delta. This avoids duplicated text when the ASR stream revises partial results.
+ASR 返回内容应被视为当前录音的完整文本，而不是 append-only delta。这样可以避免流式 ASR 修正中间结果时产生重复文本。
 
-On successful final result, keep the final transcript in the input. On cancel or stream failure, restore `baseText`.
+最终成功时，保留最终识别文本。取消或流式失败时，恢复 `baseText`。
 
-## Architecture
+## 架构
 
-### Data Flow
+### 数据流
 
-1. User enables Voice Input and enters a Volcengine API key in Chat settings.
-2. User long-presses the mic button in Chat.
-3. Browser captures microphone audio with `getUserMedia`.
-4. Browser converts audio to `16kHz`, mono, signed `int16` PCM.
-5. Browser sends Base64 PCM chunks to Registry over the existing `/ws` JSON envelope.
-6. Registry opens a Volcengine streaming ASR WebSocket using the user-provided API key as a handshake header.
-7. Registry translates browser JSON chunks into the Volcengine binary/gzip protocol.
-8. Registry forwards partial and final transcript events back to the same browser connection.
-9. Browser replaces the active voice segment in the current input as transcripts arrive.
+1. 用户在 Chat 设置中开启 `Voice Input` 并填写火山引擎 API Key。
+2. 用户在 Chat 中长按麦克风按钮。
+3. 浏览器通过 `getUserMedia` 获取麦克风音频。
+4. 浏览器把音频转换成 `16kHz`、单声道、signed `int16` PCM。
+5. 浏览器把 Base64 PCM chunk 通过已有 `/ws` JSON envelope 发送给 Registry。
+6. Registry 使用用户提供的 API Key 作为握手 header，打开火山引擎流式 ASR WebSocket。
+7. Registry 把浏览器 JSON chunk 转换成火山引擎要求的二进制/gzip 协议。
+8. Registry 把 partial 和 final transcript 事件转发回同一个浏览器连接。
+9. 浏览器把返回文本实时替换到当前输入框中的语音片段位置。
 
-### Why Base64 First
+### 为什么第一版用 Base64
 
-The current Registry `/ws` path expects JSON and Nginx already proxies it. Base64 PCM inside JSON adds overhead, but a 200ms `16kHz` mono `int16` PCM chunk is about 6.4KB raw and roughly 8.5KB after Base64. At 5 chunks per second, the MVP traffic is acceptable for chat voice input.
+当前 Registry `/ws` 路径预期接收 JSON，现有 Nginx 也已经代理这个路径。Base64 PCM 放在 JSON 里会增加体积，但 200ms 的 `16kHz` 单声道 `int16` PCM 原始数据约 6.4KB，Base64 后约 8.5KB。按每秒 5 个 chunk 计算，作为 Chat 语音输入 MVP 是可以接受的。
 
-This lets the first version avoid:
+这个方案让第一版可以避免：
 
-- Nginx route changes.
-- A second Registry WebSocket endpoint.
-- Binary-frame compatibility changes in the existing `/ws` reader.
+- 新增 Nginx 路由。
+- 新增第二个 Registry WebSocket endpoint。
+- 改造现有 `/ws` reader 以兼容二进制帧。
 
-If latency, CPU, or bandwidth become an issue, add a later binary speech endpoint such as `/speech/volcengine` and proxy it separately.
+如果后续发现延迟、CPU 或带宽不可接受，再新增专用二进制语音 endpoint，例如 `/speech/volcengine`，并单独配置代理。
 
-## Registry Protocol
+## Registry 协议
 
-Speech uses Registry-local messages on the existing browser Registry connection. These messages are not routed to Hub, project sessions, or tool execution.
+语音使用现有浏览器 Registry 连接上的 Registry-local 消息。这些消息不路由到 Hub、project session 或 tool execution。
 
-Client to Registry:
+Client 到 Registry：
 
 - `speech.start`
 - `speech.chunk`
 - `speech.finish`
 - `speech.cancel`
 
-Registry to Client:
+Registry 到 Client：
 
 - `speech.transcript`
 - `speech.error`
 
-Suggested payloads:
+建议 payload：
 
 ```ts
 type SpeechStartRequest = {
@@ -163,148 +163,148 @@ type SpeechErrorEvent = {
 };
 ```
 
-`speech.chunk` should acknowledge quickly and enqueue audio internally so the Registry read loop is not blocked by upstream Volcengine network writes.
+`speech.chunk` 应快速 ack，并把音频放入内部队列，避免 Registry read loop 被上游火山引擎网络写入阻塞。
 
-## Volcengine Integration
+## 火山引擎接入
 
-The first Volcengine implementation targets Doubao Streaming ASR 2.0 postpaid:
+第一版火山引擎实现固定接入豆包流式语音识别 2.0 后付费：
 
-- Endpoint: `wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async`
-- Resource ID: `volc.seedasr.sauc.duration`
-- Model name: `bigmodel`
-- Language: `zh-CN`
-- Audio: `pcm`, `raw`, `16000`, `16-bit`, `mono`
-- Enable ITN and punctuation.
-- Request utterance-level output when useful for finalization.
+- Endpoint：`wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async`
+- Resource ID：`volc.seedasr.sauc.duration`
+- Model name：`bigmodel`
+- Language：`zh-CN`
+- Audio：`pcm`、`raw`、`16000`、`16-bit`、`mono`
+- 开启 ITN 和标点。
+- 在有助于最终结果判断时，请求 utterance-level 输出。
 
-Registry owns the Volcengine protocol details:
+Registry 负责封装所有火山引擎协议细节：
 
-- WebSocket handshake headers.
-- `X-Api-Key`, `X-Api-Resource-Id`, `X-Api-Request-Id`, and `X-Api-Sequence: -1` handling.
-- Request ID generation.
-- Volcengine binary frame encoding and decoding.
-- Gzip JSON payload handling.
-- Mapping upstream partial/final results to `speech.transcript`.
-- Mapping upstream auth, quota, format, and network errors to `speech.error`.
+- WebSocket 握手 header。
+- `X-Api-Key`、`X-Api-Resource-Id`、`X-Api-Request-Id`、`X-Api-Sequence: -1` 的处理。
+- Request ID 生成。
+- 火山引擎二进制帧编码和解码。
+- gzip JSON payload 处理。
+- 把上游 partial/final 结果映射成 `speech.transcript`。
+- 把上游认证、额度、格式、网络错误映射成 `speech.error`。
 
-Registry should log Volcengine request IDs and `X-Tt-Logid` values for debugging when available, but must never log the API key or Base64 audio payload.
+Registry 可以记录火山引擎 request ID 和 `X-Tt-Logid` 用于排查问题，但绝不能记录 API Key 或 Base64 音频内容。
 
-## Code Organization
+## 代码组织
 
-Keep this feature isolated. The expected implementation should make only minimal touch-point edits in existing large files to register handlers or mount UI.
+这个功能必须保持隔离。对现有大文件的改动应尽量只做 handler 注册、dispatch 接入、组件挂载等最小接触点。
 
 ### Registry
 
-Prefer new focused files under `server/internal/registry/`:
+优先在 `server/internal/registry/` 下新增聚焦文件：
 
-- `speech_protocol.go`: speech method names, request/response/event structs, redaction helpers.
-- `speech_handler.go`: Registry-local dispatch for `speech.*` JSON messages.
-- `speech_service.go`: stream lifecycle, queueing, cancellation, timeouts, per-connection ownership.
-- `speech_volcengine.go`: Volcengine client, handshake headers, binary/gzip protocol, transcript parsing.
-- `speech_test.go` or focused `speech_*_test.go` files for protocol, lifecycle, and redaction tests.
+- `speech_protocol.go`：speech 方法名、request/response/event struct、脱敏 helper。
+- `speech_handler.go`：Registry-local 的 `speech.*` JSON 消息分发。
+- `speech_service.go`：stream 生命周期、队列、取消、超时、connection ownership。
+- `speech_volcengine.go`：火山引擎 client、握手 header、二进制/gzip 协议、transcript 解析。
+- `speech_test.go` 或聚焦的 `speech_*_test.go`：协议、生命周期、脱敏测试。
 
-Existing Registry files should only wire speech dispatch into the current WebSocket envelope flow. Do not place Volcengine protocol code inside the existing main Registry server file.
+现有 Registry 文件只负责把 speech dispatch 接入当前 WebSocket envelope 流程。不要把火山引擎协议代码放进现有 Registry 主 server 文件。
 
 ### Web UI
 
-Prefer new focused modules under a feature folder such as `app/web/src/features/speech/`:
+优先在类似 `app/web/src/features/speech/` 的 feature 目录下新增聚焦模块：
 
-- `speechSettings.ts`: persisted settings shape, defaults, masking/export redaction helpers.
-- `registrySpeechClient.ts`: `speech.start/chunk/finish/cancel` and event subscription wrapper.
-- `audioCapture.ts`: microphone permission, capture lifecycle, PCM conversion, chunk sizing.
-- `audioWorklet` file or equivalent small worker module for stable streaming capture.
-- `useVoiceInputController.ts`: composer-facing state machine for press, recording, cancel, finish, errors.
-- `VoiceInputButton.tsx` and `VoiceRecordingBar.tsx`: visual controls and recording strip.
-- Mobile gesture logic should be inside the voice controller or a small `useVoicePressGesture.ts` helper, not embedded into the existing composer body.
+- `speechSettings.ts`：持久化设置 shape、默认值、mask/export redaction helper。
+- `registrySpeechClient.ts`：`speech.start/chunk/finish/cancel` 和事件订阅 wrapper。
+- `audioCapture.ts`：麦克风权限、采集生命周期、PCM 转换、chunk sizing。
+- `audioWorklet` 文件或等价的小 worker 模块：保证稳定流式采集。
+- `useVoiceInputController.ts`：面向 composer 的状态机，处理按压、录音、取消、完成、错误。
+- `VoiceInputButton.tsx` 和 `VoiceRecordingBar.tsx`：可视控件和录音状态条。
+- 移动端手势逻辑放在 voice controller 或小的 `useVoicePressGesture.ts` helper 中，不嵌进现有 composer 主体。
 
-Existing Chat files should mount the new components and pass current composer state handlers. The implementation should avoid growing `main.tsx` with audio capture, Base64 encoding, pointer gesture, or ASR protocol details.
+现有 Chat 文件只挂载新组件并传入当前 composer state handler。实现时应避免把音频采集、Base64 编码、pointer gesture、ASR 协议细节继续塞进 `main.tsx`。
 
-Desktop and mobile should share the same voice-input state machine. Mobile-only presentation and pointer threshold details should stay in the speech feature modules instead of being scattered through existing composer conditionals.
+桌面端和移动端应共享同一套 voice-input 状态机。移动端专属展示和 pointer 阈值细节应留在 speech feature 模块内部，不要散落在现有 composer 条件判断里。
 
-## Frontend Audio Details
+## 前端音频细节
 
-Use browser microphone capture through `navigator.mediaDevices.getUserMedia({ audio: true })`.
+使用 `navigator.mediaDevices.getUserMedia({ audio: true })` 获取浏览器麦克风音频。
 
-Preferred capture path:
+推荐采集路径：
 
 - `AudioContext`
-- `AudioWorklet` for steady audio processing
-- resample to `16000Hz`
-- downmix to mono
-- convert Float32 samples to signed little-endian `int16` PCM
-- emit chunks around 200ms
+- `AudioWorklet`，用于稳定音频处理
+- 重采样到 `16000Hz`
+- 下混到单声道
+- 把 Float32 sample 转成 signed little-endian `int16` PCM
+- 每约 200ms 产出一个 chunk
 
-The browser-to-Registry JSON chunk uses Base64 of the raw PCM bytes. The Registry converts that back to bytes before writing to Volcengine.
+浏览器到 Registry 的 JSON chunk 使用原始 PCM bytes 的 Base64。Registry 收到后再解码成 bytes，并写入火山引擎连接。
 
-Recording constraints:
+录音约束：
 
-- Maximum recording duration: 60 seconds for MVP.
-- Accidental short recording threshold: about 300ms.
-- One active stream per browser connection for MVP.
-- Cancel local recording immediately when backpressure or Registry errors make the stream unhealthy.
+- MVP 单次录音最长 60 秒。
+- 约 300ms 以下视为误触短录音。
+- MVP 每个浏览器连接只允许一个 active stream。
+- 如果 backpressure 或 Registry 错误导致流不健康，前端立即取消本地录音。
 
-## Error Handling
+## 错误处理
 
-User-visible errors should be short and actionable:
+用户可见错误要短且可操作：
 
-- Missing API key: ask the user to fill the Chat speech API key.
-- Microphone permission denied: ask the user to allow microphone access.
-- Registry disconnected: cancel and restore previous input.
-- Volcengine auth or quota failure: keep settings openable and show the provider error category.
-- Audio unsupported: report that this browser cannot capture compatible microphone audio.
-- Timeout waiting for final transcript: keep the latest partial text only if Registry completed successfully; otherwise restore `baseText`.
+- 缺少 API Key：提示用户填写 Chat speech API key。
+- 麦克风权限被拒绝：提示用户允许麦克风访问。
+- Registry 断开：取消录音并恢复原输入。
+- 火山引擎认证或额度失败：展示供应商错误类别，并让用户能回到设置检查配置。
+- 音频不支持：提示当前浏览器无法采集兼容的麦克风音频。
+- 等待最终 transcript 超时：如果 Registry 已正常完成，则保留最新 partial；否则恢复 `baseText`。
 
-Server-side cleanup must run on finish, cancel, upstream error, downstream disconnect, and timeout.
+服务端在 finish、cancel、上游错误、下游断开、超时场景都必须清理 stream。
 
-## Observability and Security
+## 可观测性与安全
 
-- Redact `speech.start.apiKey` in client debug logs, server logs, and database/debug export paths.
-- Omit or summarize `speech.chunk.pcm`; record only metadata such as `streamId`, `seq`, byte count, and timing.
-- Never persist API keys or audio in Registry.
-- Keep API key lifetime scoped to the active Registry stream.
-- Avoid writing transcript events into unrelated debug streams unless existing Chat message flow already records composer state.
+- 在 client debug log、server log、database/debug export 路径中脱敏 `speech.start.apiKey`。
+- 对 `speech.chunk.pcm` 进行省略或摘要化，只记录 `streamId`、`seq`、byte count、timing 这类元数据。
+- Registry 绝不持久化 API Key 或音频。
+- API Key 生命周期仅限当前 active Registry stream。
+- 不把 transcript event 写入无关 debug stream，除非现有 Chat message flow 已经记录 composer state。
 
-## Testing
+## 测试
 
-Registry tests:
+Registry 测试：
 
-- Speech dispatch recognizes `speech.*` as Registry-local messages.
-- `speech.start` redacts API key in all diagnostic views.
-- `speech.chunk` validates `streamId`, sequence ordering, and Base64 decoding errors.
-- Stream lifecycle handles finish, cancel, disconnect, upstream error, and timeout cleanup.
-- Volcengine client can be tested with a fake WebSocket transport for frame encoding/decoding and transcript mapping.
+- Speech dispatch 能识别 `speech.*` 为 Registry-local 消息。
+- `speech.start` 在所有诊断视图中都会脱敏 API Key。
+- `speech.chunk` 校验 `streamId`、sequence 顺序、Base64 解码错误。
+- Stream 生命周期覆盖 finish、cancel、disconnect、上游错误、timeout cleanup。
+- 火山引擎 client 通过 fake WebSocket transport 测试 frame 编码/解码和 transcript 映射。
 
-Web UI tests:
+Web UI 测试：
 
-- Chat settings expose Voice Input, masked API key field, and the single Doubao Streaming ASR 2.0 model option.
-- Database/debug dump excludes or masks the speech API key.
-- Enabling Voice Input replaces the send button with the mic button on desktop and mobile.
-- Long press starts recording, release finishes, swipe up cancels.
-- Recording strip replaces the bottom composer strip and switches to cancel state after the swipe threshold.
-- Transcript events replace the active voice segment instead of appending duplicate text.
-- Cancel/error restores the original composer input.
-- PCM chunking produces `16kHz` mono `int16` data and Base64 chunks.
+- Chat 设置展示 Voice Input、masked API key field、唯一的 Doubao Streaming ASR 2.0 模型选项。
+- Database/debug dump 排除或脱敏 speech API key。
+- 开启 Voice Input 后，桌面端和移动端都用麦克风按钮替换发送按钮。
+- 长按开始录音，松手完成，上滑取消。
+- 录音状态条替换 composer 底部区域，并在超过上滑阈值后切换到取消状态。
+- Transcript event 替换 active voice segment，而不是追加导致重复文本。
+- Cancel/error 恢复原 composer input。
+- PCM chunking 产出 `16kHz` 单声道 `int16` 数据和 Base64 chunk。
 
-Manual verification:
+手工验证：
 
-- Browser asks for mic permission only when starting recording.
-- Partial transcripts appear in the input during recording.
-- Final transcript remains after release.
-- Swipe-up cancel removes all text inserted by the active recording.
-- Network debug tools do not show raw API keys in app debug exports.
+- 浏览器只在开始录音时请求麦克风权限。
+- 录音过程中 partial transcript 实时出现在输入框中。
+- 松手后 final transcript 保留。
+- 上滑取消会移除本次录音插入的全部文本。
+- App debug export 中看不到原始 API Key。
 
-## Implementation Phases
+## 实施阶段
 
-1. Add settings persistence and redaction for Chat speech settings.
-2. Add browser audio capture and voice-input state machine behind the disabled-by-default toggle.
-3. Add Registry-local `speech.*` protocol handling with a fake provider for local UI flow testing.
-4. Add Volcengine provider implementation in isolated Registry files.
-5. Wire live transcript insertion into the Chat composer.
-6. Add focused tests and manual verification for desktop and mobile.
+1. 新增 Chat speech settings 的持久化和脱敏。
+2. 在默认关闭的开关后面新增浏览器音频采集和 voice-input 状态机。
+3. 新增 Registry-local `speech.*` 协议处理，并先用 fake provider 打通本地 UI 流程。
+4. 在隔离的 Registry 文件中实现火山引擎 provider。
+5. 把实时 transcript 插入接入 Chat composer。
+6. 补充桌面端和移动端的聚焦测试及手工验证。
 
-## Open Risks
+## 风险
 
-- Browser audio resampling quality and AudioWorklet support need real-device testing.
-- Volcengine streaming responses may revise partial text; the replacement model handles this, but transcript parsing must confirm which upstream field is authoritative.
-- Base64 over JSON is acceptable for MVP but may become costly if recordings are long or many users record concurrently.
-- The current Web UI may have concentrated composer code; implementation should extract only the speech-related parts needed for this feature and avoid a broad composer rewrite.
+- 浏览器音频重采样质量和 AudioWorklet 支持需要真机验证。
+- 火山引擎流式响应可能会修正 partial text；当前 replacement model 能处理这种情况，但 transcript parsing 需要确认上游哪个字段最权威。
+- Base64 over JSON 对 MVP 可接受，但如果录音很长或并发用户很多，可能会带来额外成本。
+- 当前 Web UI 的 composer 代码可能比较集中；实现时只抽取本功能需要的语音相关部分，避免借机做大范围 composer 重写。
