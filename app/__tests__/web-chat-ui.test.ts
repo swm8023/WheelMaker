@@ -796,9 +796,9 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('className={`chat-cancel-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
     expect(mainTsx).toContain('title={selectedChatPromptRunning ? \'Cancel prompt\' : \'No prompt running\'}');
     expect(mainTsx).toContain('aria-label="Cancel prompt"');
-    expect(mainTsx).toContain("className=\"codicon codicon-debug-stop\"");
-    expect(mainTsx).not.toContain('chat-stop-glyph');
-    expect(mainTsx).not.toContain('chat-stop-square');
+    expect(mainTsx).toContain('className="chat-stop-glyph"');
+    expect(mainTsx).toContain('className="chat-stop-square"');
+    expect(mainTsx).not.toContain("className=\"codicon codicon-debug-stop\"");
     expect(mainTsx).toContain('className="chat-composer-tools"');
     expect(mainTsx).toContain('className="chat-tool-button chat-attachment-plus-button"');
     expect(mainTsx).toContain('aria-label="Open composer tools"');
@@ -875,7 +875,9 @@ describe('web chat integration', () => {
     expect(stopTriggerBlock).toContain('onPointerDown={event => event.preventDefault()}');
     expect(stopTriggerBlock).toContain('onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}');
     expect(stopTriggerBlock).toContain('disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}');
-    expect(stopTriggerBlock).toContain('className="codicon codicon-debug-stop"');
+    expect(stopTriggerBlock).toContain('className="chat-stop-glyph"');
+    expect(stopTriggerBlock).toContain('className="chat-stop-square"');
+    expect(stopTriggerBlock).not.toContain('codicon-debug-stop');
     expect(stopTriggerBlock).not.toContain('codicon-loading');
 
     const promptMenuOpenStart = mainTsx.indexOf('const openChatPromptMenu = useCallback(() => {');
@@ -977,11 +979,18 @@ describe('web chat integration', () => {
     const stopTriggerStyleBlock = stylesCss.match(/\.chat-composer-stop-trigger \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(stopTriggerStyleBlock).not.toContain('position: absolute;');
     expect(stylesCss).toContain('.chat-composer-stop-trigger.active {');
-    expect(stylesCss).toContain('.chat-composer-stop-trigger .codicon {');
-    expect(stylesCss).toContain('.chat-composer-stop-trigger.active .codicon {');
+    expect(stylesCss).toContain('.chat-stop-glyph {');
+    expect(stylesCss).toContain('.chat-stop-square {');
+    expect(stylesCss).toContain('.chat-composer-stop-trigger.active .chat-stop-glyph {');
+    expect(stylesCss).toMatch(
+      /\.chat-stop-glyph \{[\s\S]*border: 1\.7px solid currentColor;[\s\S]*border-radius: 999px;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-stop-square \{[\s\S]*width: 6px;[\s\S]*height: 6px;[\s\S]*background: currentColor;[\s\S]*\}/,
+    );
     expect(stylesCss).toContain('@keyframes chatStopBreath');
-    expect(stylesCss).not.toContain('.chat-stop-glyph {');
-    expect(stylesCss).not.toContain('.chat-stop-square {');
+    expect(stylesCss).not.toContain('.chat-composer-stop-trigger .codicon {');
+    expect(stylesCss).not.toContain('.chat-composer-stop-trigger.active .codicon {');
     expect(stylesCss).not.toContain('conic-gradient');
     expect(stylesCss).not.toContain('.chat-composer-quick-trigger {');
     expect(stylesCss).not.toContain('.chat-quick-trigger-label {');
