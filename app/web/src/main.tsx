@@ -12954,55 +12954,61 @@ function App() {
             onChange={event => setLocalHubReadEnabled(event.target.checked)}
           />
         </label>
-        <label className="settings-row sidebar-setting-row">
-          <span>
-            <span className="codicon codicon-mic settings-row-icon" aria-hidden="true" />
-            Voice Input
-          </span>
-          <input
-            type="checkbox"
-            checked={speechSettings.enabled}
-            onChange={event => setSpeechSettings(current =>
-              normalizeSpeechSettings({...current, enabled: event.target.checked}),
-            )}
-          />
-        </label>
-        <label className="settings-row sidebar-setting-row">
-          <span>
-            <span className="codicon codicon-key settings-row-icon" aria-hidden="true" />
-            Volcengine API Key
-          </span>
-          <input
-            className="sidebar-setting-input"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={speechSettings.volcengineApiKey}
-            onChange={event => setSpeechSettings(current =>
-              normalizeSpeechSettings({...current, volcengineApiKey: event.target.value}),
-            )}
-          />
-        </label>
-        <label className="settings-row sidebar-setting-row">
-          <span>
-            <span className="codicon codicon-symbol-misc settings-row-icon" aria-hidden="true" />
-            Speech Model
-          </span>
-          <select
-            className="sidebar-setting-select"
-            title="Doubao Streaming ASR 2.0"
-            value={speechSettings.model}
-            onChange={event => setSpeechSettings(current =>
-              normalizeSpeechSettings({...current, model: event.target.value}),
-            )}
-          >
-            {SPEECH_MODEL_OPTIONS.map(item => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="voice-input-settings-menu">
+          <label className="settings-row sidebar-setting-row">
+            <span>
+              <span className="codicon codicon-mic settings-row-icon" aria-hidden="true" />
+              Voice Input
+            </span>
+            <input
+              type="checkbox"
+              checked={speechSettings.enabled}
+              onChange={event => setSpeechSettings(current =>
+                normalizeSpeechSettings({...current, enabled: event.target.checked}),
+              )}
+            />
+          </label>
+          {speechSettings.enabled ? (
+            <div className="voice-input-settings-nested">
+              <label className="settings-row sidebar-setting-row voice-input-settings-child-row">
+                <span>
+                  <span className="codicon codicon-key settings-row-icon" aria-hidden="true" />
+                  API Key
+                </span>
+                <input
+                  className="sidebar-setting-input"
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={speechSettings.volcengineApiKey}
+                  onChange={event => setSpeechSettings(current =>
+                    normalizeSpeechSettings({...current, volcengineApiKey: event.target.value}),
+                  )}
+                />
+              </label>
+              <label className="settings-row sidebar-setting-row voice-input-settings-child-row">
+                <span>
+                  <span className="codicon codicon-symbol-misc settings-row-icon" aria-hidden="true" />
+                  Model
+                </span>
+                <select
+                  className="sidebar-setting-select"
+                  title="Doubao Streaming ASR 2.0"
+                  value={speechSettings.model}
+                  onChange={event => setSpeechSettings(current =>
+                    normalizeSpeechSettings({...current, model: event.target.value}),
+                  )}
+                >
+                  {SPEECH_MODEL_OPTIONS.map(item => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : null}
+        </div>
         <label className="settings-row sidebar-setting-row">
           <span>
             <span className="codicon codicon-text-size settings-row-icon" aria-hidden="true" />

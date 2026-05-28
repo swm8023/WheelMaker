@@ -1239,8 +1239,18 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("import {DEFAULT_SPEECH_SETTINGS, SPEECH_MODEL_OPTIONS, normalizeSpeechSettings");
     expect(mainTsx).toContain('const [speechSettings, setSpeechSettings] = useState(');
     expect(mainTsx).toContain('workspaceStore.rememberGlobalState({ speechSettings });');
-    expect(mainTsx).toContain('Voice Input');
-    expect(mainTsx).toContain('Volcengine API Key');
+    const chatStart = mainTsx.indexOf("renderSettingsSection('Chat'");
+    const codeDisplayStart = mainTsx.indexOf("renderSettingsSection('Code Display'", chatStart);
+    expect(chatStart).toBeGreaterThanOrEqual(0);
+    expect(codeDisplayStart).toBeGreaterThan(chatStart);
+    const chatSection = mainTsx.slice(chatStart, codeDisplayStart);
+    expect(chatSection).toContain('Voice Input');
+    expect(chatSection).toContain('className="voice-input-settings-nested"');
+    expect(chatSection).toContain('API Key');
+    expect(chatSection).toContain('Model');
+    expect(chatSection).not.toContain('Volcengine API Key');
+    expect(chatSection).not.toContain('Speech Model');
+    expect(chatSection).not.toContain("setSettingsDetailView('voiceInput')");
     expect(mainTsx).toContain('Doubao Streaming ASR 2.0');
     expect(mainTsx).toContain('speechSettings.enabled ? (');
     expect(mainTsx).toContain('<VoiceInputButton');
@@ -1252,6 +1262,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('<VoiceRecordingBar');
 
     expect(stylesCss).toContain('.voice-input-button');
+    expect(stylesCss).toContain('.voice-input-settings-nested');
     expect(stylesCss).toContain('.voice-recording-bar');
     expect(stylesCss).toContain('@keyframes voiceBarPulse');
   });

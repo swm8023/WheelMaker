@@ -787,6 +787,15 @@ textarea,
   background: var(--hover);
 }
 
+.mobile-settings-screen .voice-input-settings-nested {
+  margin-left: 16px;
+}
+
+.mobile-settings-screen .voice-input-settings-child-row {
+  min-height: 52px;
+  padding-left: 12px;
+}
+
 .mobile-settings-screen .sidebar-setting-select {
   max-width: min(48vw, 200px);
   border-radius: 999px;
@@ -3155,6 +3164,29 @@ textarea,
 .settings-row:hover > span:first-child > .codicon:first-child {
   color: var(--accent);
   opacity: 1;
+}
+
+.voice-input-settings-menu {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.settings-section-rows > .voice-input-settings-menu:last-child {
+  border-bottom: 0;
+}
+
+.voice-input-settings-nested {
+  margin-left: 20px;
+  border-left: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  background: color-mix(in srgb, var(--panel-2) 48%, transparent);
+}
+
+.voice-input-settings-child-row {
+  min-height: 42px;
+  padding-left: 10px;
+}
+
+.voice-input-settings-child-row:last-child {
+  border-bottom: 0;
 }
 
 .settings-detail-row:hover .codicon-chevron-right {
