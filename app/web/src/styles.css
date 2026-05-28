@@ -7450,25 +7450,16 @@ textarea,
   background: transparent;
 }
 
-.chat-stop-glyph {
-  width: 17px;
-  height: 17px;
-  border: 1.7px solid currentColor;
-  border-radius: 999px;
+.chat-composer-stop-trigger .codicon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-size: 17px;
+  line-height: 1;
   transform-origin: center;
 }
 
-.chat-stop-square {
-  width: 6px;
-  height: 6px;
-  border-radius: 1.6px;
-  background: currentColor;
-}
-
-.chat-composer-stop-trigger.active .chat-stop-glyph {
+.chat-composer-stop-trigger.active .codicon {
   animation: chatStopBreath 1.55s ease-in-out infinite;
 }
 
@@ -7487,7 +7478,7 @@ textarea,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-composer-stop-trigger.active .chat-stop-glyph {
+  .chat-composer-stop-trigger.active .codicon {
     animation: none;
   }
 }
