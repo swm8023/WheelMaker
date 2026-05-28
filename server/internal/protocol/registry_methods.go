@@ -34,6 +34,7 @@ const (
 	RegistryRouteMonitorForward  RegistryRouteKind = "monitor_forward"
 	RegistryRouteRelayControl    RegistryRouteKind = "relay_control"
 	RegistryRouteRelayHub        RegistryRouteKind = "relay_hub"
+	RegistryRouteSpeech          RegistryRouteKind = "speech"
 	RegistryRouteClientEvent     RegistryRouteKind = "client_event"
 	RegistryRouteLocalRead       RegistryRouteKind = "local_read"
 )
@@ -114,6 +115,11 @@ const (
 	RegistryMethodRelayRegenerateAccessCode = "relay.regenerateAccessCode"
 	RegistryMethodRelayOpen                 = "relay.open"
 	RegistryMethodRelayClose                = "relay.close"
+
+	RegistryMethodSpeechStart  = "speech.start"
+	RegistryMethodSpeechChunk  = "speech.chunk"
+	RegistryMethodSpeechFinish = "speech.finish"
+	RegistryMethodSpeechCancel = "speech.cancel"
 
 	LegacyRegistryMethodChatSend = "chat.send"
 )
@@ -203,6 +209,11 @@ var RegistryMethodDescriptors = map[string]RegistryMethodDescriptor{
 	RegistryMethodRelayRegenerateAccessCode: registryMethod(RegistryMethodRelayRegenerateAccessCode, RegistryRouteRelayControl, []RegistryRole{RegistryRoleClient}),
 	RegistryMethodRelayOpen:                 registryMethod(RegistryMethodRelayOpen, RegistryRouteRelayHub, nil),
 	RegistryMethodRelayClose:                registryMethod(RegistryMethodRelayClose, RegistryRouteRelayHub, nil),
+
+	RegistryMethodSpeechStart:  registrySpeechMethod(RegistryMethodSpeechStart),
+	RegistryMethodSpeechChunk:  registrySpeechMethod(RegistryMethodSpeechChunk),
+	RegistryMethodSpeechFinish: registrySpeechMethod(RegistryMethodSpeechFinish),
+	RegistryMethodSpeechCancel: registrySpeechMethod(RegistryMethodSpeechCancel),
 }
 
 func registryMethod(method string, route RegistryRouteKind, roles []RegistryRole) RegistryMethodDescriptor {
@@ -234,6 +245,10 @@ func registryHubCommandMethod(method string) RegistryMethodDescriptor {
 	desc.RequiresHubID = true
 	desc.Batchable = true
 	return desc
+}
+
+func registrySpeechMethod(method string) RegistryMethodDescriptor {
+	return registryMethod(method, RegistryRouteSpeech, []RegistryRole{RegistryRoleClient})
 }
 
 func registryHubSessionEventMethod(method string, clientEventMethod string) RegistryMethodDescriptor {
@@ -294,6 +309,10 @@ func RegistryRelayControlMethod(method string) bool {
 
 func RegistryRelayHubMethod(method string) bool {
 	return RegistryMethodHasRoute(method, RegistryRouteRelayHub)
+}
+
+func RegistrySpeechMethod(method string) bool {
+	return RegistryMethodHasRoute(method, RegistryRouteSpeech)
 }
 
 func RegistryLocalReadMethodAllowed(method string) bool {

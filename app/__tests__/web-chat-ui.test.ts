@@ -246,7 +246,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('type="file"');
     expect(mainTsx).toContain('multiple');
     expect(mainTsx).toContain('onPaste={event => {');
-    expect(mainTsx).toContain('readOnly={chatSending}');
+    expect(mainTsx).toContain('readOnly={chatSending || voiceRecording}');
     expect(mainTsx).toContain('if (chatSending) {\n      event.target.value = \'\';\n      return;\n    }');
     expect(mainTsx).toContain('if (!supportsChatClipboardFiles) {');
     expect(mainTsx).toContain('onDragOver={event => {');
@@ -740,8 +740,8 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('codicon-new-file');
     expect(mainTsx).toContain('chatFileInputRef.current?.click();');
     expect(mainTsx).not.toContain('className={`chat-tool-button chat-stop-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
-    expect(mainTsx).not.toContain('chat-voice-button');
-    expect(mainTsx).not.toContain("setError('Voice input is not available yet.');");
+    expect(mainTsx).toContain('<VoiceInputButton');
+    expect(mainTsx).toContain('<VoiceRecordingBar');
     expect(mainTsx).toContain('extractChatOptionReplies(text)');
     expect(mainTsx).toContain('splitChatOptionReplyText(text)');
     expect(mainTsx).toContain('extractChatConfirmationReply(text)');
@@ -1137,6 +1137,33 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.floating-control-stack-layer\[data-side-pulse='left'\] ~ \.drawer:not\(\.show\),[\s\S]*\.floating-control-stack-layer\[data-side-pulse='right'\] ~ \.drawer:not\(\.show\) \{[\s\S]*transition: box-shadow 220ms ease;[\s\S]*\}/,
     );
+  });
+
+  test('wires speech input settings and composer voice controls through split modules', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
+
+    expect(mainTsx).toContain("import {VoiceInputButton} from './features/speech/VoiceInputButton';");
+    expect(mainTsx).toContain("import {VoiceRecordingBar} from './features/speech/VoiceRecordingBar';");
+    expect(mainTsx).toContain("import {DEFAULT_SPEECH_SETTINGS, SPEECH_MODEL_OPTIONS, normalizeSpeechSettings");
+    expect(mainTsx).toContain('const [speechSettings, setSpeechSettings] = useState(');
+    expect(mainTsx).toContain('workspaceStore.rememberGlobalState({ speechSettings });');
+    expect(mainTsx).toContain('Voice Input');
+    expect(mainTsx).toContain('Volcengine API Key');
+    expect(mainTsx).toContain('Doubao Streaming ASR 2.0');
+    expect(mainTsx).toContain('speechSettings.enabled ? (');
+    expect(mainTsx).toContain('<VoiceInputButton');
+    expect(mainTsx).toContain('onStart={startVoiceInput}');
+    expect(mainTsx).toContain('onFinish={finishVoiceInput}');
+    expect(mainTsx).toContain('onCancel={cancelVoiceInputByGesture}');
+    expect(mainTsx).toContain('readOnly={chatSending || voiceRecording}');
+    expect(mainTsx).toContain('voiceRecording ? (');
+    expect(mainTsx).toContain('<VoiceRecordingBar');
+
+    expect(stylesCss).toContain('.voice-input-button');
+    expect(stylesCss).toContain('.voice-recording-bar');
+    expect(stylesCss).toContain('@keyframes voiceBarPulse');
   });
 
   test('keeps the mobile three-tab floating nav and drawer button translucent over content', () => {

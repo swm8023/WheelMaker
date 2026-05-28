@@ -104,6 +104,8 @@ type Server struct {
 	nextConnEpoch atomic.Int64
 
 	relay *portrelay.Controller
+
+	speech *speechService
 }
 
 type connectionState struct {
@@ -142,6 +144,7 @@ func New(cfg Config) *Server {
 		hubPeers:     make(map[string]*peerConn),
 		clientPeers:  make(map[string]*connectionState),
 	}
+	s.speech = newSpeechService(newVolcengineSpeechProvider())
 	s.relay = portrelay.NewController(portrelay.ControllerConfig{
 		RegistryAddr:      cfg.Addr,
 		ForwardHubRequest: s.forwardRelayHubRequest,
@@ -197,6 +200,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	defer registryLogger("").Info("ws disconnected id=%s role=%s hub=%s remote=%s", state.id, state.role, state.hubID, r.RemoteAddr)
 	defer s.unregisterHub(state.peer, state)
 	defer s.unregisterClient(state)
+	defer s.speech.cancelConnection(state.id)
 	defer state.peer.dropAllPending()
 
 	var idleTimer *time.Timer
@@ -298,6 +302,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			s.handleMonitorForwardRequest(state.peer, state, in)
 		case rp.RegistryHubCommandMethod(in.Method):
 			go s.handleHubCommandForwardRequest(state.peer, state, in)
+		case isSpeechRequestMethod(in.Method):
+			s.speech.handleRequest(state.peer, state, in)
 		case isClientForwardMethod(in.Method):
 			s.handleForwardRequest(state.peer, state, in)
 		default:

@@ -21,6 +21,12 @@ import {
   normalizePortRelayTargets,
   type PortRelayTarget,
 } from '../portRelayTargets';
+import {
+  DEFAULT_SPEECH_SETTINGS,
+  maskSpeechSettingsForExport,
+  normalizeSpeechSettings,
+  type SpeechSettings,
+} from '../features/speech/speechSettings';
 
 export type PersistedTab = 'chat' | 'file' | 'git';
 export type PersistedThemeMode = 'dark' | 'light';
@@ -70,6 +76,7 @@ export type PersistedGlobalState = {
   codeLineHeight: number;
   codeTabSize: number;
   chatFont: ChatFontId;
+  speechSettings: SpeechSettings;
   wrapLines: boolean;
   showLineNumbers: boolean;
   hideToolCalls: boolean;
@@ -145,6 +152,7 @@ const GLOBAL_KEYS = {
   codeLineHeight: 'codeLineHeight',
   codeTabSize: 'codeTabSize',
   chatFont: 'chatFont',
+  speechSettings: 'speechSettings',
   wrapLines: 'wrapLines',
   showLineNumbers: 'showLineNumbers',
   hideToolCalls: 'hideToolCalls',
@@ -179,6 +187,7 @@ function defaultGlobalState(): PersistedGlobalState {
     codeLineHeight: DEFAULT_CODE_LINE_HEIGHT,
     codeTabSize: DEFAULT_CODE_TAB_SIZE,
     chatFont: DEFAULT_CHAT_FONT,
+    speechSettings: DEFAULT_SPEECH_SETTINGS,
     wrapLines: false,
     showLineNumbers: true,
     hideToolCalls: true,
@@ -392,6 +401,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     codeLineHeight: typeof input.codeLineHeight === 'number' && Number.isFinite(input.codeLineHeight) ? input.codeLineHeight : base.codeLineHeight,
     codeTabSize: typeof input.codeTabSize === 'number' && Number.isFinite(input.codeTabSize) ? input.codeTabSize : base.codeTabSize,
     chatFont: typeof input.chatFont === 'string' && isChatFontId(input.chatFont) ? input.chatFont : base.chatFont,
+    speechSettings: normalizeSpeechSettings(input.speechSettings),
     wrapLines: typeof input.wrapLines === 'boolean' ? input.wrapLines : base.wrapLines,
     showLineNumbers: typeof input.showLineNumbers === 'boolean' ? input.showLineNumbers : base.showLineNumbers,
     hideToolCalls: typeof input.hideToolCalls === 'boolean' ? input.hideToolCalls : base.hideToolCalls,
@@ -466,6 +476,18 @@ type RawKVRow = {
   v: string;
   updatedAt: number;
 };
+
+function redactGlobalDumpRows(rows: RawKVRow[]): RawKVRow[] {
+  return rows.map(row => {
+    if (row.k !== GLOBAL_KEYS.speechSettings) {
+      return row;
+    }
+    return {
+      ...row,
+      v: serialize(maskSpeechSettingsForExport(tryParse(row.v, DEFAULT_SPEECH_SETTINGS))),
+    };
+  });
+}
 
 type RawProjectStateRow = {
   projectId: string;
@@ -861,6 +883,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.codeLineHeight, v: serialize(this.state.global.codeLineHeight), updatedAt: now},
       {k: GLOBAL_KEYS.codeTabSize, v: serialize(this.state.global.codeTabSize), updatedAt: now},
       {k: GLOBAL_KEYS.chatFont, v: serialize(this.state.global.chatFont), updatedAt: now},
+      {k: GLOBAL_KEYS.speechSettings, v: serialize(this.state.global.speechSettings), updatedAt: now},
       {k: GLOBAL_KEYS.wrapLines, v: serialize(this.state.global.wrapLines), updatedAt: now},
       {k: GLOBAL_KEYS.showLineNumbers, v: serialize(this.state.global.showLineNumbers), updatedAt: now},
       {k: GLOBAL_KEYS.hideToolCalls, v: serialize(this.state.global.hideToolCalls), updatedAt: now},
@@ -1210,6 +1233,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeLineHeight, v: serialize(next.codeLineHeight), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeTabSize, v: serialize(next.codeTabSize), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.chatFont, v: serialize(next.chatFont), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.speechSettings, v: serialize(next.speechSettings), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.wrapLines, v: serialize(next.wrapLines), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.showLineNumbers, v: serialize(next.showLineNumbers), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.hideToolCalls, v: serialize(next.hideToolCalls), updatedAt: now});
@@ -1389,7 +1413,7 @@ export class WorkspacePersistenceRepository {
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_META),
     ]);
     return {
-      global: sortByKey(global),
+      global: sortByKey(redactGlobalDumpRows(global)),
       projects: sortByProjectId(projects),
       projectCommits: sortByProjectId(projectCommits),
       chatSessionIndex: sortByKey(chatSessionIndex),

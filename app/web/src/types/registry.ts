@@ -6,6 +6,53 @@ export interface RegistryErrorPayload {
   details?: unknown;
 }
 
+export interface RegistrySpeechAudioConfig {
+  format: 'pcm';
+  codec: 'raw';
+  rate: 16000;
+  bits: 16;
+  channel: 1;
+}
+
+export interface RegistrySpeechStartPayload {
+  provider: 'volcengine';
+  model: 'doubao-streaming-asr-2.0';
+  apiKey: string;
+  audio: RegistrySpeechAudioConfig;
+}
+
+export interface RegistrySpeechStartResponse {
+  streamId: string;
+}
+
+export interface RegistrySpeechChunkPayload {
+  streamId: string;
+  seq: number;
+  pcm: string;
+}
+
+export interface RegistrySpeechFinishPayload {
+  streamId: string;
+}
+
+export interface RegistrySpeechCancelPayload {
+  streamId: string;
+  reason: 'user' | 'gesture' | 'error' | 'disconnect';
+}
+
+export interface RegistrySpeechTranscriptEvent {
+  streamId: string;
+  text: string;
+  final: boolean;
+}
+
+export interface RegistrySpeechErrorEvent {
+  streamId?: string;
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
 export interface RegistryEnvelope<TPayload = unknown> {
   requestId?: number;
   type: RegistryMessageType;

@@ -194,6 +194,12 @@ import {
   type CodeThemeId,
   type DiffRenderLine,
 } from './services/shikiRenderer';
+import {startMicrophonePCMStream, type MicrophonePCMStream} from './features/speech/audioCapture';
+import {createVoiceInputSession, type VoiceInputSession} from './features/speech/useVoiceInputController';
+import {isSpeechErrorEvent, isSpeechTranscriptEvent} from './features/speech/registrySpeechClient';
+import {DEFAULT_SPEECH_SETTINGS, SPEECH_MODEL_OPTIONS, normalizeSpeechSettings} from './features/speech/speechSettings';
+import {VoiceInputButton} from './features/speech/VoiceInputButton';
+import {VoiceRecordingBar} from './features/speech/VoiceRecordingBar';
 import { WorkspaceController } from './services/workspaceController';
 import { WorkspaceStore } from './services/workspaceStore';
 import {
@@ -215,6 +221,7 @@ import type {
   RegistryChatMessageEventPayload,
   RegistryChatSession,
   RegistryResumableSession,
+  RegistrySpeechCancelPayload,
       RegistrySessionContentBlock,
       RegistrySessionConfigOption,
       RegistrySessionSummary,
@@ -2867,6 +2874,9 @@ function App() {
       ? persistedGlobal.localHubReadEnabled
       : true,
   );
+  const [speechSettings, setSpeechSettings] = useState(() =>
+    normalizeSpeechSettings(persistedGlobal.speechSettings ?? DEFAULT_SPEECH_SETTINGS),
+  );
   const [registryDebugPanelOpen, setRegistryDebugPanelOpen] = useState(
     typeof persistedGlobal.registryDebug === 'boolean'
       ? persistedGlobal.registryDebug
@@ -3365,6 +3375,10 @@ function App() {
   const [chatComposerText, setChatComposerText] = useState('');
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const chatAttachmentUploadPending = chatAttachments.some(isChatAttachmentUploadPending);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceCancelIntent, setVoiceCancelIntent] = useState(false);
+  const [voiceElapsedMs, setVoiceElapsedMs] = useState(0);
+  const [voiceLevel, setVoiceLevel] = useState(0);
   const [chatComposerDragActive, setChatComposerDragActive] = useState(false);
   const [chatComposerDrafts, setChatComposerDrafts] = useState<Record<string, ChatComposerDraft>>({});
   const [chatPendingPromptsByKey, setChatPendingPromptsByKey] = useState<Record<string, PendingChatPrompt>>({});
@@ -3380,6 +3394,12 @@ function App() {
   const currentChatDraftKeyRef = useRef('');
   const chatAttachmentIdRef = useRef(0);
   const chatAttachmentCancelIdsRef = useRef<Set<string>>(new Set());
+  const voiceRecordingRef = useRef(false);
+  const voiceStreamIdRef = useRef('');
+  const voiceSeqRef = useRef(0);
+  const voiceSessionRef = useRef<VoiceInputSession | null>(null);
+  const voiceCaptureRef = useRef<MicrophonePCMStream | null>(null);
+  const voiceStartedAtRef = useRef(0);
   const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);
   const [chatFileMentionMenuOpen, setChatFileMentionMenuOpen] = useState(false);
   const [chatAttachmentTrayOpen, setChatAttachmentTrayOpen] = useState(false);
@@ -4211,6 +4231,23 @@ function App() {
   useEffect(() => {
     chatAttachmentsRef.current = chatAttachments;
   }, [chatAttachments]);
+
+  useEffect(() => {
+    voiceRecordingRef.current = voiceRecording;
+  }, [voiceRecording]);
+
+  useEffect(() => {
+    if (!voiceRecording) {
+      setVoiceElapsedMs(0);
+      return;
+    }
+    const tick = () => {
+      setVoiceElapsedMs(Date.now() - voiceStartedAtRef.current);
+    };
+    tick();
+    const timer = window.setInterval(tick, 250);
+    return () => window.clearInterval(timer);
+  }, [voiceRecording]);
 
   useEffect(() => {
     chatComposerDraftsRef.current = chatComposerDrafts;
@@ -5227,6 +5264,10 @@ function App() {
     setLocalHubReadStatuses(service.getLocalHubReadStatuses(registryHubs));
     workspaceStore.rememberGlobalState({ localHubReadEnabled });
   }, [localHubReadEnabled, registryHubs]);
+
+  useEffect(() => {
+    workspaceStore.rememberGlobalState({ speechSettings });
+  }, [speechSettings]);
 
   useEffect(() => {
     workspaceStore.rememberGlobalState({
@@ -8375,6 +8416,155 @@ function App() {
     });
   };
 
+  const stopVoiceCapture = () => {
+    voiceCaptureRef.current?.stop();
+    voiceCaptureRef.current = null;
+  };
+
+  const resetVoiceRecordingUi = () => {
+    voiceRecordingRef.current = false;
+    setVoiceRecording(false);
+    setVoiceCancelIntent(false);
+    setVoiceLevel(0);
+  };
+
+  const clearVoiceInputState = () => {
+    resetVoiceRecordingUi();
+    voiceStreamIdRef.current = '';
+    voiceSeqRef.current = 0;
+    voiceSessionRef.current = null;
+  };
+
+  const cancelVoiceInput = async (reason: RegistrySpeechCancelPayload['reason'] = 'user') => {
+    const streamId = voiceStreamIdRef.current;
+    const session = voiceSessionRef.current;
+    stopVoiceCapture();
+    if (session) {
+      updateChatComposerText(session.cancel());
+      window.setTimeout(resizeChatComposerTextarea, 0);
+    }
+    clearVoiceInputState();
+    if (!streamId) {
+      return;
+    }
+    try {
+      await service.cancelSpeech({streamId, reason});
+    } catch (err) {
+      if (reason !== 'disconnect') {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+  };
+
+  const cancelVoiceInputByGesture = () => {
+    void cancelVoiceInput('gesture');
+  };
+
+  const finishVoiceInput = async () => {
+    const streamId = voiceStreamIdRef.current;
+    stopVoiceCapture();
+    resetVoiceRecordingUi();
+    if (!streamId) {
+      clearVoiceInputState();
+      return;
+    }
+    try {
+      await service.finishSpeech({streamId});
+    } catch (err) {
+      clearVoiceInputState();
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const startVoiceInput = async () => {
+    if (voiceRecordingRef.current || voiceStreamIdRef.current) {
+      return;
+    }
+    const settings = normalizeSpeechSettings(speechSettings);
+    const apiKey = settings.volcengineApiKey.trim();
+    if (!settings.enabled) {
+      return;
+    }
+    if (!connected) {
+      setError('Connect Registry before using voice input.');
+      return;
+    }
+    if (!apiKey) {
+      setError('Fill Volcengine API Key in Chat settings first.');
+      return;
+    }
+    const input = chatComposerTextareaRef.current;
+    const baseText = chatComposerTextRef.current;
+    const insertStart = input?.selectionStart ?? baseText.length;
+    const insertEnd = input?.selectionEnd ?? insertStart;
+    voiceSessionRef.current = createVoiceInputSession(baseText, insertStart, insertEnd);
+    voiceStartedAtRef.current = Date.now();
+    voiceSeqRef.current = 0;
+    voiceRecordingRef.current = true;
+    setVoiceRecording(true);
+    setVoiceCancelIntent(false);
+    setVoiceElapsedMs(0);
+    setVoiceLevel(0);
+    setError('');
+    setChatPromptMenuOpen(false);
+    setChatAttachmentTrayOpen(false);
+    setChatFileMentionMenuOpen(false);
+    setChatConfigMenuOptionId('');
+    setChatConfigOverflowOpen(false);
+
+    try {
+      const response = await service.startSpeech({
+        provider: 'volcengine',
+        model: settings.model,
+        apiKey,
+        audio: {
+          format: 'pcm',
+          codec: 'raw',
+          rate: 16000,
+          bits: 16,
+          channel: 1,
+        },
+      });
+      if (!response.streamId) {
+        throw new Error('speech.start returned no streamId');
+      }
+      if (!voiceRecordingRef.current) {
+        await service.cancelSpeech({streamId: response.streamId, reason: 'gesture'});
+        return;
+      }
+      voiceStreamIdRef.current = response.streamId;
+      const capture = await startMicrophonePCMStream({
+        targetRate: 16000,
+        chunkBytes: 6400,
+        onLevel: level => setVoiceLevel(level),
+        onChunk: chunk => {
+          const streamId = voiceStreamIdRef.current;
+          if (!voiceRecordingRef.current || !streamId) {
+            return;
+          }
+          voiceSeqRef.current += 1;
+          service.sendSpeechChunk({
+            streamId,
+            seq: voiceSeqRef.current,
+            pcm: chunk.base64,
+          }).catch(err => {
+            setError(err instanceof Error ? err.message : String(err));
+            cancelVoiceInput('error').catch(() => undefined);
+          });
+        },
+      });
+      if (!voiceRecordingRef.current) {
+        capture.stop();
+        return;
+      }
+      voiceCaptureRef.current = capture;
+    } catch (err) {
+      stopVoiceCapture();
+      clearVoiceInputState();
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const buildChatAttachmentsFromBlocks = (blocks: RegistryChatContentBlock[]): ChatAttachment[] => {
     const attachments: ChatAttachment[] = [];
     for (const [index, block] of blocks.entries()) {
@@ -10958,6 +11148,35 @@ function App() {
 
   useEffect(() => {
     const unsubscribeEvent = service.onEvent(event => {
+      if (isSpeechTranscriptEvent(event)) {
+        const payload = event.payload;
+        if (!payload || payload.streamId !== voiceStreamIdRef.current || !voiceSessionRef.current) {
+          return;
+        }
+        const nextText = voiceSessionRef.current.applyTranscript(payload.text);
+        updateChatComposerText(nextText);
+        window.setTimeout(resizeChatComposerTextarea, 0);
+        if (payload.final) {
+          stopVoiceCapture();
+          clearVoiceInputState();
+        }
+        return;
+      }
+      if (isSpeechErrorEvent(event)) {
+        const payload = event.payload;
+        if (!payload || (payload.streamId && payload.streamId !== voiceStreamIdRef.current)) {
+          return;
+        }
+        const session = voiceSessionRef.current;
+        stopVoiceCapture();
+        if (session) {
+          updateChatComposerText(session.cancel());
+          window.setTimeout(resizeChatComposerTextarea, 0);
+        }
+        clearVoiceInputState();
+        setError(payload.message);
+        return;
+      }
       const eventProjectId = event.projectId ?? '';
       if (
         event.method === 'project.online' ||
@@ -11077,6 +11296,9 @@ function App() {
       }
     });
     const unsubscribeClose = service.onClose(() => {
+      if (voiceRecordingRef.current || voiceStreamIdRef.current) {
+        void cancelVoiceInput('disconnect');
+      }
       setConnected(false);
       if (supervisorManagedCloseRef.current) {
         supervisorManagedCloseRef.current = false;
@@ -12731,6 +12953,55 @@ function App() {
             checked={localHubReadEnabled}
             onChange={event => setLocalHubReadEnabled(event.target.checked)}
           />
+        </label>
+        <label className="settings-row sidebar-setting-row">
+          <span>
+            <span className="codicon codicon-mic settings-row-icon" aria-hidden="true" />
+            Voice Input
+          </span>
+          <input
+            type="checkbox"
+            checked={speechSettings.enabled}
+            onChange={event => setSpeechSettings(current =>
+              normalizeSpeechSettings({...current, enabled: event.target.checked}),
+            )}
+          />
+        </label>
+        <label className="settings-row sidebar-setting-row">
+          <span>
+            <span className="codicon codicon-key settings-row-icon" aria-hidden="true" />
+            Volcengine API Key
+          </span>
+          <input
+            className="sidebar-setting-input"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={speechSettings.volcengineApiKey}
+            onChange={event => setSpeechSettings(current =>
+              normalizeSpeechSettings({...current, volcengineApiKey: event.target.value}),
+            )}
+          />
+        </label>
+        <label className="settings-row sidebar-setting-row">
+          <span>
+            <span className="codicon codicon-symbol-misc settings-row-icon" aria-hidden="true" />
+            Speech Model
+          </span>
+          <select
+            className="sidebar-setting-select"
+            title="Doubao Streaming ASR 2.0"
+            value={speechSettings.model}
+            onChange={event => setSpeechSettings(current =>
+              normalizeSpeechSettings({...current, model: event.target.value}),
+            )}
+          >
+            {SPEECH_MODEL_OPTIONS.map(item => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="settings-row sidebar-setting-row">
           <span>
@@ -14596,7 +14867,7 @@ function App() {
                     rows={1}
                     className="chat-composer-input"
                     value={chatComposerText}
-                    readOnly={chatSending}
+                    readOnly={chatSending || voiceRecording}
                     enterKeyHint={isWide ? undefined : 'send'}
                     onChange={event => {
                       closeChatAttachmentTray();
@@ -14665,16 +14936,28 @@ function App() {
                   />
                 </div>
                 <div className="chat-composer-action-column">
-                  <button
-                    type="button"
-                    className="chat-send-button"
-                    onClick={() => sendChatMessage().catch(() => undefined)}
-                    disabled={chatSending || chatAttachmentUploadPending}
-                    title="Send"
-                    aria-label="Send message"
-                  >
-                    <span className="codicon codicon-send" />
-                  </button>
+                  {speechSettings.enabled ? (
+                    <VoiceInputButton
+                      recording={voiceRecording}
+                      disabled={chatAttachmentUploadPending}
+                      readOnly={chatSending || voiceRecording}
+                      onStart={startVoiceInput}
+                      onFinish={finishVoiceInput}
+                      onCancel={cancelVoiceInputByGesture}
+                      onCancelIntentChange={setVoiceCancelIntent}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="chat-send-button"
+                      onClick={() => sendChatMessage().catch(() => undefined)}
+                      disabled={chatSending || chatAttachmentUploadPending}
+                      title="Send"
+                      aria-label="Send message"
+                    >
+                      <span className="codicon codicon-send" />
+                    </button>
+                  )}
                 </div>
               </div>
               {chatFileMentionMenuOpen ? (
@@ -14706,6 +14989,13 @@ function App() {
                   })}
                 </div>
               ) : null}
+              {voiceRecording ? (
+                <VoiceRecordingBar
+                  cancelIntent={voiceCancelIntent}
+                  elapsedMs={voiceElapsedMs}
+                  level={voiceLevel}
+                />
+              ) : (
               <div className="chat-composer-toolbar">
                 <div className="chat-composer-tools">
                   <button
@@ -14883,6 +15173,7 @@ function App() {
                   ) : null}
                 </div>
               </div>
+              )}
             </div>
           </div>
           </div>

@@ -24,6 +24,11 @@ import type {
   RegistryPortRelayEnablePayload,
   RegistryPortRelaySnapshot,
   RegistryResumableSession,
+  RegistrySpeechCancelPayload,
+  RegistrySpeechChunkPayload,
+  RegistrySpeechFinishPayload,
+  RegistrySpeechStartPayload,
+  RegistrySpeechStartResponse,
   RegistrySessionAttachmentCancelPayload,
   RegistrySessionAttachmentCancelResponse,
   RegistrySessionAttachmentChunkPayload,
@@ -1304,6 +1309,39 @@ export class RegistryRepository {
       timeoutMs: 60000,
     });
     return (resp.payload ?? {}) as RegistrySkillCommandResponse;
+  }
+
+  async startSpeech(payload: RegistrySpeechStartPayload): Promise<RegistrySpeechStartResponse> {
+    const resp = await this.client.request({
+      method: 'speech.start',
+      payload,
+      timeoutMs: 15000,
+    });
+    return (resp.payload ?? {}) as RegistrySpeechStartResponse;
+  }
+
+  async sendSpeechChunk(payload: RegistrySpeechChunkPayload): Promise<void> {
+    await this.client.request({
+      method: 'speech.chunk',
+      payload,
+      timeoutMs: 8000,
+    });
+  }
+
+  async finishSpeech(payload: RegistrySpeechFinishPayload): Promise<void> {
+    await this.client.request({
+      method: 'speech.finish',
+      payload,
+      timeoutMs: 15000,
+    });
+  }
+
+  async cancelSpeech(payload: RegistrySpeechCancelPayload): Promise<void> {
+    await this.client.request({
+      method: 'speech.cancel',
+      payload,
+      timeoutMs: 8000,
+    });
   }
 
   close(): void {

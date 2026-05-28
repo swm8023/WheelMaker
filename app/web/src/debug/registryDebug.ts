@@ -107,6 +107,43 @@ export type RegistryDebugStore = {
 const MAX_EXTRACT_DEPTH = 8;
 const MAX_EXTRACT_NODES = 500;
 
+function estimateBase64ByteCount(value: string): number {
+  if (!value) return 0;
+  const normalized = value.replace(/\s/g, '');
+  const padding = normalized.endsWith('==') ? 2 : normalized.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
+}
+
+export function redactRegistryDebugEnvelope<TEnvelope extends RegistryEnvelope>(envelope: TEnvelope): TEnvelope {
+  if (envelope.method !== 'speech.start' && envelope.method !== 'speech.chunk') {
+    return envelope;
+  }
+  const payload = envelope.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return envelope;
+  }
+  const record = payload as Record<string, unknown>;
+  if (envelope.method === 'speech.start') {
+    return {
+      ...envelope,
+      payload: {
+        ...record,
+        apiKey: typeof record.apiKey === 'string' && record.apiKey ? '[redacted]' : '',
+      },
+    } as TEnvelope;
+  }
+  const pcm = typeof record.pcm === 'string' ? record.pcm : '';
+  return {
+    ...envelope,
+    payload: {
+      streamId: record.streamId,
+      seq: record.seq,
+      pcm: '[base64 omitted]',
+      byteCount: estimateBase64ByteCount(pcm),
+    },
+  } as TEnvelope;
+}
+
 function appendUnique(items: string[], value: unknown): void {
   if (typeof value !== 'string' || value.length === 0) {
     return;
@@ -254,15 +291,17 @@ export function createRegistryDebugStore(now: () => number = () => Date.now()): 
   };
 
   const recordOutbound = (input: Omit<RegistryDebugOutboundInput, 'kind'>) => {
-    if (!enabled || input.envelope.method === 'connect.init') {
+    const envelope = redactRegistryDebugEnvelope(input.envelope);
+    if (!enabled || envelope.method === 'connect.init') {
       return;
     }
     const timestamp = input.timestamp ?? now();
-    const sessionIds = extractRegistryDebugSessionIds(input.envelope);
-    if (typeof input.envelope.requestId === 'number') {
-      requests.set(input.envelope.requestId, {
-        method: input.envelope.method,
-        projectId: input.envelope.projectId,
+    const raw = JSON.stringify(envelope);
+    const sessionIds = extractRegistryDebugSessionIds(envelope);
+    if (typeof envelope.requestId === 'number') {
+      requests.set(envelope.requestId, {
+        method: envelope.method,
+        projectId: envelope.projectId,
         sessionIds,
         connection: input.connection ?? 'Remote',
         timestamp,
@@ -274,13 +313,13 @@ export function createRegistryDebugStore(now: () => number = () => Date.now()): 
       direction: 'out',
       phase: 'request',
       connection: input.connection,
-      method: input.envelope.method,
-      requestId: input.envelope.requestId,
-      projectId: input.envelope.projectId,
+      method: envelope.method,
+      requestId: envelope.requestId,
+      projectId: envelope.projectId,
       sessionIds,
       multiSession: sessionIds.length > 1,
-      raw: input.raw,
-      envelope: input.envelope,
+      raw,
+      envelope,
     });
   };
 
@@ -288,11 +327,13 @@ export function createRegistryDebugStore(now: () => number = () => Date.now()): 
     if (!enabled) {
       return;
     }
+    const envelope = redactRegistryDebugEnvelope(input.envelope);
     const timestamp = input.timestamp ?? now();
-    const correlated = typeof input.envelope.requestId === 'number'
-      ? requests.get(input.envelope.requestId)
+    const correlated = typeof envelope.requestId === 'number'
+      ? requests.get(envelope.requestId)
       : undefined;
-    const extractedSessionIds = extractRegistryDebugSessionIds(input.envelope);
+    const raw = JSON.stringify(envelope);
+    const extractedSessionIds = extractRegistryDebugSessionIds(envelope);
     const sessionIds = extractedSessionIds.length > 0
       ? extractedSessionIds
       : correlated?.sessionIds ?? [];
@@ -300,22 +341,22 @@ export function createRegistryDebugStore(now: () => number = () => Date.now()): 
       timestamp,
       timeText: formatRegistryDebugTime(timestamp),
       direction: 'in',
-      phase: resolveInboundPhase(input.envelope.type),
+      phase: resolveInboundPhase(envelope.type),
       connection: input.connection ?? correlated?.connection,
-      method: input.envelope.method ?? correlated?.method,
-      requestId: input.envelope.requestId,
-      projectId: input.envelope.projectId ?? correlated?.projectId,
+      method: envelope.method ?? correlated?.method,
+      requestId: envelope.requestId,
+      projectId: envelope.projectId ?? correlated?.projectId,
       sessionIds,
       multiSession: sessionIds.length > 1,
       durationMs: correlated ? Math.max(0, timestamp - correlated.timestamp) : undefined,
-      raw: input.raw,
-      envelope: input.envelope,
+      raw,
+      envelope,
     });
     if (
-      typeof input.envelope.requestId === 'number' &&
-      (input.envelope.type === 'response' || input.envelope.type === 'error')
+      typeof envelope.requestId === 'number' &&
+      (envelope.type === 'response' || envelope.type === 'error')
     ) {
-      requests.delete(input.envelope.requestId);
+      requests.delete(envelope.requestId);
     }
   };
 

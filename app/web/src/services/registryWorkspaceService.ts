@@ -38,6 +38,11 @@ import type {
   RegistrySkillCommandResponse,
   RegistrySkillInstallPayload,
   RegistrySkillScopePayload,
+  RegistrySpeechCancelPayload,
+  RegistrySpeechChunkPayload,
+  RegistrySpeechFinishPayload,
+  RegistrySpeechStartPayload,
+  RegistrySpeechStartResponse,
   RegistrySyncCheckPayload,
   RegistrySyncCheckResponse,
   RegistryTokenScanResult,
@@ -701,6 +706,34 @@ export class RegistryWorkspaceService {
       throw new Error('session is not ready');
     }
     return this.repository.updateSkills(payload);
+  }
+
+  async startSpeech(payload: RegistrySpeechStartPayload): Promise<RegistrySpeechStartResponse> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.startSpeech(payload);
+  }
+
+  async sendSpeechChunk(payload: RegistrySpeechChunkPayload): Promise<void> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.sendSpeechChunk(payload);
+  }
+
+  async finishSpeech(payload: RegistrySpeechFinishPayload): Promise<void> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.finishSpeech(payload);
+  }
+
+  async cancelSpeech(payload: RegistrySpeechCancelPayload): Promise<void> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.cancelSpeech(payload);
   }
 
   onEvent(listener: (event: RegistryEnvelope) => void): () => void {

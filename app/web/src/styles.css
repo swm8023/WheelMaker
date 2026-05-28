@@ -3180,6 +3180,26 @@ body,
   border-color: var(--accent);
 }
 
+.sidebar-setting-input {
+  width: min(180px, 48vw);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 6px;
+  background: var(--panel-3);
+  color: var(--text);
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.sidebar-setting-input:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.sidebar-setting-input:focus {
+  border-color: var(--accent);
+}
+
 .sidebar-secondary-btn {
   width: calc(100% - 16px);
   margin: 8px;
@@ -7482,6 +7502,170 @@ body,
       color-mix(in srgb, var(--accent) 14%, var(--panel)) 100%
     );
   color: color-mix(in srgb, var(--accent) 92%, var(--text));
+}
+
+.voice-input-button {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, #18a999 60%, var(--border));
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, #18a999 22%, var(--panel)) 0%,
+      color-mix(in srgb, var(--accent) 10%, var(--panel)) 100%
+    );
+  color: color-mix(in srgb, #5eead4 72%, var(--text));
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  box-shadow: 0 6px 14px color-mix(in srgb, #18a999 16%, transparent);
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.voice-input-button .codicon {
+  font-size: 17px;
+}
+
+.voice-input-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, #5eead4 72%, var(--border));
+  color: var(--text);
+}
+
+.voice-input-button.recording {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, #5eead4 82%, var(--border));
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, #18a999 30%, var(--panel)) 0%,
+      color-mix(in srgb, #5eead4 14%, var(--panel)) 100%
+    );
+}
+
+.voice-input-button.cancel-intent {
+  border-color: color-mix(in srgb, #f85149 82%, var(--border));
+  background: color-mix(in srgb, #f85149 14%, var(--panel));
+  color: #ff8a82;
+}
+
+.voice-input-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+.voice-recording-bar {
+  position: relative;
+  min-height: 26px;
+  border: 1px solid color-mix(in srgb, #18a999 32%, var(--border));
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #18a999 16%, var(--panel)) 0%,
+      color-mix(in srgb, var(--panel-2) 92%, transparent) 100%
+    );
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  overflow: hidden;
+}
+
+.voice-recording-bar.cancel-intent {
+  border-color: color-mix(in srgb, #f85149 55%, var(--border));
+  background: color-mix(in srgb, #f85149 12%, var(--panel));
+}
+
+.voice-recording-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #5eead4;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #5eead4 16%, transparent);
+}
+
+.voice-recording-bar.cancel-intent .voice-recording-dot {
+  background: #ff8a82;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #f85149 18%, transparent);
+}
+
+.voice-recording-wave {
+  height: 16px;
+  width: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.voice-recording-wave span {
+  width: 3px;
+  height: 12px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.82;
+  transform: scaleY(var(--voice-bar-scale, 0.7));
+  animation: voiceBarPulse 920ms ease-in-out infinite;
+  transform-origin: center;
+}
+
+.voice-recording-wave span:nth-child(2) {
+  animation-delay: 90ms;
+}
+
+.voice-recording-wave span:nth-child(3) {
+  animation-delay: 180ms;
+}
+
+.voice-recording-wave span:nth-child(4) {
+  animation-delay: 270ms;
+}
+
+.voice-recording-wave span:nth-child(5) {
+  animation-delay: 360ms;
+}
+
+.voice-recording-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.voice-recording-time {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1;
+}
+
+@keyframes voiceBarPulse {
+  0%,
+  100% {
+    transform: scaleY(calc(var(--voice-bar-scale, 0.7) * 0.68));
+    opacity: 0.62;
+  }
+  50% {
+    transform: scaleY(calc(var(--voice-bar-scale, 0.7) * 1.08));
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-recording-wave span {
+    animation: none;
+  }
 }
 
 .chat-composer-toolbar {
