@@ -15079,7 +15079,7 @@ function App() {
                         aria-label="Attach photo"
                         role="menuitem"
                       >
-                        <span className="codicon codicon-file-media" aria-hidden="true" />
+                        <span className="codicon codicon-device-camera" aria-hidden="true" />
                         <span className="chat-attachment-action-label">Photo</span>
                       </button>
                     </div>

@@ -740,7 +740,7 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('codicon-symbol-keyword');
     expect(mainTsx).not.toContain('className="chat-tool-button chat-attach-button"');
     expect(mainTsx).toContain('codicon-attach');
-    expect(mainTsx).toContain('codicon-file-media');
+    expect(mainTsx).toContain('codicon-device-camera');
     expect(mainTsx).not.toContain('codicon-cloud-upload');
     expect(mainTsx).not.toContain('codicon-new-file');
     expect(mainTsx).toContain('chatFileInputRef.current?.click();');
@@ -1087,9 +1087,9 @@ describe('web chat integration', () => {
     expect(toolsBlock).toContain('chat-attachment-action-button file');
     expect(toolsBlock).toContain('chat-attachment-action-button photo');
     expect(toolsBlock).toContain('codicon-attach');
-    expect(toolsBlock).toContain('codicon-file-media');
+    expect(toolsBlock).toContain('codicon-device-camera');
     expect(toolsBlock).not.toContain('codicon-cloud-upload');
-    expect(toolsBlock).not.toContain('codicon-device-camera');
+    expect(toolsBlock).not.toContain('codicon-file-media');
     expect(toolsBlock).not.toContain('codicon-new-file');
 
     expect(stylesCss).toMatch(
