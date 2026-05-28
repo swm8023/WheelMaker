@@ -8530,7 +8530,8 @@ function App() {
       message.includes('closed during connect') ||
       message.includes('connection closed before response') ||
       message.includes('request timed out') ||
-      message.includes('session is not ready');
+      message.includes('session is not ready') ||
+      message.includes('speech stream already active');
   };
 
   const cancelVoiceInput = async (

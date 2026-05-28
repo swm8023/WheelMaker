@@ -16,6 +16,7 @@ describe('web voice input local buffering wiring', () => {
     expect(mainTsx).toContain('const VOICE_INPUT_FINISH_WAIT_MS = 3000;');
     expect(mainTsx).toContain('const voiceInputReconnectAvailable = () => (');
     expect(mainTsx).toContain("logVoiceInputState('warn', 'start_buffering_disconnected'");
+    expect(mainTsx).toContain("message.includes('speech stream already active')");
     expect(mainTsx).toContain('voiceInputBufferRef.current = createVoiceInputBuffer({');
     expect(mainTsx).toContain('voiceSendQueueRef.current = createVoiceInputSendQueue({');
     expect(mainTsx).toContain('voiceSendQueueRef.current.enqueue(chunk.bytes)');

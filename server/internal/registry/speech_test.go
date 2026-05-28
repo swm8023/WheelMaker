@@ -206,10 +206,218 @@ func TestSpeechDisconnectCancelsActiveStreams(t *testing.T) {
 	}
 }
 
+func TestSpeechStartReplacesActiveStreamForSameConnection(t *testing.T) {
+	provider := newFakeSpeechProvider()
+	s := New(Config{})
+	s.speech = newSpeechService(provider)
+	ts := httptestNewRegistryServer(t, s.Handler())
+
+	client := dialWS(t, "http://"+ts+"/ws")
+	defer client.Close()
+	connectRegistryClient(t, client)
+
+	firstStreamID := startFakeSpeechStreamWithRequestID(t, client, 2)
+	firstStream := provider.stream
+	secondStreamID := startFakeSpeechStreamWithRequestID(t, client, 3)
+
+	if secondStreamID == firstStreamID {
+		t.Fatalf("replacement streamID=%q, want a new stream", secondStreamID)
+	}
+	if provider.stream == firstStream {
+		t.Fatal("provider should receive a new speech stream")
+	}
+	select {
+	case <-firstStream.cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("old speech stream was not cancelled after replacement start")
+	}
+}
+
+func TestSpeechFinishReleasesActiveStreamImmediately(t *testing.T) {
+	provider := newFakeSpeechProvider()
+	s := New(Config{})
+	s.speech = newSpeechService(provider)
+	ts := httptestNewRegistryServer(t, s.Handler())
+
+	client := dialWS(t, "http://"+ts+"/ws")
+	defer client.Close()
+	connectRegistryClient(t, client)
+
+	firstStreamID := startFakeSpeechStreamWithRequestID(t, client, 2)
+	firstStream := provider.stream
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 3,
+		Type:      "request",
+		Method:    "speech.finish",
+		Payload: map[string]any{
+			"streamId": firstStreamID,
+		},
+	})
+	finishResp := mustReadEnvelope(t, client)
+	if finishResp.Type != "response" || finishResp.Method != "speech.finish" {
+		t.Fatalf("speech.finish response=%#v", finishResp)
+	}
+	if !firstStream.finished {
+		t.Fatal("provider stream should be finished")
+	}
+
+	secondStreamID := startFakeSpeechStreamWithRequestID(t, client, 4)
+	if secondStreamID == firstStreamID {
+		t.Fatalf("new streamID=%q, want a new stream", secondStreamID)
+	}
+}
+
+func TestSpeechProviderErrorReleasesActiveStream(t *testing.T) {
+	provider := newFakeSpeechProvider()
+	s := New(Config{})
+	s.speech = newSpeechService(provider)
+	ts := httptestNewRegistryServer(t, s.Handler())
+
+	client := dialWS(t, "http://"+ts+"/ws")
+	defer client.Close()
+	connectRegistryClient(t, client)
+
+	streamID := startFakeSpeechStreamWithRequestID(t, client, 2)
+	provider.stream.events.Error(codeUnavailable, "speech provider disconnected", true)
+	errEvent := mustReadEnvelope(t, client)
+	if errEvent.Type != "event" || errEvent.Method != "speech.error" {
+		t.Fatalf("speech.error event=%#v", errEvent)
+	}
+	if errEvent.Payload["streamId"] != streamID || errEvent.Payload["retryable"] != true {
+		t.Fatalf("speech.error payload=%#v", errEvent.Payload)
+	}
+
+	nextStreamID := startFakeSpeechStreamWithRequestID(t, client, 3)
+	if nextStreamID == streamID {
+		t.Fatalf("new streamID=%q, want a new stream", nextStreamID)
+	}
+}
+
+func TestSpeechIdleTimeoutCancelsStreamAndEmitsError(t *testing.T) {
+	provider := newFakeSpeechProvider()
+	s := New(Config{})
+	s.speech = newSpeechServiceWithOptions(provider, speechServiceOptions{
+		idleTimeout:   20 * time.Millisecond,
+		startTimeout:  time.Second,
+		finishTimeout: time.Second,
+	})
+	ts := httptestNewRegistryServer(t, s.Handler())
+
+	client := dialWS(t, "http://"+ts+"/ws")
+	defer client.Close()
+	connectRegistryClient(t, client)
+
+	streamID := startFakeSpeechStreamWithRequestID(t, client, 2)
+	_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	errEvent := mustReadEnvelope(t, client)
+	if errEvent.Type != "event" || errEvent.Method != "speech.error" {
+		t.Fatalf("idle timeout event=%#v", errEvent)
+	}
+	if errEvent.Payload["streamId"] != streamID ||
+		errEvent.Payload["code"] != codeUnavailable ||
+		errEvent.Payload["message"] != "speech stream idle timeout" ||
+		errEvent.Payload["retryable"] != true {
+		t.Fatalf("idle timeout payload=%#v", errEvent.Payload)
+	}
+	select {
+	case <-provider.stream.cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("idle timeout did not cancel provider stream")
+	}
+	_ = client.SetReadDeadline(time.Time{})
+
+	nextStreamID := startFakeSpeechStreamWithRequestID(t, client, 3)
+	if nextStreamID == streamID {
+		t.Fatalf("new streamID=%q, want a new stream", nextStreamID)
+	}
+}
+
+func TestSpeechProviderStartTimeoutReleasesActiveStream(t *testing.T) {
+	provider := &timeoutFirstSpeechProvider{}
+	s := New(Config{})
+	s.speech = newSpeechServiceWithOptions(provider, speechServiceOptions{
+		idleTimeout:   time.Second,
+		startTimeout:  20 * time.Millisecond,
+		finishTimeout: time.Second,
+	})
+	ts := httptestNewRegistryServer(t, s.Handler())
+
+	client := dialWS(t, "http://"+ts+"/ws")
+	defer client.Close()
+	connectRegistryClient(t, client)
+
+	writeSpeechStartRequest(t, client, 2)
+	resp := mustReadEnvelope(t, client)
+	if resp.Type != "error" || resp.Method != "speech.start" {
+		t.Fatalf("speech.start timeout response=%#v", resp)
+	}
+	if resp.Payload["code"] != codeUnavailable {
+		t.Fatalf("timeout code=%#v, want %s", resp.Payload["code"], codeUnavailable)
+	}
+
+	nextStreamID := startFakeSpeechStreamWithRequestID(t, client, 3)
+	if nextStreamID == "" {
+		t.Fatal("expected a new stream after start timeout")
+	}
+}
+
+func TestSpeechProviderFinishTimeoutDoesNotRestoreActiveStream(t *testing.T) {
+	provider := &blockingFinishSpeechProvider{}
+	s := New(Config{})
+	s.speech = newSpeechServiceWithOptions(provider, speechServiceOptions{
+		idleTimeout:   time.Second,
+		startTimeout:  time.Second,
+		finishTimeout: 20 * time.Millisecond,
+	})
+	ts := httptestNewRegistryServer(t, s.Handler())
+
+	client := dialWS(t, "http://"+ts+"/ws")
+	defer client.Close()
+	connectRegistryClient(t, client)
+
+	streamID := startFakeSpeechStreamWithRequestID(t, client, 2)
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 3,
+		Type:      "request",
+		Method:    "speech.finish",
+		Payload: map[string]any{
+			"streamId": streamID,
+		},
+	})
+	resp := mustReadEnvelope(t, client)
+	if resp.Type != "error" || resp.Method != "speech.finish" {
+		t.Fatalf("speech.finish timeout response=%#v", resp)
+	}
+	if resp.Payload["code"] != codeUnavailable {
+		t.Fatalf("timeout code=%#v, want %s", resp.Payload["code"], codeUnavailable)
+	}
+
+	nextStreamID := startFakeSpeechStreamWithRequestID(t, client, 4)
+	if nextStreamID == streamID {
+		t.Fatalf("new streamID=%q, want a new stream", nextStreamID)
+	}
+}
+
 func startFakeSpeechStream(t *testing.T, client *websocket.Conn) string {
 	t.Helper()
+	return startFakeSpeechStreamWithRequestID(t, client, 2)
+}
+
+func startFakeSpeechStreamWithRequestID(t *testing.T, client *websocket.Conn, requestID int64) string {
+	t.Helper()
+	writeSpeechStartRequest(t, client, requestID)
+	resp := mustReadEnvelope(t, client)
+	streamID, _ := resp.Payload["streamId"].(string)
+	if streamID == "" {
+		t.Fatalf("missing streamId in response: %#v", resp)
+	}
+	return streamID
+}
+
+func writeSpeechStartRequest(t *testing.T, client *websocket.Conn, requestID int64) {
+	t.Helper()
 	mustWriteJSON(t, client, testEnvelope{
-		RequestID: 2,
+		RequestID: requestID,
 		Type:      "request",
 		Method:    "speech.start",
 		Payload: map[string]any{
@@ -225,12 +433,6 @@ func startFakeSpeechStream(t *testing.T, client *websocket.Conn) string {
 			},
 		},
 	})
-	resp := mustReadEnvelope(t, client)
-	streamID, _ := resp.Payload["streamId"].(string)
-	if streamID == "" {
-		t.Fatalf("missing streamId in response: %#v", resp)
-	}
-	return streamID
 }
 
 type fakeSpeechProvider struct {
@@ -269,6 +471,58 @@ func (s *fakeSpeechStream) Finish(_ context.Context) error {
 }
 
 func (s *fakeSpeechStream) Cancel() {
+	select {
+	case <-s.cancelled:
+	default:
+		close(s.cancelled)
+	}
+}
+
+type timeoutFirstSpeechProvider struct {
+	calls  int
+	stream *fakeSpeechStream
+}
+
+func (p *timeoutFirstSpeechProvider) Start(ctx context.Context, req speechProviderStartRequest, events speechEventSink) (speechProviderStream, error) {
+	p.calls++
+	if p.calls == 1 {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	p.stream = &fakeSpeechStream{
+		events:    events,
+		cancelled: make(chan struct{}),
+	}
+	return p.stream, nil
+}
+
+type blockingFinishSpeechProvider struct {
+	stream *blockingFinishSpeechStream
+}
+
+func (p *blockingFinishSpeechProvider) Start(_ context.Context, req speechProviderStartRequest, events speechEventSink) (speechProviderStream, error) {
+	p.stream = &blockingFinishSpeechStream{
+		cancelled: make(chan struct{}),
+	}
+	return p.stream, nil
+}
+
+type blockingFinishSpeechStream struct {
+	writes    [][]byte
+	cancelled chan struct{}
+}
+
+func (s *blockingFinishSpeechStream) WriteAudio(_ context.Context, pcm []byte) error {
+	s.writes = append(s.writes, append([]byte(nil), pcm...))
+	return nil
+}
+
+func (s *blockingFinishSpeechStream) Finish(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (s *blockingFinishSpeechStream) Cancel() {
 	select {
 	case <-s.cancelled:
 	default:
