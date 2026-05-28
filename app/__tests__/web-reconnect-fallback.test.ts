@@ -25,7 +25,28 @@ describe('web reconnect fallback behavior', () => {
     const connectStart = mainTsx.indexOf('const connect = async');
     const disconnectStart = mainTsx.indexOf('const disconnectForSupervisor', connectStart);
     const connectBlock = mainTsx.slice(connectStart, disconnectStart);
-    expect(connectBlock).toContain('refreshChatIndex().catch(() => undefined);');
+    expect(connectBlock).toContain('schedulePostConnectProjectRefresh();');
+    expect(connectBlock).not.toContain('await refreshChatIndex();');
+  });
+
+  test('schedules a forced project refresh after registry connect is ready', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'main.tsx'),
+      'utf8',
+    );
+
+    expect(mainTsx).toContain('const schedulePostConnectProjectRefresh = () => {');
+    expect(mainTsx).toContain('window.setTimeout(() => {');
+    expect(mainTsx).toContain('refreshChatIndex({force: true}).catch(() => undefined);');
+    expect(mainTsx).toContain('const refreshChatIndex = async (options?: {force?: boolean}) => {');
+    expect(mainTsx).toContain('if (!options?.force && !connected && !connectInFlightRef.current) return;');
+
+    const connectStart = mainTsx.indexOf('const connect = async');
+    const disconnectStart = mainTsx.indexOf('const disconnectForSupervisor', connectStart);
+    const connectBlock = mainTsx.slice(connectStart, disconnectStart);
+    expect(connectBlock).toContain('schedulePostConnectProjectRefresh();');
+    expect(connectBlock).not.toContain('refreshChatIndex().catch(() => undefined);');
     expect(connectBlock).not.toContain('await refreshChatIndex();');
   });
 

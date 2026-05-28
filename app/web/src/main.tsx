@@ -9047,6 +9047,12 @@ function App() {
     event.target.value = '';
   };
 
+  const schedulePostConnectProjectRefresh = () => {
+    window.setTimeout(() => {
+      refreshChatIndex({force: true}).catch(() => undefined);
+    }, 0);
+  };
+
   const connect = async ({
     silentReconnect = false,
   }: { silentReconnect?: boolean } = {}) => {
@@ -9115,7 +9121,7 @@ function App() {
           preferredSelectedChatId,
         ).catch(() => undefined);
       }
-      refreshChatIndex().catch(() => undefined);
+      schedulePostConnectProjectRefresh();
       workspaceController
         .validateExpandedDirectories(
           result.hydrated.projectId,
@@ -11427,8 +11433,8 @@ function App() {
     }
   };
 
-  const refreshChatIndex = async () => {
-    if (!connected && !connectInFlightRef.current) return;
+  const refreshChatIndex = async (options?: {force?: boolean}) => {
+    if (!options?.force && !connected && !connectInFlightRef.current) return;
     if (chatIndexFullRefreshInFlightRef.current) {
       chatIndexFullRefreshDirtyRef.current = true;
       return;
