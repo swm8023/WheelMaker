@@ -4,11 +4,11 @@
 
 ## 背景
 
-当前 Chat 输入区在开启 Voice Input 后，右侧操作按钮偏向“语音优先”：按钮显示为麦克风，语音输入通过长按触发。实际使用中需要把发送和语音合并成一个更符合移动端输入习惯的复合按钮：
+当前 Chat 输入区在开启 Voice Input 后，需要把发送和语音合并成一个更符合移动端输入习惯的复合按钮：
 
 - 没有可发送内容时，主动作是语音。
 - 有文字或附件时，主动作是发送。
-- 有可发送内容时仍能通过长按进入语音。
+- 有可发送内容时仍能通过长按启动语音。
 
 本文是 `docs/superpowers/specs/2026-05-28-registry-speech-input-design.md` 的 Chat 输入区交互迭代。若语音按钮、发送按钮、录音手势和输入框键盘行为与旧文档冲突，以本文为准。Registry speech 协议和服务端 ASR 接入不在本次迭代范围内。
 
@@ -16,7 +16,7 @@
 
 - 让右侧操作按钮根据“是否有可发送内容”在语音和发送之间切换。
 - 支持短按锁定录音、再次点击停止。
-- 支持长按按住说话、松手停止、上滑取消。
+- 支持有可发送内容时长按启动语音，但语音启动后仍保持锁定录音，再次点击停止。
 - 避免非语音路径触发 iOS/Safari 麦克风权限弹窗。
 - 语音只修改本次语音插入片段，不覆盖或重写整个输入框。
 - 语音开始和结束都尽量保持输入法/键盘展开状态不变。
@@ -26,7 +26,7 @@
 - 不改变 Registry speech 协议。
 - 不改变火山引擎 ASR 接入方式。
 - 不新增空闲麦克风 warm stream。
-- 不新增单独的“锁定录音取消”按钮；锁定录音再次点击即停止并保留识别文本。
+- 不支持上滑取消；本轮交互统一使用再次点击停止并保留识别文本。
 - 不在本次迭代中重做 Chat 输入区整体布局。
 
 ## 核心规则
@@ -43,34 +43,32 @@
 
 ### 按钮形态
 
-复合按钮有四种视觉/行为形态：
+复合按钮有三种主要视觉/行为形态：
 
 - `voice`：无可发送内容时显示纯麦克风按钮。
 - `sendWithVoice`：有可发送内容时显示发送按钮，并在右下角叠加小麦克风 badge，表示长按可语音。
-- `recordingLocked`：短按语音后的锁定录音态，按钮持续录音动画，再次点击停止。
-- `recordingHold`：长按按住说话态，按钮呈按压/录音态，底部长条提示松手停止、上滑取消。
+- `recordingLocked`：语音启动后的锁定录音态，按钮持续录音动画，再次点击停止。
 
 ### 触发行为
 
 无可发送内容时：
 
-- 短按：启动锁定录音。
-- 长按：启动按住说话。
-- 短按和长按都属于明确语音路径，可以调用 `getUserMedia`。
+- 点击：启动锁定录音。
+- 松手不会结束录音。
+- 再次点击录音按钮：停止录音。
 
 有可发送内容时：
 
 - `260ms` 内松开：发送消息。
-- 达到 `260ms` 长按阈值：进入按住说话。
-- 达到长按阈值后，松手只结束语音，不再发送原文本。
+- 达到 `260ms` 长按阈值：启动锁定录音。
+- 长按启动语音后，松手不会结束录音，也不会发送原文本。
 - 短按发送路径绝不调用 `getUserMedia`，避免 iOS/Safari 在发送时弹麦克风权限。
 
 录音中：
 
-- 锁定录音：再次点击按钮停止录音。
-- 按住说话：松手停止录音。
-- 按住说话：上滑超过取消阈值后，松手取消本次语音输入。
+- 再次点击按钮停止录音。
 - 停止录音复用现有 `speech.finish -> 最多等待 3 秒 final transcript -> cleanup` 流程。
+- 不支持上滑取消，也不通过 pointer cancel 结束录音。
 
 ### iOS/Safari 权限弹窗
 
@@ -81,7 +79,7 @@
 - 只有明确语音路径会调用 `getUserMedia`。
 - 有可发送内容的短按发送路径不能调用 `getUserMedia`。
 - 录音结束立即停止 tracks 和 AudioContext，不保留空闲麦克风流。
-- 如果 iOS 权限弹窗打断手势，授权成功后降级为锁定录音，不因为用户点击系统弹窗时松手而立即停止。
+- 如果 iOS 权限弹窗打断手势，授权成功后继续保持锁定录音，不因为用户点击系统弹窗时松手而立即停止。
 - 如果用户拒绝授权，退出语音状态，不修改输入框，并显示错误。
 
 Safari 普通标签页支持对站点设置 Microphone 为 Ask/Deny/Allow。若用户设置为 Ask 或 PWA/WKWebView 权限无法稳定持久化，系统可能仍会重复询问；这属于浏览器权限策略，不由应用弹窗实现。
@@ -106,11 +104,11 @@ ASR transcript 只替换本次语音片段：
 nextText = baseText[0:insertStart] + committedTranscript + liveTranscript + baseText[insertEnd:]
 ```
 
-跨 Registry stream 重连时，当前 live transcript 会先固化到 committed transcript；新 stream 只能更新新的 live transcript，不能覆盖旧识别结果。用户上滑取消按住说话时，恢复语音开始前的 `baseText`。
+跨 Registry stream 重连时，当前 live transcript 会先固化到 committed transcript；新 stream 只能更新新的 live transcript，不能覆盖旧识别结果。
 
 ## 键盘和输入框状态
 
-语音开始、停止、取消都不主动调用 `focus()` 或 `blur()`：
+语音开始、停止都不主动调用 `focus()` 或 `blur()`：
 
 - 原来输入法展开，尽量保持展开。
 - 原来输入法未展开，不主动展开。
@@ -126,75 +124,67 @@ nextText = baseText[0:insertStart] + committedTranscript + liveTranscript + base
 
 ## 组件边界
 
-### ComposerActionButton
+### VoiceInputButton
 
-建议把当前 `VoiceInputButton` 演进为更通用的输入区动作按钮，或者新增一个包装组件，避免把发送/语音复合手势全部塞进 `main.tsx`。
+当前 `VoiceInputButton` 负责复合按钮的手势和视觉状态，不直接了解 Registry speech 协议。
 
 职责：
 
 - 接收是否有可发送内容、录音状态、禁用状态。
-- 处理短按、长按、松手、上滑取消、再次点击停止。
-- 在 `sendWithVoice` 模式下短按调用 `onSend`，长按调用 `onVoiceStart`。
-- 在 `voice` 模式下短按启动锁定录音，长按启动按住说话。
-- 不直接了解 Registry speech 协议。
+- 在 `sendWithVoice` 模式下短按调用 `onSend`，长按调用 `onStart('locked')`。
+- 在 `voice` 模式下点击调用 `onStart('locked')`。
+- 录音态再次点击调用 `onFinish`。
+- 不处理上滑取消，不在 pointer cancel 时结束录音。
 
 ### Voice session controller
 
-沿用并扩展当前 `VoiceInputSession`：
+沿用当前 `VoiceInputSession`：
 
 - 继续负责 `baseText + insertStart + insertEnd` 片段替换。
 - 支持 committed/live transcript。
-- 暴露取消、提交、当前文本查询。
+- 跨 stream 重连时提交 live transcript，避免后续 live 结果覆盖旧文本。
 
 ### App glue
 
 `main.tsx` 负责把按钮事件连接到现有业务：
 
 - `onSend` -> `sendChatMessage()`
-- `onVoiceStart(mode)` -> `startVoiceInput({interactionMode: 'locked' | 'hold'})`
-- `onVoiceFinish` -> `finishVoiceInput()`
-- `onVoiceCancel` -> `cancelVoiceInputByGesture()`
+- `onStart(mode)` -> `startVoiceInput(mode)`
+- `onFinish` -> `finishVoiceInput()`
 
 ## 视觉反馈
 
 有可发送内容时，发送按钮是主视觉，右下角麦克风 badge 是辅助提示。badge 不单独成为可点击目标，避免增加命中区域复杂度。
 
-锁定录音：
+录音中：
 
 - 按钮持续录音动画。
 - 再次点击按钮停止。
-- 底部长条显示锁定录音状态，表达“正在录音，点击停止”。
+- 底部长条显示录音状态、连接状态和结束等待状态。
 
-按住说话：
-
-- 底部长条显示更强的按住语音反馈。
-- 正常状态提示松手停止。
-- 上滑超过取消阈值后切换到取消反馈。
-
-首次授权弹窗后降级锁定录音时，使用锁定录音视觉。
+首次授权弹窗打断手势后，授权成功继续使用锁定录音视觉。
 
 ## Corner Cases
 
 - 有附件但无文字：显示 `sendWithVoice`，短按发送附件，长按语音。
 - 有文字时长按进入语音：达到 260ms 后不再触发发送。
 - 有文字时短按发送：不调用 `getUserMedia`。
-- 无内容短按语音：可以触发麦克风权限；授权成功后进入锁定录音。
-- 无内容长按语音：已授权时按住说话；若权限弹窗打断手势，授权成功后降级锁定录音。
+- 无内容点击语音：可以触发麦克风权限；授权成功后进入锁定录音。
+- 权限弹窗导致 pointer up/cancel：不结束录音，授权成功后继续录音。
 - 权限拒绝：退出语音，不修改输入框。
-- 录音中 Registry 断线：沿用已实现的本地 buffer 和重连策略。
+- 录音中 Registry 断线：沿用本地 buffer 和重连策略。
 - 录音中手动输入：阻止或忽略，保持语音片段的唯一写入权。
 - 录音中切换会话/项目：取消本次语音，避免写错上下文。
-- 锁定录音不支持上滑取消；按住说话支持上滑取消。
 
 ## 测试策略
 
 前端测试应覆盖：
 
-- 无可发送内容时短按启动锁定录音。
-- 无可发送内容时长按启动按住说话，松手 finish。
-- 有可发送内容时短按发送，不调用预热或麦克风启动。
-- 有可发送内容时长按启动语音，不触发发送。
-- 权限弹窗/启动延迟导致 pointer 已释放时，授权成功后进入锁定录音而不是立即 finish。
+- 无可发送内容时点击启动锁定录音，松手不结束。
+- 有可发送内容时短按发送，不调用麦克风启动。
+- 有可发送内容时长按启动语音，不触发发送，松手不结束。
+- 权限弹窗/启动延迟导致 pointer 已释放时，授权成功后继续锁定录音而不是立即 finish。
+- pointer move 和 pointer cancel 不取消语音。
 - 录音期间 textarea 不使用 readonly 锁键盘，且手动 onChange 不覆盖语音文本。
 - 附件-only 场景显示发送主按钮。
 - 语音插入只替换本次语音 segment。

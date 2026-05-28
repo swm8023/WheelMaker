@@ -330,7 +330,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('type="file"');
     expect(mainTsx).toContain('multiple');
     expect(mainTsx).toContain('onPaste={event => {');
-    expect(mainTsx).toContain('readOnly={chatSending || voiceRecording}');
+    expect(mainTsx).toContain('readOnly={chatSending}');
     expect(mainTsx).toContain('if (chatSending) {\n      event.target.value = \'\';\n      return;\n    }');
     expect(mainTsx).toContain('if (!supportsChatClipboardFiles) {');
     expect(mainTsx).toContain('onDragOver={event => {');
@@ -1234,7 +1234,7 @@ describe('web chat integration', () => {
     const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
     const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
 
-    expect(mainTsx).toContain("import {VoiceInputButton} from './features/speech/VoiceInputButton';");
+    expect(mainTsx).toContain("import {VoiceInputButton, type VoiceInputInteractionMode} from './features/speech/VoiceInputButton';");
     expect(mainTsx).toContain("import {VoiceRecordingBar} from './features/speech/VoiceRecordingBar';");
     expect(mainTsx).toContain("formatVoiceInputDiagnosticError,");
     expect(mainTsx).toContain("logVoiceInputDiagnostic,");
@@ -1257,19 +1257,28 @@ describe('web chat integration', () => {
     expect(chatSection).not.toContain("setSettingsDetailView('voiceInput')");
     expect(mainTsx).toContain('Doubao Streaming ASR 2.0');
     expect(mainTsx).toContain('speechSettings.enabled ? (');
+    expect(mainTsx).toContain('const chatComposerHasSendableContent = chatComposerText.trim().length > 0 || chatAttachments.length > 0;');
     expect(mainTsx).toContain('<VoiceInputButton');
+    expect(mainTsx).toContain('recordingMode={voiceInteractionMode}');
+    expect(mainTsx).toContain('hasSendableContent={chatComposerHasSendableContent}');
+    expect(mainTsx).toContain('onSend={() => sendChatMessage().catch(() => undefined)}');
     expect(mainTsx).toContain('onStart={startVoiceInput}');
     expect(mainTsx).toContain('onFinish={finishVoiceInput}');
-    expect(mainTsx).toContain('onCancel={cancelVoiceInputByGesture}');
+    expect(mainTsx).not.toContain('onCancel={cancelVoiceInputByGesture}');
     expect(mainTsx).toContain('onLog={logVoiceInputButtonEvent}');
     expect(mainTsx).toContain("logVoiceInputDiagnostic('debug', 'start_requested'");
     expect(mainTsx).toContain("logVoiceInputDiagnostic('error', 'start_failed'");
     expect(mainTsx).toContain("logVoiceInputDiagnostic('error', 'chunk_send_failed'");
     expect(mainTsx).toContain('readOnly={chatSending}');
+    expect(mainTsx).toContain('if (voiceRecordingRef.current) {');
     expect(mainTsx).toContain('voiceRecording ? (');
     expect(mainTsx).toContain('<VoiceRecordingBar');
 
     expect(stylesCss).toContain('.voice-input-button');
+    expect(stylesCss).toContain('.voice-input-button.send-with-voice');
+    expect(stylesCss).toContain('.voice-input-badge');
+    expect(stylesCss).toContain('.voice-input-button.locked-recording');
+    expect(stylesCss).toContain('.voice-input-button.hold-recording');
     expect(stylesCss).toContain('.voice-input-settings-nested');
     expect(stylesCss).toContain('.voice-recording-bar');
     expect(stylesCss).toContain('@keyframes voiceBarPulse');

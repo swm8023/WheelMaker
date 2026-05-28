@@ -55,4 +55,24 @@ describe('web voice input local buffering wiring', () => {
     expect(mainTsx).toContain('scheduleVoiceFinalTimeout');
     expect(mainTsx).toContain('completeVoiceInputFinalizing');
   });
+
+  test('wires composer action modes without eager microphone prewarm on send paths', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'main.tsx'),
+      'utf8',
+    );
+
+    expect(mainTsx).toContain("type VoiceInputInteractionMode");
+    expect(mainTsx).toContain('const [voiceInteractionMode, setVoiceInteractionMode] = useState<VoiceInputInteractionMode | null>(null);');
+    expect(mainTsx).toContain('const voiceInteractionModeRef = useRef<VoiceInputInteractionMode | null>(null);');
+    expect(mainTsx).toContain("const startVoiceInput = async (interactionMode: VoiceInputInteractionMode = 'locked') => {");
+    expect(mainTsx).toContain('voiceInteractionModeRef.current = interactionMode;');
+    expect(mainTsx).toContain('setVoiceInteractionMode(interactionMode);');
+    expect(mainTsx).toContain('recordingMode={voiceInteractionMode}');
+    expect(mainTsx).toContain('hasSendableContent={chatComposerHasSendableContent}');
+    expect(mainTsx).toContain('onSend={() => sendChatMessage().catch(() => undefined)}');
+    expect(mainTsx).not.toContain('onPrewarmStart={prewarmVoiceCapture}');
+    expect(mainTsx).not.toContain('onPrewarmCancel={cancelVoicePrewarmCapture}');
+  });
 });

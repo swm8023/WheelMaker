@@ -8,7 +8,6 @@ function renderText(status: 'buffering' | 'recording' | 'finishing') {
     renderer = ReactTestRenderer.create(
       <VoiceRecordingBar
         status={status}
-        cancelIntent={false}
         elapsedMs={1200}
         level={0.2}
       />,
@@ -24,18 +23,19 @@ describe('VoiceRecordingBar', () => {
     expect(renderText('finishing')).toContain('Finishing...');
   });
 
-  test('cancel intent overrides transfer state copy', () => {
+  test('does not render legacy cancel guidance', () => {
     let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
     ReactTestRenderer.act(() => {
       renderer = ReactTestRenderer.create(
         <VoiceRecordingBar
           status="buffering"
-          cancelIntent={true}
           elapsedMs={1200}
         />,
       );
     });
 
-    expect(JSON.stringify(renderer!.toJSON())).toContain('Release to cancel');
+    const text = JSON.stringify(renderer!.toJSON());
+    expect(text).toContain('Connecting...');
+    expect(text).not.toContain('Release to cancel');
   });
 });

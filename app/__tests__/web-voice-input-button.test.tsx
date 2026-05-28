@@ -37,11 +37,10 @@ describe('VoiceInputButton', () => {
     jest.useRealTimers();
   });
 
-  test('ignores short taps before the long press threshold', async () => {
+  test('sends on short press when the composer has sendable content', async () => {
+    const onSend = jest.fn();
     const onStart = jest.fn();
     const onFinish = jest.fn();
-    const onCancel = jest.fn();
-    const onPrewarmCancel = jest.fn();
     const onLog = jest.fn();
     let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
 
@@ -49,10 +48,10 @@ describe('VoiceInputButton', () => {
       renderer = ReactTestRenderer.create(
         <VoiceInputButton
           recording={false}
+          hasSendableContent={true}
+          onSend={onSend}
           onStart={onStart}
           onFinish={onFinish}
-          onCancel={onCancel}
-          onPrewarmCancel={onPrewarmCancel}
           onLog={onLog}
         />,
       );
@@ -64,84 +63,25 @@ describe('VoiceInputButton', () => {
       button.props.onPointerUp(pointerEvent({timeStamp: 80}));
     });
 
+    expect(onSend).toHaveBeenCalledTimes(1);
     expect(onStart).not.toHaveBeenCalled();
     expect(onFinish).not.toHaveBeenCalled();
-    expect(onCancel).not.toHaveBeenCalled();
-    expect(onPrewarmCancel).toHaveBeenCalledTimes(1);
-    expect(onLog).toHaveBeenCalledWith(expect.objectContaining({
-      event: 'short_press_ignored',
-      level: 'debug',
-    }));
   });
 
-  test('prewarms voice input immediately on pointer down before long press settles', async () => {
+  test('starts locked voice input on long press when the composer has sendable content', async () => {
+    const onSend = jest.fn();
     const onStart = jest.fn();
     const onFinish = jest.fn();
-    const onCancel = jest.fn();
-    const onPrewarmStart = jest.fn();
     let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
 
     await ReactTestRenderer.act(() => {
       renderer = ReactTestRenderer.create(
         <VoiceInputButton
           recording={false}
+          hasSendableContent={true}
+          onSend={onSend}
           onStart={onStart}
           onFinish={onFinish}
-          onCancel={onCancel}
-          onPrewarmStart={onPrewarmStart}
-        />,
-      );
-    });
-
-    const button = renderer!.root.findByType('button');
-    await ReactTestRenderer.act(() => {
-      button.props.onPointerDown(pointerEvent({timeStamp: 0}));
-    });
-
-    expect(onPrewarmStart).toHaveBeenCalledTimes(1);
-    expect(onStart).not.toHaveBeenCalled();
-  });
-
-  test('finishes an active recording on pointer down', async () => {
-    const onStart = jest.fn();
-    const onFinish = jest.fn();
-    const onCancel = jest.fn();
-    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
-
-    await ReactTestRenderer.act(() => {
-      renderer = ReactTestRenderer.create(
-        <VoiceInputButton
-          recording={true}
-          onStart={onStart}
-          onFinish={onFinish}
-          onCancel={onCancel}
-        />,
-      );
-    });
-
-    const button = renderer!.root.findByType('button');
-    await ReactTestRenderer.act(() => {
-      button.props.onPointerDown(pointerEvent({timeStamp: 300}));
-    });
-
-    expect(onFinish).toHaveBeenCalledTimes(1);
-    expect(onStart).not.toHaveBeenCalled();
-    expect(onCancel).not.toHaveBeenCalled();
-  });
-
-  test('finishes recording after long press release', async () => {
-    const onStart = jest.fn();
-    const onFinish = jest.fn();
-    const onCancel = jest.fn();
-    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
-
-    await ReactTestRenderer.act(() => {
-      renderer = ReactTestRenderer.create(
-        <VoiceInputButton
-          recording={false}
-          onStart={onStart}
-          onFinish={onFinish}
-          onCancel={onCancel}
         />,
       );
     });
@@ -153,30 +93,112 @@ describe('VoiceInputButton', () => {
       await Promise.resolve();
     });
 
-    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledWith('locked');
+    expect(onSend).not.toHaveBeenCalled();
 
     await ReactTestRenderer.act(() => {
-      button.props.onPointerUp(pointerEvent({timeStamp: 520}));
+      button.props.onPointerUp(pointerEvent({timeStamp: 420}));
     });
 
-    expect(onFinish).toHaveBeenCalledTimes(1);
-    expect(onCancel).not.toHaveBeenCalled();
+    expect(onFinish).not.toHaveBeenCalled();
   });
 
-  test('defers cancel intent until async start settles', async () => {
-    const start = deferred();
-    const onStart = jest.fn(() => start.promise);
+  test('starts locked recording on short press when the composer is empty', async () => {
+    const onStart = jest.fn();
     const onFinish = jest.fn();
-    const onCancel = jest.fn();
     let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
 
     await ReactTestRenderer.act(() => {
       renderer = ReactTestRenderer.create(
         <VoiceInputButton
           recording={false}
+          hasSendableContent={false}
           onStart={onStart}
           onFinish={onFinish}
-          onCancel={onCancel}
+        />,
+      );
+    });
+
+    const button = renderer!.root.findByType('button');
+    await ReactTestRenderer.act(() => {
+      button.props.onPointerDown(pointerEvent({timeStamp: 0}));
+      button.props.onPointerUp(pointerEvent({timeStamp: 80}));
+    });
+
+    expect(onStart).toHaveBeenCalledWith('locked');
+    expect(onFinish).not.toHaveBeenCalled();
+  });
+
+  test('keeps empty composer long press locked until the next recording click', async () => {
+    const onStart = jest.fn();
+    const onFinish = jest.fn();
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(
+        <VoiceInputButton
+          recording={false}
+          hasSendableContent={false}
+          onStart={onStart}
+          onFinish={onFinish}
+        />,
+      );
+    });
+
+    const button = renderer!.root.findByType('button');
+    await ReactTestRenderer.act(async () => {
+      button.props.onPointerDown(pointerEvent({timeStamp: 0}));
+      jest.advanceTimersByTime(260);
+      await Promise.resolve();
+    });
+
+    expect(onStart).toHaveBeenCalledWith('locked');
+
+    await ReactTestRenderer.act(() => {
+      button.props.onPointerUp(pointerEvent({timeStamp: 520}));
+    });
+
+    expect(onFinish).not.toHaveBeenCalled();
+  });
+
+  test('finishes locked recording on the next pointer down', async () => {
+    const onStart = jest.fn();
+    const onFinish = jest.fn();
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(
+        <VoiceInputButton
+          recording={true}
+          recordingMode="locked"
+          onStart={onStart}
+          onFinish={onFinish}
+        />,
+      );
+    });
+
+    const button = renderer!.root.findByType('button');
+    await ReactTestRenderer.act(() => {
+      button.props.onPointerDown(pointerEvent({timeStamp: 300}));
+    });
+
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
+  test('keeps async voice start alive when permission UI interrupts the gesture', async () => {
+    const start = deferred();
+    const onStart = jest.fn(() => start.promise);
+    const onFinish = jest.fn();
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(
+        <VoiceInputButton
+          recording={false}
+          hasSendableContent={true}
+          onStart={onStart}
+          onFinish={onFinish}
         />,
       );
     });
@@ -185,12 +207,11 @@ describe('VoiceInputButton', () => {
     await ReactTestRenderer.act(() => {
       button.props.onPointerDown(pointerEvent({clientY: 200, timeStamp: 0}));
       jest.advanceTimersByTime(260);
-      button.props.onPointerMove(pointerEvent({clientY: 120, timeStamp: 90}));
-      button.props.onPointerUp(pointerEvent({clientY: 120, timeStamp: 120}));
+      button.props.onPointerUp(pointerEvent({clientY: 200, timeStamp: 320}));
     });
 
+    expect(onStart).toHaveBeenCalledWith('locked');
     expect(onFinish).not.toHaveBeenCalled();
-    expect(onCancel).not.toHaveBeenCalled();
 
     await ReactTestRenderer.act(async () => {
       start.resolve();
@@ -198,35 +219,68 @@ describe('VoiceInputButton', () => {
     });
 
     expect(onFinish).not.toHaveBeenCalled();
-    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  test('locks recording instead of cancelling on browser pointer cancel without cancel intent', async () => {
-    const onStart = jest.fn();
+  test('ignores upward movement during a recording start because cancellation is click-only', async () => {
+    const start = deferred();
+    const onStart = jest.fn(() => start.promise);
     const onFinish = jest.fn();
-    const onCancel = jest.fn();
     let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
 
     await ReactTestRenderer.act(() => {
       renderer = ReactTestRenderer.create(
         <VoiceInputButton
           recording={false}
+          hasSendableContent={true}
           onStart={onStart}
           onFinish={onFinish}
-          onCancel={onCancel}
         />,
       );
     });
 
     const button = renderer!.root.findByType('button');
     await ReactTestRenderer.act(() => {
+      button.props.onPointerDown(pointerEvent({clientY: 200, timeStamp: 0}));
+      jest.advanceTimersByTime(260);
+      button.props.onPointerMove(pointerEvent({clientY: 120, timeStamp: 280}));
+      button.props.onPointerUp(pointerEvent({clientY: 120, timeStamp: 320}));
+    });
+
+    expect(onFinish).not.toHaveBeenCalled();
+
+    await ReactTestRenderer.act(async () => {
+      start.resolve();
+      await start.promise;
+    });
+
+    expect(onFinish).not.toHaveBeenCalled();
+  });
+
+  test('leaves long-press voice recording active on browser pointer cancel', async () => {
+    const onStart = jest.fn();
+    const onFinish = jest.fn();
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(
+        <VoiceInputButton
+          recording={false}
+          hasSendableContent={true}
+          onStart={onStart}
+          onFinish={onFinish}
+        />,
+      );
+    });
+
+    const button = renderer!.root.findByType('button');
+    await ReactTestRenderer.act(async () => {
       button.props.onPointerDown(pointerEvent({timeStamp: 0}));
       jest.advanceTimersByTime(260);
+      await Promise.resolve();
       button.props.onPointerCancel(pointerEvent({timeStamp: 120}));
     });
 
-    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledWith('locked');
     expect(onFinish).not.toHaveBeenCalled();
-    expect(onCancel).not.toHaveBeenCalled();
   });
 });

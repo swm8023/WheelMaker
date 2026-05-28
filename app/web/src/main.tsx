@@ -212,7 +212,7 @@ import {
   type VoiceInputDiagnosticEntry,
   type VoiceInputDiagnosticLevel,
 } from './features/speech/voiceInputDiagnostics';
-import {VoiceInputButton} from './features/speech/VoiceInputButton';
+import {VoiceInputButton, type VoiceInputInteractionMode} from './features/speech/VoiceInputButton';
 import {VoiceRecordingBar} from './features/speech/VoiceRecordingBar';
 import { WorkspaceController } from './services/workspaceController';
 import { WorkspaceStore } from './services/workspaceStore';
@@ -3397,9 +3397,10 @@ function App() {
   const [chatComposerText, setChatComposerText] = useState('');
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const chatAttachmentUploadPending = chatAttachments.some(isChatAttachmentUploadPending);
+  const chatComposerHasSendableContent = chatComposerText.trim().length > 0 || chatAttachments.length > 0;
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceRecordingStatus, setVoiceRecordingStatus] = useState<VoiceRecordingStatus>('recording');
-  const [voiceCancelIntent, setVoiceCancelIntent] = useState(false);
+  const [voiceInteractionMode, setVoiceInteractionMode] = useState<VoiceInputInteractionMode | null>(null);
   const [voiceElapsedMs, setVoiceElapsedMs] = useState(0);
   const [voiceLevel, setVoiceLevel] = useState(0);
   const [chatComposerDragActive, setChatComposerDragActive] = useState(false);
@@ -3428,12 +3429,10 @@ function App() {
   const voiceStartGenerationRef = useRef(0);
   const voicePendingFinishRef = useRef(false);
   const voiceAwaitingFinalRef = useRef(false);
+  const voiceInteractionModeRef = useRef<VoiceInputInteractionMode | null>(null);
   const voiceFinalTimerRef = useRef<number | null>(null);
   const voiceReconnectBufferingRef = useRef(false);
   const voiceCaptureGenerationRef = useRef(0);
-  const voicePrewarmCaptureRef = useRef<MicrophonePCMStream | null>(null);
-  const voicePrewarmCapturePromiseRef = useRef<Promise<MicrophonePCMStream> | null>(null);
-  const voicePrewarmTokenRef = useRef(0);
   const voiceActiveSettingsRef = useRef<ReturnType<typeof normalizeSpeechSettings> | null>(null);
   const voiceActiveApiKeyRef = useRef('');
   const voiceRuntimeKeyRef = useRef('');
@@ -8474,9 +8473,10 @@ function App() {
 
   const resetVoiceRecordingUi = () => {
     voiceRecordingRef.current = false;
+    voiceInteractionModeRef.current = null;
     setVoiceRecording(false);
+    setVoiceInteractionMode(null);
     setVoiceRecordingStatus('recording');
-    setVoiceCancelIntent(false);
     setVoiceLevel(0);
   };
 
@@ -8486,10 +8486,6 @@ function App() {
       window.clearTimeout(voiceFinalTimerRef.current);
       voiceFinalTimerRef.current = null;
     }
-    voicePrewarmTokenRef.current += 1;
-    voicePrewarmCaptureRef.current?.stop();
-    voicePrewarmCaptureRef.current = null;
-    voicePrewarmCapturePromiseRef.current = null;
     voiceInputBufferRef.current?.clear();
     voiceInputBufferRef.current = null;
     voiceSendQueueRef.current?.cancel();
@@ -8602,10 +8598,6 @@ function App() {
         setError(err instanceof Error ? err.message : String(err));
       }
     }
-  };
-
-  const cancelVoiceInputByGesture = () => {
-    void cancelVoiceInput('gesture');
   };
 
   const commitVoiceInputTranscript = () => {
@@ -8909,59 +8901,8 @@ function App() {
     },
   });
 
-  const stopVoicePrewarmCapture = () => {
-    voicePrewarmTokenRef.current += 1;
-    voicePrewarmCaptureRef.current?.stop();
-    voicePrewarmCaptureRef.current = null;
-    voicePrewarmCapturePromiseRef.current = null;
-  };
-
-  const prewarmVoiceCapture = () => {
-    if (voiceCaptureRef.current || voicePrewarmCaptureRef.current || voicePrewarmCapturePromiseRef.current) {
-      return;
-    }
-    const token = voicePrewarmTokenRef.current + 1;
-    voicePrewarmTokenRef.current = token;
-    const promise = createVoiceMicrophoneCapture()
-      .then(capture => {
-        if (voicePrewarmTokenRef.current !== token) {
-          capture.stop();
-          return capture;
-        }
-        voicePrewarmCaptureRef.current = capture;
-        return capture;
-      })
-      .finally(() => {
-        if (voicePrewarmTokenRef.current === token) {
-          voicePrewarmCapturePromiseRef.current = null;
-        }
-      });
-    promise.catch(() => undefined);
-    voicePrewarmCapturePromiseRef.current = promise;
-  };
-
-  const cancelVoicePrewarmCapture = () => {
-    if (voiceRecordingRef.current || voiceStreamIdRef.current || voiceAwaitingFinalRef.current) {
-      return;
-    }
-    stopVoicePrewarmCapture();
-  };
-
   const startVoiceCaptureForGeneration = async (generation: number) => {
     voiceCaptureGenerationRef.current = generation;
-    if (voicePrewarmCaptureRef.current) {
-      const capture = voicePrewarmCaptureRef.current;
-      voicePrewarmCaptureRef.current = null;
-      voicePrewarmCapturePromiseRef.current = null;
-      return capture;
-    }
-    const pendingPrewarm = voicePrewarmCapturePromiseRef.current;
-    if (pendingPrewarm) {
-      const capture = await pendingPrewarm;
-      voicePrewarmCaptureRef.current = null;
-      voicePrewarmCapturePromiseRef.current = null;
-      return capture;
-    }
     return createVoiceMicrophoneCapture();
   };
 
@@ -9024,7 +8965,7 @@ function App() {
     finishVoiceInputPreservingTranscript(payload.message, {cancelStream: false});
   };
 
-  const startVoiceInput = async () => {
+  const startVoiceInput = async (interactionMode: VoiceInputInteractionMode = 'locked') => {
     if (voiceRecordingRef.current || voiceStreamIdRef.current || voiceAwaitingFinalRef.current) {
       logVoiceInputState('warn', 'start_ignored_active_session');
       return;
@@ -9055,6 +8996,7 @@ function App() {
       baseTextLength: baseText.length,
       insertStart,
       insertEnd,
+      interactionMode,
     });
     if (!connected) {
       logVoiceInputState('warn', 'start_buffering_disconnected', {
@@ -9077,10 +9019,11 @@ function App() {
     voiceStartedAtRef.current = Date.now();
     voiceSeqRef.current = 0;
     voiceCaptureGenerationRef.current = generation;
+    voiceInteractionModeRef.current = interactionMode;
     voiceRecordingRef.current = true;
+    setVoiceInteractionMode(interactionMode);
     setVoiceRecording(true);
     setVoiceRecordingStatus('buffering');
-    setVoiceCancelIntent(false);
     setVoiceElapsedMs(0);
     setVoiceLevel(0);
     setError('');
@@ -15503,13 +15446,29 @@ function App() {
                     rows={1}
                     className="chat-composer-input"
                     value={chatComposerText}
-                    readOnly={chatSending || voiceRecording}
+                    readOnly={chatSending}
                     enterKeyHint={isWide ? undefined : 'send'}
                     onChange={event => {
+                      if (voiceRecordingRef.current) {
+                        event.preventDefault();
+                        return;
+                      }
+                      if (voiceAwaitingFinalRef.current) {
+                        event.preventDefault();
+                        return;
+                      }
                       closeChatAttachmentTray();
                       updateChatComposerText(event.target.value);
                     }}
                     onPaste={event => {
+                      if (voiceRecordingRef.current) {
+                        event.preventDefault();
+                        return;
+                      }
+                      if (voiceAwaitingFinalRef.current) {
+                        event.preventDefault();
+                        return;
+                      }
                       if (chatSending) {
                         return;
                       }
@@ -15526,6 +15485,14 @@ function App() {
                       enqueueChatAttachmentFiles(files, attachmentDraftKey, attachmentDraftGeneration);
                     }}
                     onKeyDown={event => {
+                      if (voiceRecordingRef.current) {
+                        event.preventDefault();
+                        return;
+                      }
+                      if (voiceAwaitingFinalRef.current) {
+                        event.preventDefault();
+                        return;
+                      }
                       if (chatSlashMenuVisible) {
                         if (event.key === 'ArrowDown') {
                           event.preventDefault();
@@ -15575,14 +15542,13 @@ function App() {
                   {speechSettings.enabled ? (
                     <VoiceInputButton
                       recording={voiceRecording}
+                      recordingMode={voiceInteractionMode}
+                      hasSendableContent={chatComposerHasSendableContent}
                       disabled={chatAttachmentUploadPending}
                       readOnly={chatSending}
+                      onSend={() => sendChatMessage().catch(() => undefined)}
                       onStart={startVoiceInput}
                       onFinish={finishVoiceInput}
-                      onCancel={cancelVoiceInputByGesture}
-                      onPrewarmStart={prewarmVoiceCapture}
-                      onPrewarmCancel={cancelVoicePrewarmCapture}
-                      onCancelIntentChange={setVoiceCancelIntent}
                       onLog={logVoiceInputButtonEvent}
                     />
                   ) : (
@@ -15631,7 +15597,6 @@ function App() {
               {voiceRecording ? (
                 <VoiceRecordingBar
                   status={voiceRecordingStatus}
-                  cancelIntent={voiceCancelIntent}
                   elapsedMs={voiceElapsedMs}
                   level={voiceLevel}
                 />
