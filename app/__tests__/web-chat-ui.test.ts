@@ -1134,6 +1134,9 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.narrow-shell\[data-floating-control-side='left'\] \.drawer\.show \{[\s\S]*transform: translateX\(0\);[\s\S]*box-shadow: -8px 0 28px rgba\(0, 0, 0, 0\.38\);[\s\S]*\}/,
     );
+    expect(stylesCss).toMatch(
+      /\.floating-control-stack-layer\[data-side-pulse='left'\] ~ \.drawer:not\(\.show\),[\s\S]*\.floating-control-stack-layer\[data-side-pulse='right'\] ~ \.drawer:not\(\.show\) \{[\s\S]*transition: box-shadow 220ms ease;[\s\S]*\}/,
+    );
   });
 
   test('keeps the mobile three-tab floating nav and drawer button translucent over content', () => {

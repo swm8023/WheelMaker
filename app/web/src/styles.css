@@ -8318,6 +8318,11 @@ body,
   box-shadow: -8px 0 28px rgba(0, 0, 0, 0.38);
 }
 
+.floating-control-stack-layer[data-side-pulse='left'] ~ .drawer:not(.show),
+.floating-control-stack-layer[data-side-pulse='right'] ~ .drawer:not(.show) {
+  transition: box-shadow 220ms ease;
+}
+
 .narrow-shell .body {
   position: relative;
 }
