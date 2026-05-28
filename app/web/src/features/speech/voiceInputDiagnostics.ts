@@ -9,7 +9,19 @@ export type VoiceInputDiagnosticEntry = {
 };
 
 export function formatVoiceInputDiagnosticError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  if (!error || typeof error !== 'object') {
+    return message;
+  }
+  const details = (error as {details?: unknown}).details;
+  if (!details || typeof details !== 'object' || Array.isArray(details)) {
+    return message;
+  }
+  const providerError = (details as Record<string, unknown>).error;
+  if (typeof providerError !== 'string' || providerError.length === 0) {
+    return message;
+  }
+  return `${message}: ${providerError}`;
 }
 
 export function logVoiceInputDiagnostic(

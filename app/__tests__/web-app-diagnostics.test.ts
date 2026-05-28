@@ -3,7 +3,10 @@ import {
   createAppDiagnosticStore,
   filterAppDiagnosticRecords,
 } from '../web/src/debug/appDiagnostics';
-import {logVoiceInputDiagnostic} from '../web/src/features/speech/voiceInputDiagnostics';
+import {
+  formatVoiceInputDiagnosticError,
+  logVoiceInputDiagnostic,
+} from '../web/src/features/speech/voiceInputDiagnostics';
 
 describe('app diagnostics', () => {
   afterEach(() => {
@@ -43,5 +46,14 @@ describe('app diagnostics', () => {
     expect(loggedPayload.streamId).toBe('[redacted]');
     expect(loggedPayload.pcm).toBe('[omitted]');
     expect(loggedPayload.connected).toBe(true);
+  });
+
+  test('includes registry error details in voice diagnostic error messages', () => {
+    const error = new Error('speech provider start failed') as Error & {details?: unknown};
+    error.details = {error: 'speech provider unavailable'};
+
+    expect(formatVoiceInputDiagnosticError(error)).toBe(
+      'speech provider start failed: speech provider unavailable',
+    );
   });
 });
