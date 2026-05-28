@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/websocket"
 )
@@ -200,10 +201,12 @@ func buildVolcengineFullClientRequest(audio speechAudioConfig) ([]byte, error) {
 			"channel": audio.Channel,
 		},
 		"request": map[string]any{
-			"model_name":      volcengineSpeechModelName,
-			"enable_itn":      true,
-			"enable_punc":     true,
-			"show_utterances": true,
+			"model_name":       volcengineSpeechModelName,
+			"enable_itn":       true,
+			"enable_punc":      true,
+			"show_utterances":  true,
+			"result_type":      "full",
+			"enable_nonstream": true,
 		},
 	}
 	raw, err := json.Marshal(payload)
@@ -304,26 +307,51 @@ func readVolcenginePayload(payload []byte, compression byte) ([]byte, error) {
 }
 
 func extractVolcengineText(body []byte) string {
-	var root map[string]any
+	var root struct {
+		Result json.RawMessage `json:"result"`
+	}
 	if err := json.Unmarshal(body, &root); err != nil {
 		return ""
 	}
-	return extractVolcengineResultText(root["result"])
+	return extractVolcengineResultText(root.Result)
 }
 
-func extractVolcengineResultText(result any) string {
-	switch typed := result.(type) {
-	case map[string]any:
-		if text, ok := typed["text"].(string); ok {
-			return text
+func extractVolcengineResultText(result json.RawMessage) string {
+	if len(result) == 0 {
+		return ""
+	}
+
+	var node struct {
+		Text      string `json:"text"`
+		Utterance []struct {
+			Text string `json:"text"`
+		} `json:"utterances"`
+	}
+	if err := json.Unmarshal(result, &node); err == nil {
+		if node.Text != "" {
+			return node.Text
 		}
-	case []any:
-		for i := len(typed) - 1; i >= 0; i-- {
-			text := extractVolcengineResultText(typed[i])
-			if text != "" {
-				return text
-			}
+		var out strings.Builder
+		for _, utterance := range node.Utterance {
+			out.WriteString(utterance.Text)
 		}
+		if out.Len() > 0 {
+			return out.String()
+		}
+	}
+
+	var nodes []json.RawMessage
+	if err := json.Unmarshal(result, &nodes); err == nil {
+		var out strings.Builder
+		for _, item := range nodes {
+			out.WriteString(extractVolcengineResultText(item))
+		}
+		return out.String()
+	}
+
+	var text string
+	if err := json.Unmarshal(result, &text); err == nil {
+		return text
 	}
 	return ""
 }

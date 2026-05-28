@@ -37,7 +37,12 @@ func TestVolcengineFullClientRequestFrame(t *testing.T) {
 		t.Fatalf("audio payload=%#v", audio)
 	}
 	request := body["request"].(map[string]any)
-	if request["model_name"] != "bigmodel" || request["enable_itn"] != true || request["enable_punc"] != true || request["show_utterances"] != true {
+	if request["model_name"] != "bigmodel" ||
+		request["enable_itn"] != true ||
+		request["enable_punc"] != true ||
+		request["show_utterances"] != true ||
+		request["result_type"] != "full" ||
+		request["enable_nonstream"] != true {
 		t.Fatalf("request payload=%#v", request)
 	}
 }
@@ -86,6 +91,26 @@ func TestParseVolcengineTranscriptFrame(t *testing.T) {
 	}
 	if parsed.Text != "你好世界" || parsed.Final {
 		t.Fatalf("parsed=%#v", parsed)
+	}
+}
+
+func TestParseVolcengineTranscriptFrameCombinesFullResultList(t *testing.T) {
+	body := gzipJSON(t, map[string]any{
+		"result": []map[string]any{
+			{"text": "前面"},
+			{"text": "后面"},
+		},
+	})
+	frame := append([]byte{0x11, 0x91, 0x11, 0x00}, int32Bytes(8)...)
+	frame = append(frame, uint32Bytes(uint32(len(body)))...)
+	frame = append(frame, body...)
+
+	parsed, err := parseVolcengineFrame(frame)
+	if err != nil {
+		t.Fatalf("parse frame: %v", err)
+	}
+	if parsed.Text != "前面后面" {
+		t.Fatalf("parsed text=%q, want %q", parsed.Text, "前面后面")
 	}
 }
 
