@@ -527,6 +527,12 @@ describe('web chat integration', () => {
       /\.floating-control-drag-backdrop \{[\s\S]*background: rgba\(0, 0, 0, 0\.13\);[\s\S]*backdrop-filter: blur\(2px\);[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
+      /\.floating-control-dock-rail\.left \{[^}]*left: 0;[^}]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.floating-control-dock-rail\.right \{[^}]*right: 0;[^}]*\}/,
+    );
+    expect(stylesCss).toMatch(
       /\.floating-control-stack-layer\[data-drag-state='dragging'\] \.floating-control-drag-backdrop \{[\s\S]*opacity: 1;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
@@ -1126,7 +1132,7 @@ describe('web chat integration', () => {
       /\.narrow-shell\[data-floating-control-side='left'\] \.drawer \{[\s\S]*inset: 0 0 0 auto;[\s\S]*width: min\(440px, calc\(100vw - var\(--mobile-floating-control-lane\) - env\(safe-area-inset-left, 0px\)\)\);[\s\S]*border-left: 1px solid var\(--border\);[\s\S]*transform: translateX\(100%\);[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.narrow-shell\[data-floating-control-side='left'\] \.drawer\.show \{[\s\S]*box-shadow: -8px 0 28px rgba\(0, 0, 0, 0\.38\);[\s\S]*\}/,
+      /\.narrow-shell\[data-floating-control-side='left'\] \.drawer\.show \{[\s\S]*transform: translateX\(0\);[\s\S]*box-shadow: -8px 0 28px rgba\(0, 0, 0, 0\.38\);[\s\S]*\}/,
     );
   });
 

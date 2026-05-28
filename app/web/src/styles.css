@@ -2196,11 +2196,11 @@ body,
 }
 
 .floating-control-dock-rail.left {
-  left: calc(env(safe-area-inset-left, 0px) + 16px);
+  left: 0;
 }
 
 .floating-control-dock-rail.right {
-  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  right: 0;
 }
 
 .floating-control-stack-layer[data-drag-state='dragging'] .floating-control-dock-rail {
@@ -8314,6 +8314,7 @@ body,
 }
 
 .narrow-shell[data-floating-control-side='left'] .drawer.show {
+  transform: translateX(0);
   box-shadow: -8px 0 28px rgba(0, 0, 0, 0.38);
 }
 
