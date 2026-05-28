@@ -3400,6 +3400,7 @@ function App() {
   const chatComposerHasSendableContent = chatComposerText.trim().length > 0 || chatAttachments.length > 0;
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceRecordingStatus, setVoiceRecordingStatus] = useState<VoiceRecordingStatus>('recording');
+  const [voiceCancelIntent, setVoiceCancelIntent] = useState(false);
   const [voiceInteractionMode, setVoiceInteractionMode] = useState<VoiceInputInteractionMode | null>(null);
   const [voiceElapsedMs, setVoiceElapsedMs] = useState(0);
   const [voiceLevel, setVoiceLevel] = useState(0);
@@ -8477,6 +8478,7 @@ function App() {
     setVoiceRecording(false);
     setVoiceInteractionMode(null);
     setVoiceRecordingStatus('recording');
+    setVoiceCancelIntent(false);
     setVoiceLevel(0);
   };
 
@@ -8518,6 +8520,11 @@ function App() {
 
   const logVoiceInputButtonEvent = (entry: VoiceInputDiagnosticEntry) => {
     logVoiceInputState(entry.level, `button_${entry.event}`, entry.details);
+  };
+
+  const setVoiceInputInteractionMode = (mode: VoiceInputInteractionMode) => {
+    voiceInteractionModeRef.current = mode;
+    setVoiceInteractionMode(mode);
   };
 
   const voiceInputReconnectAvailable = () => (
@@ -8598,6 +8605,10 @@ function App() {
         setError(err instanceof Error ? err.message : String(err));
       }
     }
+  };
+
+  const cancelVoiceInputByGesture = () => {
+    void cancelVoiceInput('gesture');
   };
 
   const commitVoiceInputTranscript = () => {
@@ -9024,6 +9035,7 @@ function App() {
     setVoiceInteractionMode(interactionMode);
     setVoiceRecording(true);
     setVoiceRecordingStatus('buffering');
+    setVoiceCancelIntent(false);
     setVoiceElapsedMs(0);
     setVoiceLevel(0);
     setError('');
@@ -15552,6 +15564,9 @@ function App() {
                       onSend={() => sendChatMessage().catch(() => undefined)}
                       onStart={startVoiceInput}
                       onFinish={finishVoiceInput}
+                      onCancel={cancelVoiceInputByGesture}
+                      onModeChange={setVoiceInputInteractionMode}
+                      onCancelIntentChange={setVoiceCancelIntent}
                       onLog={logVoiceInputButtonEvent}
                     />
                   ) : (
@@ -15600,6 +15615,7 @@ function App() {
               {voiceRecording ? (
                 <VoiceRecordingBar
                   status={voiceRecordingStatus}
+                  cancelIntent={voiceCancelIntent}
                   elapsedMs={voiceElapsedMs}
                   level={voiceLevel}
                 />

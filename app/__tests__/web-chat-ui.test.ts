@@ -1258,13 +1258,16 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('Doubao Streaming ASR 2.0');
     expect(mainTsx).toContain('speechSettings.enabled ? (');
     expect(mainTsx).toContain('const chatComposerHasSendableContent = chatComposerText.trim().length > 0 || chatAttachments.length > 0;');
+    expect(mainTsx).toContain('const [voiceCancelIntent, setVoiceCancelIntent] = useState(false);');
     expect(mainTsx).toContain('<VoiceInputButton');
     expect(mainTsx).toContain('recordingMode={voiceInteractionMode}');
     expect(mainTsx).toContain('hasSendableContent={chatComposerHasSendableContent}');
     expect(mainTsx).toContain('onSend={() => sendChatMessage().catch(() => undefined)}');
     expect(mainTsx).toContain('onStart={startVoiceInput}');
     expect(mainTsx).toContain('onFinish={finishVoiceInput}');
-    expect(mainTsx).not.toContain('onCancel={cancelVoiceInputByGesture}');
+    expect(mainTsx).toContain('onCancel={cancelVoiceInputByGesture}');
+    expect(mainTsx).toContain('onModeChange={setVoiceInputInteractionMode}');
+    expect(mainTsx).toContain('onCancelIntentChange={setVoiceCancelIntent}');
     expect(mainTsx).toContain('onLog={logVoiceInputButtonEvent}');
     expect(mainTsx).toContain("logVoiceInputDiagnostic('debug', 'start_requested'");
     expect(mainTsx).toContain("logVoiceInputDiagnostic('error', 'start_failed'");
@@ -1273,12 +1276,16 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('if (voiceRecordingRef.current) {');
     expect(mainTsx).toContain('voiceRecording ? (');
     expect(mainTsx).toContain('<VoiceRecordingBar');
+    expect(mainTsx).toContain('cancelIntent={voiceCancelIntent}');
 
     expect(stylesCss).toContain('.voice-input-button');
     expect(stylesCss).toContain('.voice-input-button.send-with-voice');
     expect(stylesCss).toContain('.voice-input-badge');
     expect(stylesCss).toContain('.voice-input-button.locked-recording');
     expect(stylesCss).toContain('.voice-input-button.hold-recording');
+    expect(stylesCss).toContain('.voice-input-button.cancel-intent');
+    expect(stylesCss).toContain('.voice-recording-bar.cancel-intent');
+    expect(stylesCss).toContain('.voice-recording-bar.cancel-intent .voice-recording-dot');
     expect(stylesCss).toContain('.voice-input-settings-nested');
     expect(stylesCss).toContain('.voice-recording-bar');
     expect(stylesCss).toContain('@keyframes voiceBarPulse');

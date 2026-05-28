@@ -1,6 +1,7 @@
 import React from 'react';
 
 export type VoiceRecordingBarProps = {
+  cancelIntent: boolean;
   elapsedMs: number;
   level?: number;
   status?: 'buffering' | 'recording' | 'finishing';
@@ -14,6 +15,7 @@ function formatElapsed(elapsedMs: number): string {
 }
 
 export function VoiceRecordingBar({
+  cancelIntent,
   elapsedMs,
   level = 0.35,
   status = 'recording',
@@ -32,13 +34,13 @@ export function VoiceRecordingBar({
       : 'Recording';
 
   return (
-    <div className="voice-recording-bar" role="status" aria-live="polite">
+    <div className={`voice-recording-bar${cancelIntent ? ' cancel-intent' : ''}`} role="status" aria-live="polite">
       <span className="voice-recording-dot" aria-hidden="true" />
       <span className="voice-recording-wave" aria-hidden="true">
         {bars}
       </span>
       <span className="voice-recording-text">
-        {statusText}
+        {cancelIntent ? 'Release to cancel' : statusText}
       </span>
       <span className="voice-recording-time">{formatElapsed(elapsedMs)}</span>
     </div>

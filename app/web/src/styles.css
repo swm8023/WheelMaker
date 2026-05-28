@@ -7775,6 +7775,12 @@ textarea,
   border-color: color-mix(in srgb, var(--accent) 84%, var(--border));
 }
 
+.voice-input-button.cancel-intent {
+  border-color: color-mix(in srgb, #f85149 82%, var(--border));
+  background: color-mix(in srgb, #f85149 14%, var(--panel));
+  color: #ff8a82;
+}
+
 .voice-input-button:disabled {
   cursor: default;
   opacity: 0.55;
@@ -7800,12 +7806,22 @@ textarea,
   overflow: hidden;
 }
 
+.voice-recording-bar.cancel-intent {
+  border-color: color-mix(in srgb, #f85149 55%, var(--border));
+  background: color-mix(in srgb, #f85149 12%, var(--panel));
+}
+
 .voice-recording-dot {
   width: 7px;
   height: 7px;
   border-radius: 999px;
   background: #5eead4;
   box-shadow: 0 0 0 4px color-mix(in srgb, #5eead4 16%, transparent);
+}
+
+.voice-recording-bar.cancel-intent .voice-recording-dot {
+  background: #ff8a82;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #f85149 18%, transparent);
 }
 
 .voice-recording-wave {

@@ -1,4 +1,5 @@
-import React, {useEffect, useRef} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
+import {resolveVoiceGestureState} from './useVoiceInputController';
 import {formatVoiceInputDiagnosticError, type VoiceInputDiagnosticEntry} from './voiceInputDiagnostics';
 
 const VOICE_LONG_PRESS_MS = 260;
@@ -14,16 +15,24 @@ export type VoiceInputButtonProps = {
   onSend?: () => void | Promise<void>;
   onStart: (mode: VoiceInputInteractionMode) => void | Promise<void>;
   onFinish: () => void | Promise<void>;
+  onCancel: () => void | Promise<void>;
+  onModeChange?: (mode: VoiceInputInteractionMode) => void;
+  onCancelIntentChange?: (cancelIntent: boolean) => void;
   onLog?: (entry: VoiceInputDiagnosticEntry) => void;
 };
 
+type PointerAction = 'send' | 'finish' | 'cancel' | 'lock' | 'none';
+
 type ActivePointer = {
   pointerId: number;
+  startY: number;
   startTime: number;
   startTimer: number | null;
   voiceStarted: boolean;
   voiceMode: VoiceInputInteractionMode | null;
   startSettled: boolean;
+  cancelIntent: boolean;
+  pendingAction: PointerAction | null;
 };
 
 export function VoiceInputButton({
@@ -35,9 +44,13 @@ export function VoiceInputButton({
   onSend,
   onStart,
   onFinish,
+  onCancel,
+  onModeChange,
+  onCancelIntentChange,
   onLog,
 }: VoiceInputButtonProps) {
   const pointerRef = useRef<ActivePointer | null>(null);
+  const [cancelIntent, setCancelIntent] = useState(false);
 
   const log = (level: VoiceInputDiagnosticEntry['level'], event: string, details?: Record<string, unknown>) => {
     onLog?.({level, event, details});
@@ -49,6 +62,33 @@ export function VoiceInputButton({
     }
     window.clearTimeout(pointer.startTimer);
     pointer.startTimer = null;
+  };
+
+  const setNextCancelIntent = (next: boolean) => {
+    setCancelIntent(next);
+    onCancelIntentChange?.(next);
+    if (pointerRef.current) {
+      pointerRef.current.cancelIntent = next;
+    }
+  };
+
+  const runTerminalAction = (action: PointerAction) => {
+    if (action === 'none') {
+      return;
+    }
+    if (action === 'send') {
+      void Promise.resolve(onSend?.());
+      return;
+    }
+    if (action === 'lock') {
+      onModeChange?.('locked');
+      return;
+    }
+    if (action === 'cancel') {
+      void Promise.resolve(onCancel());
+      return;
+    }
+    void Promise.resolve(onFinish());
   };
 
   const beginVoiceStart = (pointer: ActivePointer, mode: VoiceInputInteractionMode) => {
@@ -66,6 +106,13 @@ export function VoiceInputButton({
           return;
         }
         pointer.startSettled = true;
+        if (!pointer.pendingAction) {
+          return;
+        }
+        const action = pointer.pendingAction;
+        pointerRef.current = null;
+        setNextCancelIntent(false);
+        runTerminalAction(action);
       })
       .catch(error => {
         log('error', 'start_failed', {
@@ -74,18 +121,35 @@ export function VoiceInputButton({
         });
         if (pointerRef.current === pointer) {
           pointerRef.current = null;
+          setNextCancelIntent(false);
         }
       });
   };
 
-  const startPointerVoice = (pointer: ActivePointer) => {
+  const promotePointerToHold = (pointer: ActivePointer) => {
     if (pointerRef.current !== pointer) {
       return;
     }
     pointer.startTimer = null;
     if (!pointer.voiceStarted) {
-      beginVoiceStart(pointer, 'locked');
+      beginVoiceStart(pointer, 'hold');
+      return;
     }
+    if (pointer.voiceMode !== 'hold') {
+      pointer.voiceMode = 'hold';
+      onModeChange?.('hold');
+      log('debug', 'locked_press_promoted_to_hold', {pointerId: pointer.pointerId});
+    }
+  };
+
+  const resolvePointerAction = (pointer: ActivePointer, source: 'up' | 'cancel'): PointerAction => {
+    if (!pointer.voiceStarted) {
+      return source === 'up' && hasSendableContent ? 'send' : 'none';
+    }
+    if (pointer.voiceMode === 'hold') {
+      return pointer.cancelIntent ? 'cancel' : 'finish';
+    }
+    return 'lock';
   };
 
   const finishPointer = (
@@ -98,23 +162,38 @@ export function VoiceInputButton({
     }
     event.currentTarget.releasePointerCapture?.(event.pointerId);
     const elapsedMs = Math.max(0, event.timeStamp - pointer.startTime);
-    clearStartTimer(pointer);
-    pointerRef.current = null;
     if (!pointer.voiceStarted) {
-      if (source === 'up' && hasSendableContent) {
-        void Promise.resolve(onSend?.());
+      if (source === 'up' && elapsedMs >= VOICE_LONG_PRESS_MS) {
+        clearStartTimer(pointer);
+        beginVoiceStart(pointer, 'hold');
+        pointer.pendingAction = 'lock';
+        return;
       }
+      clearStartTimer(pointer);
+      pointerRef.current = null;
+      setNextCancelIntent(false);
+      runTerminalAction(source === 'up' && hasSendableContent ? 'send' : 'none');
       log('debug', source === 'cancel' ? 'pointer_cancel_before_start' : 'short_press_send', {
         pointerId: pointer.pointerId,
         elapsedMs,
       });
       return;
     }
-    log('debug', source === 'cancel' ? 'pointer_cancel_recording_kept' : 'pointer_up_recording_kept', {
+    clearStartTimer(pointer);
+    const action = resolvePointerAction(pointer, source);
+    setNextCancelIntent(false);
+    if (!pointer.startSettled) {
+      pointer.pendingAction = action === 'finish' ? 'lock' : action;
+      return;
+    }
+    pointerRef.current = null;
+    runTerminalAction(action);
+    log('debug', source === 'cancel' ? 'pointer_cancel_recording_resolved' : 'pointer_up_recording_resolved', {
       pointerId: pointer.pointerId,
       elapsedMs,
       mode: pointer.voiceMode,
       startSettled: pointer.startSettled,
+      action,
     });
   };
 
@@ -134,6 +213,7 @@ export function VoiceInputButton({
         recording ? 'recording' : '',
         recording && recordingMode === 'locked' ? 'locked-recording' : '',
         recording && recordingMode === 'hold' ? 'hold-recording' : '',
+        cancelIntent ? 'cancel-intent' : '',
       ].filter(Boolean).join(' ')}
       disabled={disabled}
       aria-label={
@@ -169,16 +249,18 @@ export function VoiceInputButton({
         event.currentTarget.setPointerCapture?.(event.pointerId);
         const pointer: ActivePointer = {
           pointerId: event.pointerId,
+          startY: event.clientY,
           startTime: event.timeStamp,
           startTimer: null,
           voiceStarted: false,
           voiceMode: null,
           startSettled: false,
+          cancelIntent: false,
+          pendingAction: null,
         };
-        if (hasSendableContent) {
-          pointer.startTimer = window.setTimeout(() => startPointerVoice(pointer), VOICE_LONG_PRESS_MS);
-        }
+        pointer.startTimer = window.setTimeout(() => promotePointerToHold(pointer), VOICE_LONG_PRESS_MS);
         pointerRef.current = pointer;
+        setNextCancelIntent(false);
         if (!hasSendableContent) {
           beginVoiceStart(pointer, 'locked');
         }
@@ -188,7 +270,11 @@ export function VoiceInputButton({
         if (!pointer || pointer.pointerId !== event.pointerId) {
           return;
         }
-        event.preventDefault();
+        const next = pointer.voiceMode === 'hold' &&
+          resolveVoiceGestureState(pointer.startY, event.clientY) === 'cancel';
+        if (next !== pointer.cancelIntent) {
+          setNextCancelIntent(next);
+        }
       }}
       onPointerUp={event => finishPointer(event, 'up')}
       onPointerCancel={event => finishPointer(event, 'cancel')}
@@ -197,7 +283,11 @@ export function VoiceInputButton({
         if (!pointer || pointer.pointerId !== event.pointerId) {
           return;
         }
-        event.preventDefault();
+        const next = pointer.voiceMode === 'hold' &&
+          resolveVoiceGestureState(pointer.startY, event.clientY) === 'cancel';
+        if (next !== pointer.cancelIntent) {
+          setNextCancelIntent(next);
+        }
       }}
     >
       <span className={`codicon ${hasSendableContent && !recording ? 'codicon-send' : 'codicon-mic'}`} aria-hidden="true" />

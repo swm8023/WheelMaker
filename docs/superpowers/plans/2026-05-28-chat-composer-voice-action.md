@@ -43,7 +43,7 @@
 - Modify: `app/__tests__/web-voice-input-button.test.tsx`
 - Modify: `app/web/src/features/speech/VoiceInputButton.tsx`
 
-- [ ] **Step 1: 写失败的按钮测试**
+- [x] **Step 1: 写失败的按钮测试**
 
 更新测试，覆盖这些核心断言：
 
@@ -63,7 +63,7 @@ expect(onCancel).not.toHaveBeenCalled();
 - async hold start 在 `onStart` settle 前收到 pointer up，不调用 `onFinish`；start settle 后调用 `onModeChange('locked')`。
 - hold start settle 后收到 pointer cancel，且没有 cancel intent 时调用 `onFinish`。
 
-- [ ] **Step 2: 运行测试确认 red**
+- [x] **Step 2: 运行测试确认 red**
 
 Run:
 
@@ -74,7 +74,7 @@ npm test -- --runTestsByPath __tests__/web-voice-input-button.test.tsx
 
 预期：FAIL。当前实现仍然把长按当 locked 录音，并忽略 release/cancel。
 
-- [ ] **Step 3: 实现按钮状态机**
+- [x] **Step 3: 实现按钮状态机**
 
 使用这个 props 形状：
 
@@ -108,7 +108,7 @@ export type VoiceInputButtonProps = {
 - active hold 且有 cancel intent 时，pointer up 或 pointer cancel 调用 `onCancel`。
 - hold start 仍 pending 时收到 pointer up/cancel，记录 pending action 为 locked fallback；start settle 后调用 `onModeChange('locked')`，不调用 finish/cancel。
 
-- [ ] **Step 4: 运行按钮测试确认 green**
+- [x] **Step 4: 运行按钮测试确认 green**
 
 Run:
 
@@ -128,7 +128,7 @@ npm test -- --runTestsByPath __tests__/web-voice-input-button.test.tsx
 - Modify: `app/web/src/main.tsx`
 - Modify: `app/web/src/features/speech/VoiceRecordingBar.tsx`
 
-- [ ] **Step 1: 写失败的 wiring 测试**
+- [x] **Step 1: 写失败的 wiring 测试**
 
 断言 `main.tsx` 包含：
 
@@ -155,7 +155,7 @@ expect(mainTsx).not.toContain('onPrewarmStart={prewarmVoiceCapture}');
 expect(mainTsx).not.toContain('onPrewarmCancel={cancelVoicePrewarmCapture}');
 ```
 
-- [ ] **Step 2: 运行 wiring 测试确认 red**
+- [x] **Step 2: 运行 wiring 测试确认 red**
 
 Run:
 
@@ -166,7 +166,7 @@ npm test -- --runTestsByPath __tests__/web-chat-ui.test.ts __tests__/web-voice-i
 
 预期：FAIL。当前 `main.tsx` 已移除 cancel intent plumbing，录音条也不再渲染取消文案。
 
-- [ ] **Step 3: 实现 app wiring**
+- [x] **Step 3: 实现 app wiring**
 
 恢复 cancel intent state：
 
@@ -243,7 +243,7 @@ export type VoiceRecordingBarProps = {
 </div>
 ```
 
-- [ ] **Step 4: 运行 wiring 测试确认 green**
+- [x] **Step 4: 运行 wiring 测试确认 green**
 
 Run:
 
@@ -260,7 +260,7 @@ npm test -- --runTestsByPath __tests__/web-chat-ui.test.ts __tests__/web-voice-i
 - Modify: `app/web/src/styles.css`
 - Modify: `app/__tests__/web-chat-ui.test.ts`
 
-- [ ] **Step 1: 写失败的样式断言**
+- [x] **Step 1: 写失败的样式断言**
 
 新增断言：
 
@@ -270,7 +270,7 @@ expect(stylesCss).toContain('.voice-recording-bar.cancel-intent');
 expect(stylesCss).toContain('.voice-recording-bar.cancel-intent .voice-recording-dot');
 ```
 
-- [ ] **Step 2: 运行 UI 测试确认 red**
+- [x] **Step 2: 运行 UI 测试确认 red**
 
 Run:
 
@@ -281,7 +281,7 @@ npm test -- --runTestsByPath __tests__/web-chat-ui.test.ts
 
 预期：FAIL。当前 CSS 已移除 cancel-intent 样式。
 
-- [ ] **Step 3: 恢复取消样式**
+- [x] **Step 3: 恢复取消样式**
 
 添加：
 
@@ -303,7 +303,7 @@ npm test -- --runTestsByPath __tests__/web-chat-ui.test.ts
 }
 ```
 
-- [ ] **Step 4: 运行 UI 测试确认 green**
+- [x] **Step 4: 运行 UI 测试确认 green**
 
 Run:
 
@@ -320,7 +320,7 @@ npm test -- --runTestsByPath __tests__/web-chat-ui.test.ts
 - Modify: `docs/superpowers/specs/2026-05-28-chat-composer-voice-action-design.md`
 - Modify: `docs/superpowers/plans/2026-05-28-chat-composer-voice-action.md`
 
-- [ ] **Step 1: 验证 spec 语言**
+- [x] **Step 1: 验证 spec 语言**
 
 确认 spec 明确写到：
 
@@ -330,7 +330,7 @@ npm test -- --runTestsByPath __tests__/web-chat-ui.test.ts
 - iOS 权限弹窗打断 pending hold 时降级 locked。
 - 有内容短按发送仍然不会调用 `getUserMedia`。
 
-- [ ] **Step 2: Focused verification**
+- [x] **Step 2: Focused verification**
 
 Run:
 
@@ -342,7 +342,7 @@ npm run tsc:web
 
 预期：PASS。
 
-- [ ] **Step 3: Full verification**
+- [x] **Step 3: Full verification**
 
 Run:
 

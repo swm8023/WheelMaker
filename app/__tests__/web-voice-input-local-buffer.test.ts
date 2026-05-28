@@ -85,6 +85,9 @@ describe('web voice input local buffering wiring', () => {
     expect(mainTsx).toContain('recordingMode={voiceInteractionMode}');
     expect(mainTsx).toContain('hasSendableContent={chatComposerHasSendableContent}');
     expect(mainTsx).toContain('onSend={() => sendChatMessage().catch(() => undefined)}');
+    expect(mainTsx).toContain('onCancel={cancelVoiceInputByGesture}');
+    expect(mainTsx).toContain('onModeChange={setVoiceInputInteractionMode}');
+    expect(mainTsx).toContain('onCancelIntentChange={setVoiceCancelIntent}');
     expect(mainTsx).not.toContain('onPrewarmStart={prewarmVoiceCapture}');
     expect(mainTsx).not.toContain('onPrewarmCancel={cancelVoicePrewarmCapture}');
   });
