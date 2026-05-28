@@ -2,8 +2,10 @@ export type VoiceGestureState = 'recording' | 'cancel';
 
 export type VoiceInputSession = {
   applyTranscript: (text: string) => string;
+  commitLiveTranscript: () => string;
   cancel: () => string;
   currentText: () => string;
+  currentTranscriptText: () => string;
 };
 
 export function replaceVoiceSegment(
@@ -23,16 +25,28 @@ export function createVoiceInputSession(
   insertEnd: number,
 ): VoiceInputSession {
   let current = baseText;
+  let committedTranscript = '';
+  let liveTranscript = '';
+  const render = () => {
+    current = replaceVoiceSegment(baseText, insertStart, insertEnd, `${committedTranscript}${liveTranscript}`);
+    return current;
+  };
   return {
     applyTranscript: text => {
-      current = replaceVoiceSegment(baseText, insertStart, insertEnd, text);
-      return current;
+      liveTranscript = text;
+      return render();
+    },
+    commitLiveTranscript: () => {
+      committedTranscript += liveTranscript;
+      liveTranscript = '';
+      return render();
     },
     cancel: () => {
       current = baseText;
       return current;
     },
     currentText: () => current,
+    currentTranscriptText: () => `${committedTranscript}${liveTranscript}`,
   };
 }
 

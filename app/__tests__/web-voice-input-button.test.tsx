@@ -41,6 +41,7 @@ describe('VoiceInputButton', () => {
     const onStart = jest.fn();
     const onFinish = jest.fn();
     const onCancel = jest.fn();
+    const onPrewarmCancel = jest.fn();
     const onLog = jest.fn();
     let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
 
@@ -51,6 +52,7 @@ describe('VoiceInputButton', () => {
           onStart={onStart}
           onFinish={onFinish}
           onCancel={onCancel}
+          onPrewarmCancel={onPrewarmCancel}
           onLog={onLog}
         />,
       );
@@ -65,10 +67,39 @@ describe('VoiceInputButton', () => {
     expect(onStart).not.toHaveBeenCalled();
     expect(onFinish).not.toHaveBeenCalled();
     expect(onCancel).not.toHaveBeenCalled();
+    expect(onPrewarmCancel).toHaveBeenCalledTimes(1);
     expect(onLog).toHaveBeenCalledWith(expect.objectContaining({
       event: 'short_press_ignored',
       level: 'debug',
     }));
+  });
+
+  test('prewarms voice input immediately on pointer down before long press settles', async () => {
+    const onStart = jest.fn();
+    const onFinish = jest.fn();
+    const onCancel = jest.fn();
+    const onPrewarmStart = jest.fn();
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(
+        <VoiceInputButton
+          recording={false}
+          onStart={onStart}
+          onFinish={onFinish}
+          onCancel={onCancel}
+          onPrewarmStart={onPrewarmStart}
+        />,
+      );
+    });
+
+    const button = renderer!.root.findByType('button');
+    await ReactTestRenderer.act(() => {
+      button.props.onPointerDown(pointerEvent({timeStamp: 0}));
+    });
+
+    expect(onPrewarmStart).toHaveBeenCalledTimes(1);
+    expect(onStart).not.toHaveBeenCalled();
   });
 
   test('finishes an active recording on pointer down', async () => {

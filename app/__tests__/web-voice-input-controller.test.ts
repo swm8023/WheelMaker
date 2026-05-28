@@ -18,6 +18,15 @@ describe('voice input controller helpers', () => {
     expect(session.cancel()).toBe('hello world');
   });
 
+  test('commits current stream transcript before applying a new stream transcript', () => {
+    const session = createVoiceInputSession('prefix suffix', 7, 7);
+
+    expect(session.applyTranscript('你好')).toBe('prefix 你好suffix');
+    session.commitLiveTranscript();
+    expect(session.applyTranscript('世界')).toBe('prefix 你好世界suffix');
+    expect(session.currentTranscriptText()).toBe('你好世界');
+  });
+
   test('detects swipe-up cancellation threshold', () => {
     expect(resolveVoiceGestureState(200, 170)).toBe('recording');
     expect(resolveVoiceGestureState(200, 144)).toBe('cancel');

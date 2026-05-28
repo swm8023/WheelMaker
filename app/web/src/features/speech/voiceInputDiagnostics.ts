@@ -29,6 +29,9 @@ export function logVoiceInputDiagnostic(
   event: string,
   details: Record<string, unknown> = {},
 ): void {
+  if (level === 'debug') {
+    return;
+  }
   const safeDetails = sanitizeAppDiagnosticDetails(details);
   const payload = {
     at: new Date().toISOString(),
@@ -49,5 +52,4 @@ export function logVoiceInputDiagnostic(
     console.warn(message, payload);
     return;
   }
-  console.debug(message, payload);
 }

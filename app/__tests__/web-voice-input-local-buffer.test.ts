@@ -23,4 +23,36 @@ describe('web voice input local buffering wiring', () => {
     expect(mainTsx).toContain('await queue.drain();');
     expect(mainTsx).toContain('status={voiceRecordingStatus}');
   });
+
+  test('keeps voice input alive across registry reconnects and preserves recognized text', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'main.tsx'),
+      'utf8',
+    );
+
+    expect(mainTsx).toContain('handleVoiceRegistryClosedDuringInput');
+    expect(mainTsx).toContain("logVoiceInputDiagnostic('warn', 'registry_closed_during_voice'");
+    expect(mainTsx).toContain("logVoiceInputDiagnostic('warn', 'voice_reconnect_buffering'");
+    expect(mainTsx).toContain("logVoiceInputDiagnostic('warn', 'voice_reconnect_stream_started'");
+    expect(mainTsx).toContain("logVoiceInputDiagnostic('warn', 'voice_reconnect_buffer_overflow'");
+    expect(mainTsx).toContain('commitLiveTranscript()');
+    expect(mainTsx).toContain('clearVoiceStreamStateForReconnect');
+    expect(mainTsx).toContain('finishVoiceInputPreservingTranscript');
+  });
+
+  test('handles speech errors and finalizing without rolling back recognized text', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'main.tsx'),
+      'utf8',
+    );
+
+    expect(mainTsx).toContain("logVoiceInputDiagnostic('error', 'speech_error_event'");
+    expect(mainTsx).toContain('handleVoiceSpeechErrorEvent');
+    expect(mainTsx).toContain('VOICE_INPUT_FINAL_WAIT_MS = 3000');
+    expect(mainTsx).toContain('voiceAwaitingFinalRef');
+    expect(mainTsx).toContain('scheduleVoiceFinalTimeout');
+    expect(mainTsx).toContain('completeVoiceInputFinalizing');
+  });
 });

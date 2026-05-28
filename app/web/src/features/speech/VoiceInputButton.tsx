@@ -11,6 +11,8 @@ export type VoiceInputButtonProps = {
   onStart: () => void | Promise<void>;
   onFinish: () => void | Promise<void>;
   onCancel: () => void | Promise<void>;
+  onPrewarmStart?: () => void | Promise<void>;
+  onPrewarmCancel?: () => void | Promise<void>;
   onCancelIntentChange?: (cancelIntent: boolean) => void;
   onLog?: (entry: VoiceInputDiagnosticEntry) => void;
 };
@@ -35,6 +37,8 @@ export function VoiceInputButton({
   onStart,
   onFinish,
   onCancel,
+  onPrewarmStart,
+  onPrewarmCancel,
   onCancelIntentChange,
   onLog,
 }: VoiceInputButtonProps) {
@@ -135,6 +139,7 @@ export function VoiceInputButton({
       clearStartTimer(pointer);
       pointerRef.current = null;
       setNextCancelIntent(false);
+      void Promise.resolve(onPrewarmCancel?.());
       log('debug', source === 'cancel' ? 'pointer_cancel_before_start' : 'short_press_ignored', {
         pointerId: pointer.pointerId,
         elapsedMs,
@@ -202,6 +207,7 @@ export function VoiceInputButton({
         pointer.startTimer = window.setTimeout(() => beginPointerStart(pointer), VOICE_LONG_PRESS_MS);
         pointerRef.current = pointer;
         setNextCancelIntent(false);
+        void Promise.resolve(onPrewarmStart?.());
       }}
       onPointerMove={event => {
         const pointer = pointerRef.current;

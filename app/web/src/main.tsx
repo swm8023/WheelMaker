@@ -236,10 +236,11 @@ import type {
   RegistryChatSession,
   RegistryResumableSession,
   RegistrySpeechCancelPayload,
-      RegistrySessionContentBlock,
-      RegistrySessionConfigOption,
-      RegistrySessionSummary,
-      RegistrySessionTurn,
+  RegistrySpeechErrorEvent,
+  RegistrySessionContentBlock,
+  RegistrySessionConfigOption,
+  RegistrySessionSummary,
+  RegistrySessionTurn,
   RegistryFsEntry,
   RegistryFsInfo,
   RegistryGitCommit,
@@ -580,6 +581,7 @@ const CODE_TAB_SIZE_OPTIONS = [2, 4, 8] as const;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
 const VOICE_INPUT_FINISH_WAIT_MS = 3000;
+const VOICE_INPUT_FINAL_WAIT_MS = 3000;
 const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
 const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
@@ -3425,6 +3427,15 @@ function App() {
   const voiceSendQueueRef = useRef<VoiceInputSendQueue | null>(null);
   const voiceStartGenerationRef = useRef(0);
   const voicePendingFinishRef = useRef(false);
+  const voiceAwaitingFinalRef = useRef(false);
+  const voiceFinalTimerRef = useRef<number | null>(null);
+  const voiceReconnectBufferingRef = useRef(false);
+  const voiceCaptureGenerationRef = useRef(0);
+  const voicePrewarmCaptureRef = useRef<MicrophonePCMStream | null>(null);
+  const voicePrewarmCapturePromiseRef = useRef<Promise<MicrophonePCMStream> | null>(null);
+  const voicePrewarmTokenRef = useRef(0);
+  const voiceActiveSettingsRef = useRef<ReturnType<typeof normalizeSpeechSettings> | null>(null);
+  const voiceActiveApiKeyRef = useRef('');
   const voiceRuntimeKeyRef = useRef('');
   const voiceStartedAtRef = useRef(0);
   const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);
@@ -8458,6 +8469,7 @@ function App() {
   const stopVoiceCapture = () => {
     voiceCaptureRef.current?.stop();
     voiceCaptureRef.current = null;
+    voiceCaptureGenerationRef.current = 0;
   };
 
   const resetVoiceRecordingUi = () => {
@@ -8470,11 +8482,23 @@ function App() {
 
   const clearVoiceInputState = () => {
     voiceStartGenerationRef.current += 1;
+    if (voiceFinalTimerRef.current !== null) {
+      window.clearTimeout(voiceFinalTimerRef.current);
+      voiceFinalTimerRef.current = null;
+    }
+    voicePrewarmTokenRef.current += 1;
+    voicePrewarmCaptureRef.current?.stop();
+    voicePrewarmCaptureRef.current = null;
+    voicePrewarmCapturePromiseRef.current = null;
     voiceInputBufferRef.current?.clear();
     voiceInputBufferRef.current = null;
     voiceSendQueueRef.current?.cancel();
     voiceSendQueueRef.current = null;
     voicePendingFinishRef.current = false;
+    voiceAwaitingFinalRef.current = false;
+    voiceReconnectBufferingRef.current = false;
+    voiceActiveSettingsRef.current = null;
+    voiceActiveApiKeyRef.current = '';
     voiceRuntimeKeyRef.current = '';
     resetVoiceRecordingUi();
     voiceStreamIdRef.current = '';
@@ -8534,6 +8558,14 @@ function App() {
       message.includes('speech stream already active');
   };
 
+  const isVoiceInputStreamRetryableError = (err: unknown) => {
+    const message = formatVoiceInputDiagnosticError(err).toLowerCase();
+    return isVoiceInputStartRetryableError(err) ||
+      message.includes('provider disconnected') ||
+      message.includes('speech provider disconnected') ||
+      message.includes('speech stream idle timeout');
+  };
+
   const cancelVoiceInput = async (
     reason: RegistrySpeechCancelPayload['reason'] = 'user',
     options: {restoreComposer?: boolean; message?: string} = {},
@@ -8576,12 +8608,117 @@ function App() {
     void cancelVoiceInput('gesture');
   };
 
+  const commitVoiceInputTranscript = () => {
+    const session = voiceSessionRef.current;
+    if (!session) {
+      return '';
+    }
+    const nextText = session.commitLiveTranscript();
+    updateChatComposerText(nextText);
+    window.setTimeout(resizeChatComposerTextarea, 0);
+    return nextText;
+  };
+
+  const finishVoiceInputPreservingTranscript = (
+    message?: string,
+    options: {cancelStream?: boolean} = {},
+  ) => {
+    const streamId = voiceStreamIdRef.current;
+    stopVoiceCapture();
+    commitVoiceInputTranscript();
+    clearVoiceInputState();
+    if (message) {
+      setError(message);
+    }
+    if (streamId && options.cancelStream !== false && connectedRef.current) {
+      service.cancelSpeech({streamId, reason: 'error'}).catch(err => {
+        logVoiceInputDiagnostic('error', 'preserve_cancel_failed', {
+          connected: connectedRef.current,
+          streamId,
+          error: formatVoiceInputDiagnosticError(err),
+        });
+      });
+    }
+  };
+
+  const clearVoiceStreamStateForReconnect = () => {
+    voiceSendQueueRef.current?.cancel();
+    voiceSendQueueRef.current = null;
+    voiceStreamIdRef.current = '';
+    voiceSeqRef.current = 0;
+  };
+
+  const completeVoiceInputFinalizing = (generation: number) => {
+    if (voiceStartGenerationRef.current !== generation) {
+      return;
+    }
+    commitVoiceInputTranscript();
+    clearVoiceInputState();
+  };
+
+  const scheduleVoiceFinalTimeout = (generation: number) => {
+    if (voiceFinalTimerRef.current !== null) {
+      window.clearTimeout(voiceFinalTimerRef.current);
+    }
+    voiceFinalTimerRef.current = window.setTimeout(() => {
+      voiceFinalTimerRef.current = null;
+      completeVoiceInputFinalizing(generation);
+    }, VOICE_INPUT_FINAL_WAIT_MS);
+  };
+
   const isVoiceInputActive = () => (
-    voiceRecordingRef.current || !!voiceStreamIdRef.current
+    voiceRecordingRef.current || !!voiceStreamIdRef.current || voiceAwaitingFinalRef.current
   );
+
+  const handleVoiceRegistryClosedDuringInput = (source: 'close' | 'chunk' | 'speech_error', err?: unknown) => {
+    if (!isVoiceInputActive()) {
+      return false;
+    }
+    const generation = voiceStartGenerationRef.current;
+    const queueStats = voiceSendQueueRef.current?.stats();
+    const bufferStats = voiceInputBufferRef.current?.stats();
+    logVoiceInputDiagnostic('warn', 'registry_closed_during_voice', {
+      connected: connectedRef.current,
+      recording: voiceRecordingRef.current,
+      pendingFinish: voicePendingFinishRef.current,
+      awaitingFinal: voiceAwaitingFinalRef.current,
+      hasStream: !!voiceStreamIdRef.current,
+      source,
+      error: err ? formatVoiceInputDiagnosticError(err) : undefined,
+      queuedBytes: queueStats?.queuedBytes ?? 0,
+      bufferedDurationMs: bufferStats?.durationMs ?? 0,
+    });
+    commitVoiceInputTranscript();
+    clearVoiceStreamStateForReconnect();
+    if (!voiceRecordingRef.current || voicePendingFinishRef.current || voiceAwaitingFinalRef.current) {
+      return true;
+    }
+    if (!voiceInputBufferRef.current) {
+      voiceInputBufferRef.current = createVoiceInputBuffer({
+        maxDurationMs: DEFAULT_VOICE_INPUT_BUFFER_MAX_MS,
+      });
+    }
+    voiceReconnectBufferingRef.current = true;
+    setVoiceRecordingStatus('buffering');
+    logVoiceInputDiagnostic('warn', 'voice_reconnect_buffering', {
+      connected: connectedRef.current,
+      bufferedDurationMs: voiceInputBufferRef.current.stats().durationMs,
+      maxBytes: voiceInputBufferRef.current.stats().maxBytes,
+    });
+    const settings = voiceActiveSettingsRef.current;
+    const apiKey = voiceActiveApiKeyRef.current;
+    if (settings && apiKey) {
+      void runVoiceStartLoop(generation, settings, apiKey);
+    }
+    return true;
+  };
 
   const handleVoiceChunkSendFailure = (generation: number, err: unknown) => {
     if (!isVoiceGenerationActive(generation)) {
+      return;
+    }
+    if (!voicePendingFinishRef.current && isVoiceInputStreamRetryableError(err)) {
+      handleVoiceRegistryClosedDuringInput('chunk', err);
       return;
     }
     const message = err instanceof Error ? err.message : String(err);
@@ -8646,6 +8783,14 @@ function App() {
       },
     });
     setVoiceRecordingStatus(voicePendingFinishRef.current ? 'finishing' : 'recording');
+    if (voiceReconnectBufferingRef.current) {
+      logVoiceInputDiagnostic('warn', 'voice_reconnect_stream_started', {
+        connected: connectedRef.current,
+        streamId: response.streamId,
+        bufferedDurationMs: voiceInputBufferRef.current?.stats().durationMs ?? 0,
+      });
+      voiceReconnectBufferingRef.current = false;
+    }
     flushVoiceInputBufferToQueue(generation);
     return true;
   };
@@ -8722,16 +8867,102 @@ function App() {
     }
     const result = voiceInputBufferRef.current?.append(chunk.bytes);
     if (result?.overflow) {
-      logVoiceInputDiagnostic('warn', 'buffer_overflow', {
+      const overflowDetails = {
         connected: connectedRef.current,
         byteCount: result.stats.byteCount,
         bufferedDurationMs: result.stats.durationMs,
         maxBytes: result.stats.maxBytes,
-      });
-      void cancelVoiceInput('error', {
-        message: 'Registry connection is too slow for voice input. Try again.',
-      });
+      };
+      if (voiceReconnectBufferingRef.current) {
+        logVoiceInputDiagnostic('warn', 'voice_reconnect_buffer_overflow', overflowDetails);
+      } else {
+        logVoiceInputDiagnostic('warn', 'buffer_overflow', overflowDetails);
+      }
+      finishVoiceInputPreservingTranscript('Registry connection is too slow for voice input. Recognized text was kept.');
     }
+  };
+
+  const createVoiceMicrophoneCapture = () => startMicrophonePCMStream({
+    targetRate: 16000,
+    chunkBytes: 6400,
+    onLevel: level => {
+      if (voiceCaptureGenerationRef.current > 0) {
+        setVoiceLevel(level);
+      }
+    },
+    onChunk: chunk => {
+      const generation = voiceCaptureGenerationRef.current;
+      if (generation > 0) {
+        handleVoicePCMChunk(generation, chunk);
+      }
+    },
+    onEnded: reason => {
+      if (voiceRecordingRef.current || voiceStreamIdRef.current) {
+        logVoiceInputDiagnostic('error', 'mic_capture_ended_unexpectedly', {
+          connected: connectedRef.current,
+          reason,
+          hasStream: !!voiceStreamIdRef.current,
+          recording: voiceRecordingRef.current,
+        });
+        finishVoiceInputPreservingTranscript('Microphone capture ended. Recognized text was kept.');
+      }
+    },
+  });
+
+  const stopVoicePrewarmCapture = () => {
+    voicePrewarmTokenRef.current += 1;
+    voicePrewarmCaptureRef.current?.stop();
+    voicePrewarmCaptureRef.current = null;
+    voicePrewarmCapturePromiseRef.current = null;
+  };
+
+  const prewarmVoiceCapture = () => {
+    if (voiceCaptureRef.current || voicePrewarmCaptureRef.current || voicePrewarmCapturePromiseRef.current) {
+      return;
+    }
+    const token = voicePrewarmTokenRef.current + 1;
+    voicePrewarmTokenRef.current = token;
+    const promise = createVoiceMicrophoneCapture()
+      .then(capture => {
+        if (voicePrewarmTokenRef.current !== token) {
+          capture.stop();
+          return capture;
+        }
+        voicePrewarmCaptureRef.current = capture;
+        return capture;
+      })
+      .finally(() => {
+        if (voicePrewarmTokenRef.current === token) {
+          voicePrewarmCapturePromiseRef.current = null;
+        }
+      });
+    promise.catch(() => undefined);
+    voicePrewarmCapturePromiseRef.current = promise;
+  };
+
+  const cancelVoicePrewarmCapture = () => {
+    if (voiceRecordingRef.current || voiceStreamIdRef.current || voiceAwaitingFinalRef.current) {
+      return;
+    }
+    stopVoicePrewarmCapture();
+  };
+
+  const startVoiceCaptureForGeneration = async (generation: number) => {
+    voiceCaptureGenerationRef.current = generation;
+    if (voicePrewarmCaptureRef.current) {
+      const capture = voicePrewarmCaptureRef.current;
+      voicePrewarmCaptureRef.current = null;
+      voicePrewarmCapturePromiseRef.current = null;
+      return capture;
+    }
+    const pendingPrewarm = voicePrewarmCapturePromiseRef.current;
+    if (pendingPrewarm) {
+      const capture = await pendingPrewarm;
+      voicePrewarmCaptureRef.current = null;
+      voicePrewarmCapturePromiseRef.current = null;
+      return capture;
+    }
+    return createVoiceMicrophoneCapture();
   };
 
   const finishVoiceInput = async () => {
@@ -8761,7 +8992,9 @@ function App() {
         return;
       }
       await service.finishSpeech({streamId: activeStreamId});
+      voiceAwaitingFinalRef.current = true;
       resetVoiceRecordingUi();
+      scheduleVoiceFinalTimeout(generation);
       logVoiceInputState('debug', 'finish_completed');
     } catch (err) {
       if (!isVoiceGenerationActive(generation)) {
@@ -8770,14 +9003,29 @@ function App() {
       logVoiceInputState('error', 'finish_failed', {
         error: formatVoiceInputDiagnosticError(err),
       });
-      await cancelVoiceInput('error', {
-        message: err instanceof Error ? err.message : String(err),
-      });
+      finishVoiceInputPreservingTranscript(err instanceof Error ? err.message : String(err));
     }
   };
 
+  const handleVoiceSpeechErrorEvent = (payload: RegistrySpeechErrorEvent) => {
+    logVoiceInputDiagnostic('error', 'speech_error_event', {
+      connected: connectedRef.current,
+      code: payload.code,
+      message: payload.message,
+      retryable: payload.retryable,
+      hasStream: !!voiceStreamIdRef.current,
+      recording: voiceRecordingRef.current,
+      pendingFinish: voicePendingFinishRef.current,
+    });
+    if (payload.retryable && voiceRecordingRef.current && !voicePendingFinishRef.current) {
+      handleVoiceRegistryClosedDuringInput('speech_error', new Error(payload.message));
+      return;
+    }
+    finishVoiceInputPreservingTranscript(payload.message, {cancelStream: false});
+  };
+
   const startVoiceInput = async () => {
-    if (voiceRecordingRef.current || voiceStreamIdRef.current) {
+    if (voiceRecordingRef.current || voiceStreamIdRef.current || voiceAwaitingFinalRef.current) {
       logVoiceInputState('warn', 'start_ignored_active_session');
       return;
     }
@@ -8821,9 +9069,14 @@ function App() {
     });
     voiceSendQueueRef.current = null;
     voicePendingFinishRef.current = false;
+    voiceAwaitingFinalRef.current = false;
+    voiceReconnectBufferingRef.current = false;
+    voiceActiveSettingsRef.current = settings;
+    voiceActiveApiKeyRef.current = apiKey;
     voiceRuntimeKeyRef.current = currentVoiceInputRuntimeKey();
     voiceStartedAtRef.current = Date.now();
     voiceSeqRef.current = 0;
+    voiceCaptureGenerationRef.current = generation;
     voiceRecordingRef.current = true;
     setVoiceRecording(true);
     setVoiceRecordingStatus('buffering');
@@ -8841,12 +9094,7 @@ function App() {
 
     try {
       logVoiceInputState('debug', 'microphone_start_requested');
-      const capture = await startMicrophonePCMStream({
-        targetRate: 16000,
-        chunkBytes: 6400,
-        onLevel: level => setVoiceLevel(level),
-        onChunk: chunk => handleVoicePCMChunk(generation, chunk),
-      });
+      const capture = await startVoiceCaptureForGeneration(generation);
       logVoiceInputState('debug', 'microphone_started');
       if (!isVoiceGenerationActive(generation)) {
         logVoiceInputState('warn', 'microphone_started_after_cancel');
@@ -11484,7 +11732,7 @@ function App() {
         window.setTimeout(resizeChatComposerTextarea, 0);
         if (payload.final) {
           stopVoiceCapture();
-          clearVoiceInputState();
+          completeVoiceInputFinalizing(voiceStartGenerationRef.current);
         }
         return;
       }
@@ -11493,14 +11741,7 @@ function App() {
         if (!payload || (payload.streamId && payload.streamId !== voiceStreamIdRef.current)) {
           return;
         }
-        const session = voiceSessionRef.current;
-        stopVoiceCapture();
-        if (session) {
-          updateChatComposerText(session.cancel());
-          window.setTimeout(resizeChatComposerTextarea, 0);
-        }
-        clearVoiceInputState();
-        setError(payload.message);
+        handleVoiceSpeechErrorEvent(payload);
         return;
       }
       const eventProjectId = event.projectId ?? '';
@@ -11622,10 +11863,11 @@ function App() {
       }
     });
     const unsubscribeClose = service.onClose(() => {
-      if (voiceStreamIdRef.current) {
-        void cancelVoiceInput('disconnect');
-      }
+      connectedRef.current = false;
       setConnected(false);
+      if (isVoiceInputActive()) {
+        handleVoiceRegistryClosedDuringInput('close');
+      }
       if (supervisorManagedCloseRef.current) {
         supervisorManagedCloseRef.current = false;
         return;
@@ -15338,6 +15580,8 @@ function App() {
                       onStart={startVoiceInput}
                       onFinish={finishVoiceInput}
                       onCancel={cancelVoiceInputByGesture}
+                      onPrewarmStart={prewarmVoiceCapture}
+                      onPrewarmCancel={cancelVoicePrewarmCapture}
                       onCancelIntentChange={setVoiceCancelIntent}
                       onLog={logVoiceInputButtonEvent}
                     />

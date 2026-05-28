@@ -9,6 +9,7 @@ export type MicrophonePCMStreamOptions = {
   bufferSize?: number;
   onChunk: (chunk: PCMChunk) => void;
   onLevel?: (level: number) => void;
+  onEnded?: (reason: string) => void;
 };
 
 export type MicrophonePCMStream = {
@@ -122,22 +123,50 @@ export async function startMicrophonePCMStream(
   const targetRate = options.targetRate ?? 16000;
   const chunkBytes = options.chunkBytes ?? 6400;
   const bufferSize = options.bufferSize ?? 4096;
-  const mediaStream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      autoGainControl: true,
-      channelCount: 1,
-      echoCancellation: true,
-      noiseSuppression: true,
-    },
-  });
   const context = new AudioContextCtor();
-  if (context.state === 'suspended') {
-    await context.resume();
+  let resumeError: unknown = null;
+  const initialResume = context.state === 'suspended'
+    ? context.resume().catch(error => {
+      resumeError = error;
+    })
+    : Promise.resolve();
+  let mediaStream: MediaStream | null = null;
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        autoGainControl: true,
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+    });
+    await initialResume;
+    if (resumeError) {
+      throw resumeError;
+    }
+    if (context.state === 'suspended') {
+      await context.resume();
+    }
+  } catch (error) {
+    mediaStream?.getTracks().forEach(track => track.stop());
+    context.close().catch(() => undefined);
+    throw error;
   }
   const source = context.createMediaStreamSource(mediaStream);
   const processor = context.createScriptProcessor(bufferSize, 1, 1);
   let pending: Uint8Array<ArrayBufferLike> = new Uint8Array();
   let stopped = false;
+  let ended = false;
+  const notifyEnded = (reason: string) => {
+    if (stopped || ended) {
+      return;
+    }
+    ended = true;
+    options.onEnded?.(reason);
+  };
+  mediaStream.getTracks().forEach(track => {
+    track.addEventListener?.('ended', () => notifyEnded('track_ended'));
+  });
 
   processor.onaudioprocess = event => {
     if (stopped) {

@@ -267,6 +267,118 @@ func TestSpeechFinishReleasesActiveStreamImmediately(t *testing.T) {
 	}
 }
 
+func TestSpeechFinishKeepsClosingRouteForFinalTranscript(t *testing.T) {
+	provider := newFakeSpeechProvider()
+	s := New(Config{})
+	s.speech = newSpeechServiceWithOptions(provider, speechServiceOptions{
+		idleTimeout:         time.Second,
+		startTimeout:        time.Second,
+		finishTimeout:       time.Second,
+		closingRouteTimeout: time.Second,
+	})
+	ts := httptestNewRegistryServer(t, s.Handler())
+
+	client := dialWS(t, "http://"+ts+"/ws")
+	defer client.Close()
+	connectRegistryClient(t, client)
+
+	streamID := startFakeSpeechStreamWithRequestID(t, client, 2)
+	stream := provider.stream
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 3,
+		Type:      "request",
+		Method:    "speech.finish",
+		Payload: map[string]any{
+			"streamId": streamID,
+		},
+	})
+	finishResp := mustReadEnvelope(t, client)
+	if finishResp.Type != "response" || finishResp.Method != "speech.finish" {
+		t.Fatalf("speech.finish response=%#v", finishResp)
+	}
+
+	stream.events.Transcript("最终文本", true)
+	finalEvent := mustReadEnvelope(t, client)
+	if finalEvent.Type != "event" || finalEvent.Method != "speech.transcript" {
+		t.Fatalf("final transcript event=%#v", finalEvent)
+	}
+	if finalEvent.Payload["streamId"] != streamID || finalEvent.Payload["text"] != "最终文本" || finalEvent.Payload["final"] != true {
+		t.Fatalf("final transcript payload=%#v", finalEvent.Payload)
+	}
+}
+
+func TestSpeechFinishClosingRouteIgnoresInterimTranscript(t *testing.T) {
+	provider := newFakeSpeechProvider()
+	s := New(Config{})
+	s.speech = newSpeechServiceWithOptions(provider, speechServiceOptions{
+		idleTimeout:         time.Second,
+		startTimeout:        time.Second,
+		finishTimeout:       time.Second,
+		closingRouteTimeout: time.Second,
+	})
+	ts := httptestNewRegistryServer(t, s.Handler())
+
+	client := dialWS(t, "http://"+ts+"/ws")
+	defer client.Close()
+	connectRegistryClient(t, client)
+
+	streamID := startFakeSpeechStreamWithRequestID(t, client, 2)
+	stream := provider.stream
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 3,
+		Type:      "request",
+		Method:    "speech.finish",
+		Payload: map[string]any{
+			"streamId": streamID,
+		},
+	})
+	_ = mustReadEnvelope(t, client)
+
+	stream.events.Transcript("中间文本", false)
+	_ = client.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+	var interim testEnvelope
+	if err := client.ReadJSON(&interim); err == nil {
+		t.Fatalf("interim transcript after finish should be ignored: %#v", interim)
+	}
+}
+
+func TestSpeechFinishClosingRouteExpires(t *testing.T) {
+	provider := newFakeSpeechProvider()
+	s := New(Config{})
+	s.speech = newSpeechServiceWithOptions(provider, speechServiceOptions{
+		idleTimeout:         time.Second,
+		startTimeout:        time.Second,
+		finishTimeout:       time.Second,
+		closingRouteTimeout: 20 * time.Millisecond,
+	})
+	ts := httptestNewRegistryServer(t, s.Handler())
+
+	client := dialWS(t, "http://"+ts+"/ws")
+	defer client.Close()
+	connectRegistryClient(t, client)
+
+	streamID := startFakeSpeechStreamWithRequestID(t, client, 2)
+	stream := provider.stream
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 3,
+		Type:      "request",
+		Method:    "speech.finish",
+		Payload: map[string]any{
+			"streamId": streamID,
+		},
+	})
+	_ = mustReadEnvelope(t, client)
+
+	time.Sleep(60 * time.Millisecond)
+	stream.events.Transcript("迟到文本", true)
+	_ = client.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+	var late testEnvelope
+	if err := client.ReadJSON(&late); err == nil {
+		t.Fatalf("late final transcript should be ignored: %#v", late)
+	}
+	_ = client.SetReadDeadline(time.Time{})
+}
+
 func TestSpeechProviderErrorReleasesActiveStream(t *testing.T) {
 	provider := newFakeSpeechProvider()
 	s := New(Config{})

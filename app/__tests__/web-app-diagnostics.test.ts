@@ -48,6 +48,17 @@ describe('app diagnostics', () => {
     expect(loggedPayload.connected).toBe(true);
   });
 
+  test('voice diagnostics do not record debug entries', () => {
+    const debugSpy = jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+
+    logVoiceInputDiagnostic('debug', 'start_requested', {
+      connected: true,
+    });
+
+    expect(appDiagnosticStore.getRecords()).toEqual([]);
+    expect(debugSpy).not.toHaveBeenCalled();
+  });
+
   test('includes registry error details in voice diagnostic error messages', () => {
     const error = new Error('speech provider start failed') as Error & {details?: unknown};
     error.details = {error: 'speech provider unavailable'};

@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	defaultSpeechIdleTimeout   = 10 * time.Second
-	defaultSpeechStartTimeout  = 15 * time.Second
-	defaultSpeechFinishTimeout = 5 * time.Second
+	defaultSpeechIdleTimeout         = 10 * time.Second
+	defaultSpeechStartTimeout        = 15 * time.Second
+	defaultSpeechFinishTimeout       = 5 * time.Second
+	defaultSpeechClosingRouteTimeout = 3 * time.Second
 )
 
 type speechProviderStartRequest struct {
@@ -45,21 +46,24 @@ type speechEventSink interface {
 type speechService struct {
 	provider speechProvider
 
-	idleTimeout   time.Duration
-	startTimeout  time.Duration
-	finishTimeout time.Duration
+	idleTimeout         time.Duration
+	startTimeout        time.Duration
+	finishTimeout       time.Duration
+	closingRouteTimeout time.Duration
 
 	nextStreamID atomic.Int64
 
-	mu         sync.Mutex
-	streams    map[string]*activeSpeechStream
-	connActive map[string]string
+	mu             sync.Mutex
+	streams        map[string]*activeSpeechStream
+	closingStreams map[string]*activeSpeechStream
+	connActive     map[string]string
 }
 
 type speechServiceOptions struct {
-	idleTimeout   time.Duration
-	startTimeout  time.Duration
-	finishTimeout time.Duration
+	idleTimeout         time.Duration
+	startTimeout        time.Duration
+	finishTimeout       time.Duration
+	closingRouteTimeout time.Duration
 }
 
 type speechStartResult struct {
@@ -74,6 +78,7 @@ type activeSpeechStream struct {
 	stream       speechProviderStream
 	cancel       context.CancelFunc
 	idleTimer    *time.Timer
+	closingTimer *time.Timer
 }
 
 func newSpeechService(provider speechProvider) *speechService {
@@ -83,12 +88,14 @@ func newSpeechService(provider speechProvider) *speechService {
 func newSpeechServiceWithOptions(provider speechProvider, options speechServiceOptions) *speechService {
 	options = normalizeSpeechServiceOptions(options)
 	return &speechService{
-		provider:      provider,
-		idleTimeout:   options.idleTimeout,
-		startTimeout:  options.startTimeout,
-		finishTimeout: options.finishTimeout,
-		streams:       make(map[string]*activeSpeechStream),
-		connActive:    make(map[string]string),
+		provider:            provider,
+		idleTimeout:         options.idleTimeout,
+		startTimeout:        options.startTimeout,
+		finishTimeout:       options.finishTimeout,
+		closingRouteTimeout: options.closingRouteTimeout,
+		streams:             make(map[string]*activeSpeechStream),
+		closingStreams:      make(map[string]*activeSpeechStream),
+		connActive:          make(map[string]string),
 	}
 }
 
@@ -101,6 +108,9 @@ func normalizeSpeechServiceOptions(options speechServiceOptions) speechServiceOp
 	}
 	if options.finishTimeout == 0 {
 		options.finishTimeout = defaultSpeechFinishTimeout
+	}
+	if options.closingRouteTimeout == 0 {
+		options.closingRouteTimeout = defaultSpeechClosingRouteTimeout
 	}
 	return options
 }
@@ -219,13 +229,16 @@ func (s *speechService) handleFinish(peer *peerConn, state *connectionState, in 
 		_ = writeSpeechError(peer, in.RequestID, in.Method, codeNotFound, "speech stream not found", map[string]any{"streamId": payload.StreamID})
 		return
 	}
+	s.registerClosingStream(stream)
 	ctx, cancel := context.WithTimeout(context.Background(), s.finishTimeout)
 	defer cancel()
 	if err := stream.stream.Finish(ctx); err != nil {
+		s.detachClosingStream(payload.StreamID)
 		cancelSpeechProviderStream(stream)
 		_ = writeSpeechError(peer, in.RequestID, in.Method, codeUnavailable, "speech provider finish failed", map[string]any{"streamId": payload.StreamID})
 		return
 	}
+	s.armClosingStreamTimer(payload.StreamID)
 	_ = writeSpeechResponse(peer, in.RequestID, in.Method, speechOKPayload{OK: true, StreamID: payload.StreamID})
 }
 
@@ -252,6 +265,9 @@ func (s *speechService) cancelConnection(connectionID string) {
 	stream := s.detachActiveStream(connectionID)
 	if stream != nil {
 		cancelSpeechProviderStream(stream)
+	}
+	for _, closing := range s.detachClosingStreamsForConnection(connectionID) {
+		cancelSpeechProviderStream(closing)
 	}
 }
 
@@ -334,6 +350,40 @@ func (s *speechService) resetIdleTimer(stream *activeSpeechStream) {
 	}
 }
 
+func (s *speechService) registerClosingStream(stream *activeSpeechStream) {
+	if stream == nil {
+		return
+	}
+	s.mu.Lock()
+	if stream.idleTimer != nil {
+		stream.idleTimer.Stop()
+		stream.idleTimer = nil
+	}
+	s.closingStreams[stream.streamID] = stream
+	s.mu.Unlock()
+}
+
+func (s *speechService) armClosingStreamTimer(streamID string) {
+	if s.closingRouteTimeout <= 0 {
+		if expired := s.detachClosingStream(streamID); expired != nil {
+			cancelSpeechProviderStream(expired)
+		}
+		return
+	}
+	s.mu.Lock()
+	stream := s.closingStreams[streamID]
+	if stream == nil || stream.closingTimer != nil {
+		s.mu.Unlock()
+		return
+	}
+	stream.closingTimer = time.AfterFunc(s.closingRouteTimeout, func() {
+		if expired := s.detachClosingStream(streamID); expired != nil {
+			cancelSpeechProviderStream(expired)
+		}
+	})
+	s.mu.Unlock()
+}
+
 func (s *speechService) handleIdleTimeout(connectionID string, streamID string) {
 	stream := s.detachStream(connectionID, streamID)
 	if stream == nil {
@@ -364,6 +414,25 @@ func (s *speechService) detachStream(connectionID string, streamID string) *acti
 	return s.detachStreamLocked(connectionID, streamID)
 }
 
+func (s *speechService) detachClosingStream(streamID string) *activeSpeechStream {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.detachClosingStreamLocked(streamID)
+}
+
+func (s *speechService) detachClosingStreamsForConnection(connectionID string) []*activeSpeechStream {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*activeSpeechStream
+	for streamID, stream := range s.closingStreams {
+		if stream.connectionID != connectionID {
+			continue
+		}
+		out = append(out, s.detachClosingStreamLocked(streamID))
+	}
+	return out
+}
+
 func (s *speechService) detachStreamLocked(connectionID string, streamID string) *activeSpeechStream {
 	stream := s.streams[streamID]
 	if stream == nil || stream.connectionID != connectionID {
@@ -376,6 +445,19 @@ func (s *speechService) detachStreamLocked(connectionID string, streamID string)
 	if stream.idleTimer != nil {
 		stream.idleTimer.Stop()
 		stream.idleTimer = nil
+	}
+	return stream
+}
+
+func (s *speechService) detachClosingStreamLocked(streamID string) *activeSpeechStream {
+	stream := s.closingStreams[streamID]
+	if stream == nil {
+		return nil
+	}
+	delete(s.closingStreams, streamID)
+	if stream.closingTimer != nil {
+		stream.closingTimer.Stop()
+		stream.closingTimer = nil
 	}
 	return stream
 }
@@ -396,7 +478,7 @@ type speechStreamEvents struct {
 }
 
 func (e speechStreamEvents) Transcript(text string, final bool) {
-	stream := e.service.streamByID(e.streamID)
+	stream, closing := e.service.streamForTranscript(e.streamID, final)
 	if stream == nil {
 		return
 	}
@@ -410,7 +492,11 @@ func (e speechStreamEvents) Transcript(text string, final bool) {
 		}),
 	})
 	if final {
-		stream = e.service.detachStream(stream.connectionID, e.streamID)
+		if closing {
+			stream = e.service.detachClosingStream(e.streamID)
+		} else {
+			stream = e.service.detachStream(stream.connectionID, e.streamID)
+		}
 		if stream != nil {
 			stream.cancel()
 		}
@@ -418,7 +504,7 @@ func (e speechStreamEvents) Transcript(text string, final bool) {
 }
 
 func (e speechStreamEvents) Error(code string, message string, retryable bool) {
-	stream := e.service.streamByID(e.streamID)
+	stream, closing := e.service.streamForError(e.streamID)
 	if stream == nil {
 		return
 	}
@@ -432,14 +518,38 @@ func (e speechStreamEvents) Error(code string, message string, retryable bool) {
 			Retryable: retryable,
 		}),
 	})
-	stream = e.service.detachStream(stream.connectionID, e.streamID)
+	if closing {
+		stream = e.service.detachClosingStream(e.streamID)
+	} else {
+		stream = e.service.detachStream(stream.connectionID, e.streamID)
+	}
 	cancelSpeechProviderStream(stream)
 }
 
-func (s *speechService) streamByID(streamID string) *activeSpeechStream {
+func (s *speechService) streamForTranscript(streamID string, final bool) (*activeSpeechStream, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.streams[streamID]
+	if stream := s.streams[streamID]; stream != nil {
+		return stream, false
+	}
+	if final {
+		if stream := s.closingStreams[streamID]; stream != nil {
+			return stream, true
+		}
+	}
+	return nil, false
+}
+
+func (s *speechService) streamForError(streamID string) (*activeSpeechStream, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if stream := s.streams[streamID]; stream != nil {
+		return stream, false
+	}
+	if stream := s.closingStreams[streamID]; stream != nil {
+		return stream, true
+	}
+	return nil, false
 }
 
 func decodeSpeechPayload(payload json.RawMessage, out any) error {
