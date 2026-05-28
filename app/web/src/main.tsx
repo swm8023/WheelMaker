@@ -9039,7 +9039,10 @@ function App() {
       logVoiceInputState('debug', 'microphone_start_requested');
       const capture = await startVoiceCaptureForGeneration(generation);
       logVoiceInputState('debug', 'microphone_started');
-      if (!isVoiceGenerationActive(generation)) {
+      if (
+        voiceCaptureGenerationRef.current !== generation ||
+        !isVoiceGenerationActive(generation)
+      ) {
         logVoiceInputState('warn', 'microphone_started_after_cancel');
         capture.stop();
         return;

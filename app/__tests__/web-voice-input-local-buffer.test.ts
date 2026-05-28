@@ -56,6 +56,19 @@ describe('web voice input local buffering wiring', () => {
     expect(mainTsx).toContain('completeVoiceInputFinalizing');
   });
 
+  test('stops microphone capture that resolves after recording was already stopped', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'main.tsx'),
+      'utf8',
+    );
+
+    expect(mainTsx).toContain('voiceCaptureGenerationRef.current !== generation ||');
+    expect(mainTsx).toMatch(
+      /if \(\s*voiceCaptureGenerationRef\.current !== generation \|\|\s*!isVoiceGenerationActive\(generation\)\s*\) \{\s*logVoiceInputState\('warn', 'microphone_started_after_cancel'\);\s*capture\.stop\(\);\s*return;\s*\}/,
+    );
+  });
+
   test('wires composer action modes without eager microphone prewarm on send paths', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(
