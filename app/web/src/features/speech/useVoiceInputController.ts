@@ -8,6 +8,40 @@ export type VoiceInputSession = {
   currentTranscriptText: () => string;
 };
 
+function suffixPrefixOverlap(left: string, right: string): number {
+  const max = Math.min(left.length, right.length);
+  for (let size = max; size > 0; size -= 1) {
+    if (left.endsWith(right.slice(0, size))) {
+      return size;
+    }
+  }
+  return 0;
+}
+
+function commonPrefixLength(left: string, right: string): number {
+  const max = Math.min(left.length, right.length);
+  let index = 0;
+  while (index < max && left[index] === right[index]) {
+    index += 1;
+  }
+  return index;
+}
+
+export function mergeVoiceTranscriptUpdate(previous: string, next: string): string {
+  if (!previous || next.startsWith(previous)) {
+    return next;
+  }
+  if (!next || previous === next || previous.startsWith(next) || previous.endsWith(next)) {
+    return previous;
+  }
+  const sharedPrefix = commonPrefixLength(previous, next);
+  if (sharedPrefix >= Math.max(2, Math.floor(Math.min(previous.length, next.length) / 2))) {
+    return next;
+  }
+  const overlap = suffixPrefixOverlap(previous, next);
+  return `${previous}${next.slice(overlap)}`;
+}
+
 export function replaceVoiceSegment(
   baseText: string,
   insertStart: number,
@@ -33,7 +67,7 @@ export function createVoiceInputSession(
   };
   return {
     applyTranscript: text => {
-      liveTranscript = text;
+      liveTranscript = mergeVoiceTranscriptUpdate(liveTranscript, text);
       return render();
     },
     commitLiveTranscript: () => {

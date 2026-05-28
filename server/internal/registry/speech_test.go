@@ -307,7 +307,7 @@ func TestSpeechFinishKeepsClosingRouteForFinalTranscript(t *testing.T) {
 	}
 }
 
-func TestSpeechFinishClosingRouteIgnoresInterimTranscript(t *testing.T) {
+func TestSpeechFinishClosingRouteForwardsInterimTranscript(t *testing.T) {
 	provider := newFakeSpeechProvider()
 	s := New(Config{})
 	s.speech = newSpeechServiceWithOptions(provider, speechServiceOptions{
@@ -337,8 +337,15 @@ func TestSpeechFinishClosingRouteIgnoresInterimTranscript(t *testing.T) {
 	stream.events.Transcript("中间文本", false)
 	_ = client.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
 	var interim testEnvelope
-	if err := client.ReadJSON(&interim); err == nil {
-		t.Fatalf("interim transcript after finish should be ignored: %#v", interim)
+	if err := client.ReadJSON(&interim); err != nil {
+		t.Fatalf("read interim transcript after finish: %v", err)
+	}
+	_ = client.SetReadDeadline(time.Time{})
+	if interim.Type != "event" || interim.Method != "speech.transcript" {
+		t.Fatalf("interim transcript event=%#v", interim)
+	}
+	if interim.Payload["streamId"] != streamID || interim.Payload["text"] != "中间文本" || interim.Payload["final"] != false {
+		t.Fatalf("interim transcript payload=%#v", interim.Payload)
 	}
 }
 

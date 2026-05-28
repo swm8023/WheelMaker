@@ -532,10 +532,8 @@ func (s *speechService) streamForTranscript(streamID string, final bool) (*activ
 	if stream := s.streams[streamID]; stream != nil {
 		return stream, false
 	}
-	if final {
-		if stream := s.closingStreams[streamID]; stream != nil {
-			return stream, true
-		}
+	if stream := s.closingStreams[streamID]; stream != nil {
+		return stream, true
 	}
 	return nil, false
 }

@@ -13,7 +13,7 @@ export type MicrophonePCMStreamOptions = {
 };
 
 export type MicrophonePCMStream = {
-  stop: () => void;
+  stop: (options?: {flush?: boolean}) => void;
 };
 
 export function floatTo16BitPCM(input: Float32Array): ArrayBuffer {
@@ -183,13 +183,25 @@ export async function startMicrophonePCMStream(
     }
   };
 
+  const flushPending = () => {
+    if (pending.length === 0) {
+      return;
+    }
+    const bytes = pending;
+    pending = new Uint8Array();
+    options.onChunk({bytes, base64: base64FromBytes(bytes)});
+  };
+
   source.connect(processor);
   processor.connect(context.destination);
 
   return {
-    stop: () => {
+    stop: stopOptions => {
       if (stopped) {
         return;
+      }
+      if (stopOptions?.flush) {
+        flushPending();
       }
       stopped = true;
       processor.disconnect();

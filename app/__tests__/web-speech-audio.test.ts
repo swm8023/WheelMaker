@@ -85,4 +85,61 @@ describe('speech audio helpers', () => {
       });
     }
   });
+
+  test('flushes a partial PCM chunk when microphone capture stops', async () => {
+    const originalAudioContext = window.AudioContext;
+    const originalMediaDevices = navigator.mediaDevices;
+    const onChunk = jest.fn();
+    const close = jest.fn(() => Promise.resolve());
+    const source = {connect: jest.fn(), disconnect: jest.fn()};
+    const processor = {
+      connect: jest.fn(),
+      disconnect: jest.fn(),
+      onaudioprocess: null as null | ((event: {inputBuffer: {getChannelData: () => Float32Array}}) => void),
+    };
+    const audioContext = {
+      state: 'running',
+      sampleRate: 16000,
+      resume: jest.fn(() => Promise.resolve()),
+      close,
+      createMediaStreamSource: jest.fn(() => source),
+      createScriptProcessor: jest.fn(() => processor),
+      destination: {},
+    };
+    const track = {stop: jest.fn(), addEventListener: jest.fn()};
+
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: jest.fn(() => audioContext),
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {getUserMedia: jest.fn(() => Promise.resolve({getTracks: () => [track]}))},
+    });
+
+    try {
+      const capture = await startMicrophonePCMStream({chunkBytes: 10, onChunk});
+      processor.onaudioprocess?.({
+        inputBuffer: {
+          getChannelData: () => new Float32Array([0, 0.5]),
+        },
+      });
+
+      expect(onChunk).not.toHaveBeenCalled();
+
+      capture.stop({flush: true});
+
+      expect(onChunk).toHaveBeenCalledTimes(1);
+      expect(Array.from(onChunk.mock.calls[0][0].bytes)).toEqual([0, 0, 0xff, 0x3f]);
+    } finally {
+      Object.defineProperty(window, 'AudioContext', {
+        configurable: true,
+        value: originalAudioContext,
+      });
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: originalMediaDevices,
+      });
+    }
+  });
 });

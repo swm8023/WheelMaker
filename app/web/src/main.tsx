@@ -3714,7 +3714,7 @@ function App() {
     setSelectedChatId(sessionId);
   };
 
-  const resizeChatComposerTextarea = useCallback(() => {
+  const resizeChatComposerTextarea = useCallback((options: {scrollToEnd?: boolean} = {}) => {
     const input = chatComposerTextareaRef.current;
     if (!input) {
       return;
@@ -3723,6 +3723,9 @@ function App() {
     const nextHeight = Math.max(32, Math.min(input.scrollHeight, 180));
     input.style.height = `${nextHeight}px`;
     input.style.overflowY = input.scrollHeight > 180 ? 'auto' : 'hidden';
+    if (options.scrollToEnd) {
+      input.scrollTop = input.scrollHeight;
+    }
   }, []);
 
   const markChatUserScrollIntent = useCallback(() => {
@@ -8466,8 +8469,8 @@ function App() {
     });
   };
 
-  const stopVoiceCapture = () => {
-    voiceCaptureRef.current?.stop();
+  const stopVoiceCapture = (options: {flush?: boolean} = {}) => {
+    voiceCaptureRef.current?.stop(options);
     voiceCaptureRef.current = null;
     voiceCaptureGenerationRef.current = 0;
   };
@@ -8618,7 +8621,7 @@ function App() {
     }
     const nextText = session.commitLiveTranscript();
     updateChatComposerText(nextText);
-    window.setTimeout(resizeChatComposerTextarea, 0);
+    window.setTimeout(() => resizeChatComposerTextarea({scrollToEnd: true}), 0);
     return nextText;
   };
 
@@ -8921,7 +8924,7 @@ function App() {
     const generation = voiceStartGenerationRef.current;
     const streamId = voiceStreamIdRef.current;
     logVoiceInputState('debug', 'finish_requested', {streamIdPresent: !!streamId});
-    stopVoiceCapture();
+    stopVoiceCapture({flush: true});
     voicePendingFinishRef.current = true;
     setVoiceRecordingStatus('finishing');
     if (!streamId) {
@@ -11687,7 +11690,7 @@ function App() {
         }
         const nextText = voiceSessionRef.current.applyTranscript(payload.text);
         updateChatComposerText(nextText);
-        window.setTimeout(resizeChatComposerTextarea, 0);
+        window.setTimeout(() => resizeChatComposerTextarea({scrollToEnd: true}), 0);
         if (payload.final) {
           stopVoiceCapture();
           completeVoiceInputFinalizing(voiceStartGenerationRef.current);

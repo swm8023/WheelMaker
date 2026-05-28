@@ -1141,6 +1141,15 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(/\.chat-main \{[\s\S]*gap: 0;[\s\S]*\}/);
   });
 
+  test('scrolls the composer textarea to new voice transcript text after max height', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+
+    expect(mainTsx).toContain('scrollToEnd?: boolean');
+    expect(mainTsx).toContain('input.scrollTop = input.scrollHeight;');
+    expect(mainTsx).toContain('resizeChatComposerTextarea({scrollToEnd: true})');
+  });
+
   test('collapses code, file, and photo actions behind a plus tray', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
