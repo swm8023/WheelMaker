@@ -1236,6 +1236,8 @@ describe('web chat integration', () => {
 
     expect(mainTsx).toContain("import {VoiceInputButton} from './features/speech/VoiceInputButton';");
     expect(mainTsx).toContain("import {VoiceRecordingBar} from './features/speech/VoiceRecordingBar';");
+    expect(mainTsx).toContain("formatVoiceInputDiagnosticError,");
+    expect(mainTsx).toContain("logVoiceInputDiagnostic,");
     expect(mainTsx).toContain("import {DEFAULT_SPEECH_SETTINGS, SPEECH_MODEL_OPTIONS, normalizeSpeechSettings");
     expect(mainTsx).toContain('const [speechSettings, setSpeechSettings] = useState(');
     expect(mainTsx).toContain('workspaceStore.rememberGlobalState({ speechSettings });');
@@ -1259,6 +1261,10 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('onStart={startVoiceInput}');
     expect(mainTsx).toContain('onFinish={finishVoiceInput}');
     expect(mainTsx).toContain('onCancel={cancelVoiceInputByGesture}');
+    expect(mainTsx).toContain('onLog={logVoiceInputButtonEvent}');
+    expect(mainTsx).toContain("logVoiceInputDiagnostic('debug', 'start_requested'");
+    expect(mainTsx).toContain("logVoiceInputDiagnostic('error', 'start_failed'");
+    expect(mainTsx).toContain("logVoiceInputDiagnostic('error', 'chunk_send_failed'");
     expect(mainTsx).toContain('readOnly={chatSending}');
     expect(mainTsx).toContain('voiceRecording ? (');
     expect(mainTsx).toContain('<VoiceRecordingBar');

@@ -198,6 +198,12 @@ import {startMicrophonePCMStream, type MicrophonePCMStream} from './features/spe
 import {createVoiceInputSession, type VoiceInputSession} from './features/speech/useVoiceInputController';
 import {isSpeechErrorEvent, isSpeechTranscriptEvent} from './features/speech/registrySpeechClient';
 import {DEFAULT_SPEECH_SETTINGS, SPEECH_MODEL_OPTIONS, normalizeSpeechSettings} from './features/speech/speechSettings';
+import {
+  formatVoiceInputDiagnosticError,
+  logVoiceInputDiagnostic,
+  type VoiceInputDiagnosticEntry,
+  type VoiceInputDiagnosticLevel,
+} from './features/speech/voiceInputDiagnostics';
 import {VoiceInputButton} from './features/speech/VoiceInputButton';
 import {VoiceRecordingBar} from './features/speech/VoiceRecordingBar';
 import { WorkspaceController } from './services/workspaceController';
@@ -8435,9 +8441,32 @@ function App() {
     voiceSessionRef.current = null;
   };
 
+  const logVoiceInputState = (
+    level: VoiceInputDiagnosticLevel,
+    event: string,
+    details: Record<string, unknown> = {},
+  ) => {
+    logVoiceInputDiagnostic(level, event, {
+      connected,
+      recording: voiceRecordingRef.current,
+      hasStream: !!voiceStreamIdRef.current,
+      seq: voiceSeqRef.current,
+      ...details,
+    });
+  };
+
+  const logVoiceInputButtonEvent = (entry: VoiceInputDiagnosticEntry) => {
+    logVoiceInputState(entry.level, `button_${entry.event}`, entry.details);
+  };
+
   const cancelVoiceInput = async (reason: RegistrySpeechCancelPayload['reason'] = 'user') => {
     const streamId = voiceStreamIdRef.current;
     const session = voiceSessionRef.current;
+    logVoiceInputState('debug', 'cancel_requested', {
+      reason,
+      hasSession: !!session,
+      streamIdPresent: !!streamId,
+    });
     stopVoiceCapture();
     if (session) {
       updateChatComposerText(session.cancel());
@@ -8445,11 +8474,17 @@ function App() {
     }
     clearVoiceInputState();
     if (!streamId) {
+      logVoiceInputState('warn', 'cancel_without_stream', {reason});
       return;
     }
     try {
       await service.cancelSpeech({streamId, reason});
+      logVoiceInputState('debug', 'cancel_completed', {reason});
     } catch (err) {
+      logVoiceInputState('error', 'cancel_failed', {
+        reason,
+        error: formatVoiceInputDiagnosticError(err),
+      });
       if (reason !== 'disconnect') {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -8462,34 +8497,44 @@ function App() {
 
   const finishVoiceInput = async () => {
     const streamId = voiceStreamIdRef.current;
+    logVoiceInputState('debug', 'finish_requested', {streamIdPresent: !!streamId});
     stopVoiceCapture();
     resetVoiceRecordingUi();
     if (!streamId) {
       clearVoiceInputState();
+      logVoiceInputState('warn', 'finish_without_stream');
       return;
     }
     try {
       await service.finishSpeech({streamId});
+      logVoiceInputState('debug', 'finish_completed');
     } catch (err) {
       clearVoiceInputState();
+      logVoiceInputState('error', 'finish_failed', {
+        error: formatVoiceInputDiagnosticError(err),
+      });
       setError(err instanceof Error ? err.message : String(err));
     }
   };
 
   const startVoiceInput = async () => {
     if (voiceRecordingRef.current || voiceStreamIdRef.current) {
+      logVoiceInputState('warn', 'start_ignored_active_session');
       return;
     }
     const settings = normalizeSpeechSettings(speechSettings);
     const apiKey = settings.volcengineApiKey.trim();
     if (!settings.enabled) {
+      logVoiceInputState('warn', 'start_ignored_disabled');
       return;
     }
     if (!connected) {
+      logVoiceInputState('warn', 'start_ignored_disconnected');
       setError('Connect Registry before using voice input.');
       return;
     }
     if (!apiKey) {
+      logVoiceInputState('warn', 'start_ignored_missing_api_key');
       setError('Fill Volcengine API Key in Chat settings first.');
       return;
     }
@@ -8497,6 +8542,13 @@ function App() {
     const baseText = chatComposerTextRef.current;
     const insertStart = input?.selectionStart ?? baseText.length;
     const insertEnd = input?.selectionEnd ?? insertStart;
+    logVoiceInputDiagnostic('debug', 'start_requested', {
+      connected,
+      model: settings.model,
+      baseTextLength: baseText.length,
+      insertStart,
+      insertEnd,
+    });
     voiceSessionRef.current = createVoiceInputSession(baseText, insertStart, insertEnd);
     voiceStartedAtRef.current = Date.now();
     voiceSeqRef.current = 0;
@@ -8525,14 +8577,17 @@ function App() {
           channel: 1,
         },
       });
+      logVoiceInputState('debug', 'start_response', {hasStreamId: !!response.streamId});
       if (!response.streamId) {
         throw new Error('speech.start returned no streamId');
       }
       if (!voiceRecordingRef.current) {
+        logVoiceInputState('warn', 'start_response_after_cancel', {streamIdPresent: true});
         await service.cancelSpeech({streamId: response.streamId, reason: 'gesture'});
         return;
       }
       voiceStreamIdRef.current = response.streamId;
+      logVoiceInputState('debug', 'microphone_start_requested');
       const capture = await startMicrophonePCMStream({
         targetRate: 16000,
         chunkBytes: 6400,
@@ -8548,12 +8603,20 @@ function App() {
             seq: voiceSeqRef.current,
             pcm: chunk.base64,
           }).catch(err => {
+            logVoiceInputDiagnostic('error', 'chunk_send_failed', {
+              connected,
+              hasStream: !!voiceStreamIdRef.current,
+              seq: voiceSeqRef.current,
+              error: formatVoiceInputDiagnosticError(err),
+            });
             setError(err instanceof Error ? err.message : String(err));
             cancelVoiceInput('error').catch(() => undefined);
           });
         },
       });
+      logVoiceInputState('debug', 'microphone_started');
       if (!voiceRecordingRef.current) {
+        logVoiceInputState('warn', 'microphone_started_after_cancel');
         capture.stop();
         return;
       }
@@ -8561,6 +8624,11 @@ function App() {
     } catch (err) {
       stopVoiceCapture();
       clearVoiceInputState();
+      logVoiceInputDiagnostic('error', 'start_failed', {
+        connected,
+        model: settings.model,
+        error: formatVoiceInputDiagnosticError(err),
+      });
       setError(err instanceof Error ? err.message : String(err));
     }
   };
@@ -14951,6 +15019,7 @@ function App() {
                       onFinish={finishVoiceInput}
                       onCancel={cancelVoiceInputByGesture}
                       onCancelIntentChange={setVoiceCancelIntent}
+                      onLog={logVoiceInputButtonEvent}
                     />
                   ) : (
                     <button
