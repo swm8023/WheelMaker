@@ -3224,6 +3224,111 @@ textarea,
   opacity: 1;
 }
 
+.debug-log-detail {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.debug-log-list {
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.debug-log-empty {
+  padding: 14px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 8px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel-2) 70%, transparent);
+  font-size: 12px;
+}
+
+.debug-log-entry {
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--muted) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-2) 76%, transparent);
+  padding: 9px 10px;
+  display: grid;
+  gap: 7px;
+}
+
+.debug-log-entry.warn {
+  border-left-color: #d7a43a;
+}
+
+.debug-log-entry.error {
+  border-left-color: var(--danger);
+}
+
+.debug-log-entry-header,
+.debug-log-category-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.debug-log-time {
+  color: var(--muted);
+  font-family: var(--code-font-family, Consolas, monospace);
+  font-size: 11px;
+}
+
+.debug-log-level {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.debug-log-level.warn {
+  color: #d7a43a;
+}
+
+.debug-log-level.error {
+  color: var(--danger);
+}
+
+.debug-log-event {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.debug-log-details {
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  overflow: auto;
+  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+  background: color-mix(in srgb, var(--panel-3) 90%, transparent);
+  font-family: var(--code-font-family, Consolas, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.debug-log-detail-footer {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  padding: 10px 2px 2px;
+}
+
+.debug-log-category-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .sidebar-setting-select {
   max-width: 180px;
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);

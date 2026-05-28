@@ -32,6 +32,9 @@ describe('web registry debug settings', () => {
     expect(mainTsx).toContain('registryDebugStore.setEnabled(registryDebug);');
     expect(mainTsx).toContain("renderSettingsSection('Debug'");
     expect(mainTsx).toContain('Debug');
+    expect(mainTsx).toContain("'debugLogs'");
+    expect(mainTsx).toContain("settingsDetailView === 'debugLogs'");
+    expect(mainTsx).toContain('renderDebugLogsSettingsDetail(options)');
     expect(mainTsx).toContain('checked={registryDebug}');
     expect(mainTsx).toContain('onChange={event => setRegistryDebug(event.target.checked)}');
     expect(mainTsx).toContain('disabled={!registryDebug}');
@@ -39,6 +42,8 @@ describe('web registry debug settings', () => {
     const debugSectionStart = mainTsx.indexOf("renderSettingsSection('Debug'");
     const debugSectionEnd = mainTsx.indexOf("), 'bug')", debugSectionStart);
     const debugSection = mainTsx.slice(debugSectionStart, debugSectionEnd);
+    expect(debugSection).toContain("setSettingsDetailView('debugLogs')");
+    expect(debugSection).toContain('Logs');
     expect(debugSection).toContain('Logout');
     expect(debugSection).toContain('handleRegistryDebugLogout');
     expect(debugSection).toContain('settings-danger-row');
@@ -46,6 +51,22 @@ describe('web registry debug settings', () => {
     expect(mainTsx).toContain("setToken('');");
     expect(mainTsx).toContain('supervisorManagedCloseRef.current = true;');
     expect(mainTsx).not.toContain('registryDebugRecordsJson');
+  });
+
+  test('renders warning and error logs with a bottom category selector', () => {
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    expect(mainTsx).toContain('appDiagnosticStore,');
+    expect(mainTsx).toContain('filterAppDiagnosticRecords,');
+    expect(mainTsx).toContain('const [appDiagnosticRecords, setAppDiagnosticRecords] = useState');
+    expect(mainTsx).toContain("const [selectedDiagnosticCategory, setSelectedDiagnosticCategory] = useState<AppDiagnosticCategory>('voice');");
+    expect(mainTsx).toContain("levels: ['warn', 'error']");
+    expect(mainTsx).toContain('className="debug-log-detail-footer"');
+    expect(mainTsx).toContain('<option value="voice">Voice</option>');
+    expect(mainTsx).toContain('No warning or error logs yet.');
+    expect(stylesCss).toContain('.debug-log-detail-footer');
+    expect(stylesCss).toContain('.debug-log-entry.error');
   });
 
   test('places the debug settings section at the bottom of settings', () => {

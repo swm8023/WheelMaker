@@ -1,3 +1,5 @@
+import {appDiagnosticStore, sanitizeAppDiagnosticDetails} from '../../debug/appDiagnostics';
+
 export type VoiceInputDiagnosticLevel = 'debug' | 'warn' | 'error';
 
 export type VoiceInputDiagnosticEntry = {
@@ -15,10 +17,17 @@ export function logVoiceInputDiagnostic(
   event: string,
   details: Record<string, unknown> = {},
 ): void {
+  const safeDetails = sanitizeAppDiagnosticDetails(details);
   const payload = {
     at: new Date().toISOString(),
-    ...details,
+    ...safeDetails,
   };
+  appDiagnosticStore.record({
+    category: 'voice',
+    level,
+    event,
+    details: payload,
+  });
   const message = `[VoiceInput] ${event}`;
   if (level === 'error') {
     console.error(message, payload);

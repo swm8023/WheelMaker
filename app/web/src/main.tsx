@@ -199,6 +199,12 @@ import {createVoiceInputSession, type VoiceInputSession} from './features/speech
 import {isSpeechErrorEvent, isSpeechTranscriptEvent} from './features/speech/registrySpeechClient';
 import {DEFAULT_SPEECH_SETTINGS, SPEECH_MODEL_OPTIONS, normalizeSpeechSettings} from './features/speech/speechSettings';
 import {
+  appDiagnosticStore,
+  filterAppDiagnosticRecords,
+  type AppDiagnosticCategory,
+  type AppDiagnosticRecord,
+} from './debug/appDiagnostics';
+import {
   formatVoiceInputDiagnosticError,
   logVoiceInputDiagnostic,
   type VoiceInputDiagnosticEntry,
@@ -352,7 +358,7 @@ type ConfirmTarget =
       projectName?: string;
       includeProjects?: boolean;
     };
-type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | 'portRelay' | null;
+type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | 'portRelay' | 'debugLogs' | null;
 type ActiveSettingsDetailView = Exclude<SettingsDetailView, null>;
 type SettingsDetailShellOptions = {
   hideDetailHeader?: boolean;
@@ -957,6 +963,8 @@ function settingsDetailTitle(detail: ActiveSettingsDetailView): string {
       return 'Database';
     case 'portRelay':
       return 'Port Relay';
+    case 'debugLogs':
+      return 'Logs';
   }
 }
 
@@ -2889,6 +2897,8 @@ function App() {
       : false,
   );
   const [registryDebugRecords, setRegistryDebugRecords] = useState(registryDebugStore.getRecords());
+  const [appDiagnosticRecords, setAppDiagnosticRecords] = useState<AppDiagnosticRecord[]>(appDiagnosticStore.getRecords());
+  const [selectedDiagnosticCategory, setSelectedDiagnosticCategory] = useState<AppDiagnosticCategory>('voice');
   const [selectedRegistryDebugRecordId, setSelectedRegistryDebugRecordId] = useState<number | null>(null);
   const [selectedRegistryDebugScope, setSelectedRegistryDebugScope] = useState('All');
   const [selectedRegistryDebugSessionId, setSelectedRegistryDebugSessionId] = useState('All');
@@ -5241,6 +5251,8 @@ function App() {
       );
     });
   }, []);
+
+  useEffect(() => appDiagnosticStore.subscribe(setAppDiagnosticRecords), []);
 
   useEffect(() => {
     registryDebugStore.setEnabled(registryDebug);
@@ -12944,6 +12956,52 @@ function App() {
     );
   };
 
+  const renderDebugLogsSettingsDetail = (options?: SettingsDetailShellOptions) => {
+    const records = filterAppDiagnosticRecords(appDiagnosticRecords, {
+      category: selectedDiagnosticCategory,
+      levels: ['warn', 'error'],
+    });
+    return renderSettingsDetailShell(
+      'Logs',
+      <div className="debug-log-detail">
+        <div className="debug-log-list" aria-live="polite">
+          {records.length === 0 ? (
+            <div className="debug-log-empty">No warning or error logs yet.</div>
+          ) : (
+            records.map(record => (
+              <article key={record.id} className={`debug-log-entry ${record.level}`}>
+                <div className="debug-log-entry-header">
+                  <span className="debug-log-time">{record.timeText}</span>
+                  <span className={`debug-log-level ${record.level}`}>{record.level}</span>
+                </div>
+                <div className="debug-log-event">{record.event}</div>
+                {Object.keys(record.details).length > 0 ? (
+                  <pre className="debug-log-details">
+                    {JSON.stringify(record.details, null, 2)}
+                  </pre>
+                ) : null}
+              </article>
+            ))
+          )}
+        </div>
+        <div className="debug-log-detail-footer">
+          <label className="debug-log-category-label">
+            <span>Category</span>
+            <select
+              className="sidebar-setting-select"
+              value={selectedDiagnosticCategory}
+              onChange={event => setSelectedDiagnosticCategory(event.target.value as AppDiagnosticCategory)}
+            >
+              <option value="voice">Voice</option>
+            </select>
+          </label>
+        </div>
+      </div>,
+      undefined,
+      options,
+    );
+  };
+
   const renderSettingsContent = (
     showSectionTitle: boolean,
     options: SettingsDetailShellOptions = {},
@@ -12965,6 +13023,9 @@ function App() {
     }
     if (settingsDetailView === 'portRelay') {
       return renderPortRelaySettingsDetail(options);
+    }
+    if (settingsDetailView === 'debugLogs') {
+      return renderDebugLogsSettingsDetail(options);
     }
     return (
     <>
@@ -13348,6 +13409,19 @@ function App() {
           <span>
             <span className="codicon codicon-debug-alt settings-row-icon" aria-hidden="true" />
             Open Debug Panel
+          </span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
+        <button
+          type="button"
+          className="settings-row settings-detail-row"
+          onClick={() => {
+            setSettingsDetailView('debugLogs');
+          }}
+        >
+          <span>
+            <span className="codicon codicon-output settings-row-icon" aria-hidden="true" />
+            Logs
           </span>
           <span className="codicon codicon-chevron-right" />
         </button>
