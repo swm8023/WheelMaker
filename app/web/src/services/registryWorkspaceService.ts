@@ -68,10 +68,12 @@ export class RegistryWorkspaceService {
   private token = '';
   private eventListeners = new Set<(event: RegistryEnvelope) => void>();
   private closeListeners = new Set<() => void>();
+  private localHubReadStatusListeners = new Set<() => void>();
   private unsubscribeRepositoryEvent: (() => void) | null = null;
   private unsubscribeRepositoryClose: (() => void) | null = null;
   private readonly createRepository: (debugSink?: RegistryDebugSink, debugConnection?: RegistryDebugConnection) => RegistryRepository;
   private readonly localHubReadManager: LocalHubReadManager;
+  private localHubReadRefreshSeq = 0;
 
   constructor(private readonly debugSink?: RegistryDebugSink, options: RegistryWorkspaceServiceOptions = {}) {
     this.createRepository = options.createRepository ?? createRegistryRepository;
@@ -90,13 +92,15 @@ export class RegistryWorkspaceService {
       this.bindRepository(repository);
       const snapshot = await this.listProjectSnapshotWithRetry(repository);
       this.token = normalizedToken;
-      await this.localHubReadManager.refresh(snapshot, normalizedToken);
+      this.localHubReadRefreshSeq += 1;
+      this.localHubReadManager.closeAll();
       const {selectedProjectId, fileEntries} = snapshot.projects.length > 0
         ? await this.selectFirstReachableProject(repository, snapshot.projects)
         : {selectedProjectId: '', fileEntries: []};
       previousRepository?.close();
       this.repository = repository;
       this.session = {...snapshot, selectedProjectId, fileEntries};
+      this.refreshLocalHubReadInBackground(this.session, normalizedToken);
       return this.session;
     } catch (error) {
       this.unbindRepository();
@@ -120,6 +124,24 @@ export class RegistryWorkspaceService {
     this.unsubscribeRepositoryEvent = null;
     this.unsubscribeRepositoryClose?.();
     this.unsubscribeRepositoryClose = null;
+  }
+
+  private refreshLocalHubReadInBackground(snapshot: RegistryProjectListResponse, token: string): void {
+    const refreshSeq = ++this.localHubReadRefreshSeq;
+    this.localHubReadManager.refresh(snapshot, token)
+      .catch(() => undefined)
+      .then(() => {
+        if (refreshSeq !== this.localHubReadRefreshSeq) {
+          return;
+        }
+        this.emitLocalHubReadStatusChanged();
+      });
+  }
+
+  private emitLocalHubReadStatusChanged(): void {
+    for (const listener of this.localHubReadStatusListeners) {
+      listener();
+    }
   }
 
   private async listProjectSnapshotWithRetry(repository: RegistryRepository): Promise<RegistryProjectListResponse> {
@@ -169,7 +191,9 @@ export class RegistryWorkspaceService {
     this.repository?.close();
     this.repository = null;
     this.session = null;
+    this.localHubReadRefreshSeq += 1;
     this.localHubReadManager.closeAll();
+    this.emitLocalHubReadStatusChanged();
   }
 
   getSession(): WorkspaceSession | null {
@@ -318,22 +342,32 @@ export class RegistryWorkspaceService {
       return {projects: this.session?.projects ?? [], hubs: this.session?.hubs ?? []};
     }
     const snapshot = await this.repository.listProjectSnapshot();
-    await this.localHubReadManager.refresh(snapshot, this.token);
     if (this.session) {
       this.session = {...this.session, projects: snapshot.projects, hubs: snapshot.hubs};
     }
+    this.refreshLocalHubReadInBackground(snapshot, this.token);
     return snapshot;
   }
 
   setLocalHubReadEnabled(enabled: boolean): void {
     this.localHubReadManager.setEnabled(enabled);
     if (enabled && this.session) {
-      void this.localHubReadManager.refresh(this.session, this.token);
+      this.refreshLocalHubReadInBackground(this.session, this.token);
+      return;
     }
+    this.localHubReadRefreshSeq += 1;
+    this.emitLocalHubReadStatusChanged();
   }
 
   getLocalHubReadStatuses(hubs: RegistryHub[] = this.session?.hubs ?? []): Record<string, LocalHubReadStatus> {
     return this.localHubReadManager.getHubStatuses(hubs);
+  }
+
+  onLocalHubReadStatusChange(listener: () => void): () => void {
+    this.localHubReadStatusListeners.add(listener);
+    return () => {
+      this.localHubReadStatusListeners.delete(listener);
+    };
   }
 
   private readRepositoryForProject(projectId: string): RegistryRepository {

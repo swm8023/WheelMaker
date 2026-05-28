@@ -127,11 +127,12 @@ describe('local hub read service routing', () => {
     });
 
     const session = await service.connect('ws://registry.example/ws', 'secret-token');
+    await new Promise(resolve => setTimeout(resolve, 0));
     const status = await service.getGitStatus();
     const sync = await service.syncCheck({});
     const sessions = await service.listSessions();
 
-    expect(session.fileEntries).toEqual([{name: 'local.txt', path: 'local.txt', kind: 'file'}]);
+    expect(session.fileEntries).toEqual([{name: 'remote.txt', path: 'remote.txt', kind: 'file'}]);
     expect(status.worktreeRev).toBe('local');
     expect(sync.gitRev).toBe('local');
     expect(sessions[0].sessionId).toBe('remote-session');
@@ -140,6 +141,50 @@ describe('local hub read service routing', () => {
 
     localRepository.listFiles.mockRejectedValueOnce(localFileError);
     await expect(service.listDirectory('.')).rejects.toThrow('local file failure');
-    expect(remoteRepository.listFiles).toHaveBeenCalledTimes(0);
+    expect(remoteRepository.listFiles).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not wait for local read refresh before returning the registry session', async () => {
+    let releaseRefresh: (() => void) | null = null;
+    const refreshStarted = jest.fn();
+    const remoteRepository = {
+      initialize: jest.fn(async () => undefined),
+      listProjectSnapshot: jest.fn(async () => ({
+        projects: [{projectId: 'hub-a:proj1', name: 'proj1', path: 'D:/proj1', online: true, hubId: 'hub-a'}],
+        hubs: [{hubId: 'hub-a', localRead: makeCandidate()}],
+      })),
+      listFiles: jest.fn(async () => ({entries: [{name: 'remote.txt', path: 'remote.txt', kind: 'file'}], notModified: false})),
+      onEvent: jest.fn(() => () => undefined),
+      onClose: jest.fn(() => () => undefined),
+      close: jest.fn(),
+    };
+    const localHubReadManager = {
+      refresh: jest.fn(async () => {
+        refreshStarted();
+        await new Promise<void>(resolve => {
+          releaseRefresh = resolve;
+        });
+      }),
+      readRepositoryForProject: jest.fn((_projectId: string, repository: unknown) => repository),
+      closeAll: jest.fn(),
+      setEnabled: jest.fn(),
+      getHubStatuses: jest.fn(() => ({})),
+    };
+    const service = new RegistryWorkspaceService(undefined, {
+      createRepository: jest.fn().mockReturnValue(remoteRepository),
+      localHubReadManager: localHubReadManager as never,
+    });
+
+    const connectPromise = service.connect('ws://registry.example/ws', 'secret-token');
+    const raceResult = await Promise.race([
+      connectPromise,
+      new Promise(resolve => setTimeout(() => resolve('blocked'), 20)),
+    ]);
+    releaseRefresh?.();
+    const session = await connectPromise;
+
+    expect(raceResult).not.toBe('blocked');
+    expect(refreshStarted).toHaveBeenCalled();
+    expect(session.fileEntries).toEqual([{name: 'remote.txt', path: 'remote.txt', kind: 'file'}]);
   });
 });

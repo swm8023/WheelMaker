@@ -22,7 +22,11 @@ describe('web reconnect fallback behavior', () => {
     expect(mainTsx).toContain('runtimeKeysFromChatStores()');
     expect(mainTsx).toContain('runtimeKeys.add(selectedRuntimeKey);');
     expect(mainTsx).toContain('syncChatSessionsAfterReconnect(preferredSelectedChatKey).catch(() => undefined);');
-    expect(mainTsx).toContain('await refreshChatIndex();');
+    const connectStart = mainTsx.indexOf('const connect = async');
+    const disconnectStart = mainTsx.indexOf('const disconnectForSupervisor', connectStart);
+    const connectBlock = mainTsx.slice(connectStart, disconnectStart);
+    expect(connectBlock).toContain('refreshChatIndex().catch(() => undefined);');
+    expect(connectBlock).not.toContain('await refreshChatIndex();');
   });
 
   test('uses pwa foreground supervisor for background suspend and resume reconnect', () => {

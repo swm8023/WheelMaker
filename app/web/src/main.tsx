@@ -5284,6 +5284,12 @@ function App() {
   }, [localHubReadEnabled, registryHubs]);
 
   useEffect(() => {
+    return service.onLocalHubReadStatusChange(() => {
+      setLocalHubReadStatuses(service.getLocalHubReadStatuses(registryHubs));
+    });
+  }, [registryHubs]);
+
+  useEffect(() => {
     workspaceStore.rememberGlobalState({ speechSettings });
   }, [speechSettings]);
 
@@ -8889,7 +8895,7 @@ function App() {
           preferredSelectedChatId,
         ).catch(() => undefined);
       }
-      await refreshChatIndex();
+      refreshChatIndex().catch(() => undefined);
       workspaceController
         .validateExpandedDirectories(
           result.hydrated.projectId,
