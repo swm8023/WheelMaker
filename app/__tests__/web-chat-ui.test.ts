@@ -269,6 +269,9 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.chat-composer \{[\s\S]*position: relative;[\s\S]*z-index: 1;[\s\S]*padding: 0 14px 4px;[\s\S]*background: transparent;/,
     );
+    expect(stylesCss).toMatch(
+      /@media \(min-width: 901px\) \{[\s\S]*\.chat-composer \{[\s\S]*padding-bottom: 8px;[\s\S]*\}[\s\S]*\}/,
+    );
     expect(stylesCss).not.toContain('--chat-composer-frame-top');
     expect(stylesCss).not.toContain('--chat-composer-fade-distance');
     expect(stylesCss).not.toContain('margin-top: calc(-1 * var(--chat-composer-frame-top));');
@@ -736,7 +739,9 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('codicon-wand');
     expect(mainTsx).not.toContain('codicon-symbol-keyword');
     expect(mainTsx).not.toContain('className="chat-tool-button chat-attach-button"');
-    expect(mainTsx).toContain('codicon-cloud-upload');
+    expect(mainTsx).toContain('codicon-attach');
+    expect(mainTsx).toContain('codicon-file-media');
+    expect(mainTsx).not.toContain('codicon-cloud-upload');
     expect(mainTsx).not.toContain('codicon-new-file');
     expect(mainTsx).toContain('chatFileInputRef.current?.click();');
     expect(mainTsx).not.toContain('className={`chat-tool-button chat-stop-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
@@ -1081,10 +1086,11 @@ describe('web chat integration', () => {
     expect(toolsBlock).toContain('chat-attachment-action-button code');
     expect(toolsBlock).toContain('chat-attachment-action-button file');
     expect(toolsBlock).toContain('chat-attachment-action-button photo');
-    expect(toolsBlock).toContain('codicon-cloud-upload');
-    expect(toolsBlock).toContain('codicon-device-camera');
+    expect(toolsBlock).toContain('codicon-attach');
+    expect(toolsBlock).toContain('codicon-file-media');
+    expect(toolsBlock).not.toContain('codicon-cloud-upload');
+    expect(toolsBlock).not.toContain('codicon-device-camera');
     expect(toolsBlock).not.toContain('codicon-new-file');
-    expect(toolsBlock).not.toContain('codicon-file-media');
 
     expect(stylesCss).toMatch(
       /\.chat-attach-button \{[\s\S]*color: color-mix\(in srgb, #4db6ac 78%, var\(--text\)\);[\s\S]*\}/,

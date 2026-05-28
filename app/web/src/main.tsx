@@ -15060,7 +15060,7 @@ function App() {
                         aria-label="Attach file"
                         role="menuitem"
                       >
-                        <span className="codicon codicon-cloud-upload" aria-hidden="true" />
+                        <span className="codicon codicon-attach" aria-hidden="true" />
                         <span className="chat-attachment-action-label">File</span>
                       </button>
                       <button
@@ -15079,7 +15079,7 @@ function App() {
                         aria-label="Attach photo"
                         role="menuitem"
                       >
-                        <span className="codicon codicon-device-camera" aria-hidden="true" />
+                        <span className="codicon codicon-file-media" aria-hidden="true" />
                         <span className="chat-attachment-action-label">Photo</span>
                       </button>
                     </div>

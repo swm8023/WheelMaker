@@ -7200,6 +7200,12 @@ body,
   background: transparent;
 }
 
+@media (min-width: 901px) {
+  .chat-composer {
+    padding-bottom: 8px;
+  }
+}
+
 .chat-composer-frame {
   position: relative;
   display: flex;
