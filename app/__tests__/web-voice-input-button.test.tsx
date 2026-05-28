@@ -281,7 +281,7 @@ describe('VoiceInputButton', () => {
     expect(onModeChange).toHaveBeenCalledWith('locked');
   });
 
-  test('keeps upward cancel when hold start settles after the gesture ends', async () => {
+  test('downgrades interrupted upward cancel to locked recording when hold start settles', async () => {
     const start = deferred();
     const onStart = jest.fn(() => start.promise);
     const onFinish = jest.fn();
@@ -323,8 +323,8 @@ describe('VoiceInputButton', () => {
     });
 
     expect(onFinish).not.toHaveBeenCalled();
-    expect(onCancel).toHaveBeenCalledTimes(1);
-    expect(onModeChange).not.toHaveBeenCalledWith('locked');
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onModeChange).toHaveBeenCalledWith('locked');
     expect(onCancelIntentChange).toHaveBeenLastCalledWith(false);
   });
 

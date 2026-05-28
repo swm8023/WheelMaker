@@ -183,7 +183,7 @@ export function VoiceInputButton({
     const action = resolvePointerAction(pointer, source);
     setNextCancelIntent(false);
     if (!pointer.startSettled) {
-      pointer.pendingAction = action === 'finish' ? 'lock' : action;
+      pointer.pendingAction = 'lock';
       return;
     }
     pointerRef.current = null;
