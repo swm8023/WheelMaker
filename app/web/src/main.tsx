@@ -195,6 +195,8 @@ import {
   type DiffRenderLine,
 } from './services/shikiRenderer';
 import {startMicrophonePCMStream, type MicrophonePCMStream} from './features/speech/audioCapture';
+import {createVoiceInputBuffer, DEFAULT_VOICE_INPUT_BUFFER_MAX_MS, type VoiceInputBuffer} from './features/speech/voiceInputBuffer';
+import {createVoiceInputSendQueue, type VoiceInputSendQueue} from './features/speech/voiceInputSendQueue';
 import {createVoiceInputSession, type VoiceInputSession} from './features/speech/useVoiceInputController';
 import {isSpeechErrorEvent, isSpeechTranscriptEvent} from './features/speech/registrySpeechClient';
 import {DEFAULT_SPEECH_SETTINGS, SPEECH_MODEL_OPTIONS, normalizeSpeechSettings} from './features/speech/speechSettings';
@@ -394,6 +396,7 @@ type ChatComposerDraft = {
   text: string;
   attachments: ChatAttachment[];
 };
+type VoiceRecordingStatus = 'buffering' | 'recording' | 'finishing';
 type PendingChatPrompt = {
   sessionId: string;
   blocks: RegistryChatContentBlock[];
@@ -576,6 +579,7 @@ const CODE_LINE_HEIGHT_OPTIONS = [1.35, 1.45, 1.5, 1.6, 1.7] as const;
 const CODE_TAB_SIZE_OPTIONS = [2, 4, 8] as const;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
+const VOICE_INPUT_FINISH_WAIT_MS = 3000;
 const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
 const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
@@ -3392,6 +3396,7 @@ function App() {
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const chatAttachmentUploadPending = chatAttachments.some(isChatAttachmentUploadPending);
   const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceRecordingStatus, setVoiceRecordingStatus] = useState<VoiceRecordingStatus>('recording');
   const [voiceCancelIntent, setVoiceCancelIntent] = useState(false);
   const [voiceElapsedMs, setVoiceElapsedMs] = useState(0);
   const [voiceLevel, setVoiceLevel] = useState(0);
@@ -3410,11 +3415,17 @@ function App() {
   const currentChatDraftKeyRef = useRef('');
   const chatAttachmentIdRef = useRef(0);
   const chatAttachmentCancelIdsRef = useRef<Set<string>>(new Set());
+  const connectedRef = useRef(false);
   const voiceRecordingRef = useRef(false);
   const voiceStreamIdRef = useRef('');
   const voiceSeqRef = useRef(0);
   const voiceSessionRef = useRef<VoiceInputSession | null>(null);
   const voiceCaptureRef = useRef<MicrophonePCMStream | null>(null);
+  const voiceInputBufferRef = useRef<VoiceInputBuffer | null>(null);
+  const voiceSendQueueRef = useRef<VoiceInputSendQueue | null>(null);
+  const voiceStartGenerationRef = useRef(0);
+  const voicePendingFinishRef = useRef(false);
+  const voiceRuntimeKeyRef = useRef('');
   const voiceStartedAtRef = useRef(0);
   const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);
   const [chatFileMentionMenuOpen, setChatFileMentionMenuOpen] = useState(false);
@@ -4247,6 +4258,10 @@ function App() {
   useEffect(() => {
     chatAttachmentsRef.current = chatAttachments;
   }, [chatAttachments]);
+
+  useEffect(() => {
+    connectedRef.current = connected;
+  }, [connected]);
 
   useEffect(() => {
     voiceRecordingRef.current = voiceRecording;
@@ -8448,11 +8463,19 @@ function App() {
   const resetVoiceRecordingUi = () => {
     voiceRecordingRef.current = false;
     setVoiceRecording(false);
+    setVoiceRecordingStatus('recording');
     setVoiceCancelIntent(false);
     setVoiceLevel(0);
   };
 
   const clearVoiceInputState = () => {
+    voiceStartGenerationRef.current += 1;
+    voiceInputBufferRef.current?.clear();
+    voiceInputBufferRef.current = null;
+    voiceSendQueueRef.current?.cancel();
+    voiceSendQueueRef.current = null;
+    voicePendingFinishRef.current = false;
+    voiceRuntimeKeyRef.current = '';
     resetVoiceRecordingUi();
     voiceStreamIdRef.current = '';
     voiceSeqRef.current = 0;
@@ -8477,7 +8500,43 @@ function App() {
     logVoiceInputState(entry.level, `button_${entry.event}`, entry.details);
   };
 
-  const cancelVoiceInput = async (reason: RegistrySpeechCancelPayload['reason'] = 'user') => {
+  const voiceInputReconnectAvailable = () => (
+    !!addressRef.current.trim() && !!projectIdRef.current
+  );
+
+  const currentVoiceInputRuntimeKey = () => (
+    encodeChatSessionKey(selectedChatKeyRef.current) || projectIdRef.current
+  );
+
+  const isVoiceInputContextCurrent = () => {
+    const expected = voiceRuntimeKeyRef.current;
+    return !expected || expected === currentVoiceInputRuntimeKey();
+  };
+
+  const isVoiceGenerationActive = (generation: number) => (
+    voiceStartGenerationRef.current === generation &&
+    (voiceRecordingRef.current || !!voiceStreamIdRef.current) &&
+    isVoiceInputContextCurrent()
+  );
+
+  const waitForVoiceInputRetry = (ms: number) => new Promise<void>(resolve => {
+    window.setTimeout(resolve, ms);
+  });
+
+  const isVoiceInputStartRetryableError = (err: unknown) => {
+    const message = formatVoiceInputDiagnosticError(err).toLowerCase();
+    return message.includes('websocket is not connected') ||
+      message.includes('connect timeout') ||
+      message.includes('closed during connect') ||
+      message.includes('connection closed before response') ||
+      message.includes('request timed out') ||
+      message.includes('session is not ready');
+  };
+
+  const cancelVoiceInput = async (
+    reason: RegistrySpeechCancelPayload['reason'] = 'user',
+    options: {restoreComposer?: boolean; message?: string} = {},
+  ) => {
     const streamId = voiceStreamIdRef.current;
     const session = voiceSessionRef.current;
     logVoiceInputState('debug', 'cancel_requested', {
@@ -8486,11 +8545,14 @@ function App() {
       streamIdPresent: !!streamId,
     });
     stopVoiceCapture();
-    if (session) {
+    if (session && options.restoreComposer !== false) {
       updateChatComposerText(session.cancel());
       window.setTimeout(resizeChatComposerTextarea, 0);
     }
     clearVoiceInputState();
+    if (options.message) {
+      setError(options.message);
+    }
     if (!streamId) {
       logVoiceInputState('warn', 'cancel_without_stream', {reason});
       return;
@@ -8517,25 +8579,199 @@ function App() {
     voiceRecordingRef.current || !!voiceStreamIdRef.current
   );
 
+  const handleVoiceChunkSendFailure = (generation: number, err: unknown) => {
+    if (!isVoiceGenerationActive(generation)) {
+      return;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    logVoiceInputDiagnostic('error', 'chunk_send_failed', {
+      connected: connectedRef.current,
+      hasStream: !!voiceStreamIdRef.current,
+      seq: voiceSeqRef.current,
+      error: formatVoiceInputDiagnosticError(err),
+      queuedBytes: voiceSendQueueRef.current?.stats().queuedBytes ?? 0,
+      bufferedDurationMs: voiceInputBufferRef.current?.stats().durationMs ?? 0,
+    });
+    void cancelVoiceInput('error', {
+      message,
+    });
+  };
+
+  const flushVoiceInputBufferToQueue = (generation: number) => {
+    const queue = voiceSendQueueRef.current;
+    const buffer = voiceInputBufferRef.current;
+    if (!queue || !buffer || !isVoiceGenerationActive(generation)) {
+      return;
+    }
+    const chunks = buffer.drain();
+    for (const bytes of chunks) {
+      queue.enqueue(bytes).catch(err => handleVoiceChunkSendFailure(generation, err));
+    }
+  };
+
+  const startVoiceRegistryStream = async (
+    generation: number,
+    settings: ReturnType<typeof normalizeSpeechSettings>,
+    apiKey: string,
+  ) => {
+    if (voiceStreamIdRef.current || !isVoiceGenerationActive(generation)) {
+      return true;
+    }
+    const response = await service.startSpeech({
+      provider: 'volcengine',
+      model: settings.model,
+      apiKey,
+      audio: {
+        format: 'pcm',
+        codec: 'raw',
+        rate: 16000,
+        bits: 16,
+        channel: 1,
+      },
+    });
+    if (!response.streamId) {
+      throw new Error('speech.start returned no streamId');
+    }
+    if (!isVoiceGenerationActive(generation)) {
+      await service.cancelSpeech({streamId: response.streamId, reason: 'gesture'});
+      return false;
+    }
+    voiceStreamIdRef.current = response.streamId;
+    voiceSendQueueRef.current = createVoiceInputSendQueue({
+      streamId: response.streamId,
+      sendChunk: async payload => {
+        voiceSeqRef.current = payload.seq;
+        await service.sendSpeechChunk(payload);
+      },
+    });
+    setVoiceRecordingStatus(voicePendingFinishRef.current ? 'finishing' : 'recording');
+    flushVoiceInputBufferToQueue(generation);
+    return true;
+  };
+
+  const runVoiceStartLoop = async (
+    generation: number,
+    settings: ReturnType<typeof normalizeSpeechSettings>,
+    apiKey: string,
+  ) => {
+    while (isVoiceGenerationActive(generation) && !voiceStreamIdRef.current) {
+      if (!connectedRef.current) {
+        if (!voiceInputReconnectAvailable()) {
+          logVoiceInputState('warn', 'start_buffering_without_reconnect_context');
+          await cancelVoiceInput('error', {
+            message: 'Connect Registry before using voice input.',
+          });
+          return;
+        }
+        try {
+          await connect({silentReconnect: true});
+        } catch {
+          await waitForVoiceInputRetry(RECONNECT_RETRY_DELAY_MS);
+          continue;
+        }
+      }
+      try {
+        const started = await startVoiceRegistryStream(generation, settings, apiKey);
+        if (started) {
+          return;
+        }
+      } catch (err) {
+        if (isVoiceInputStartRetryableError(err)) {
+          await waitForVoiceInputRetry(RECONNECT_RETRY_DELAY_MS);
+          continue;
+        }
+        if (!isVoiceGenerationActive(generation)) {
+          return;
+        }
+        logVoiceInputDiagnostic('error', 'start_failed', {
+          connected: connectedRef.current,
+          model: settings.model,
+          error: formatVoiceInputDiagnosticError(err),
+        });
+        await cancelVoiceInput('error', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
+    }
+  };
+
+  const waitForVoiceStreamReady = async (generation: number, timeoutMs: number) => {
+    const deadline = Date.now() + timeoutMs;
+    while (isVoiceGenerationActive(generation)) {
+      if (voiceStreamIdRef.current && voiceSendQueueRef.current) {
+        return true;
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        return false;
+      }
+      await waitForVoiceInputRetry(Math.min(100, remaining));
+    }
+    return false;
+  };
+
+  const handleVoicePCMChunk = (generation: number, chunk: {bytes: Uint8Array<ArrayBufferLike>}) => {
+    if (!isVoiceGenerationActive(generation) || voicePendingFinishRef.current) {
+      return;
+    }
+    if (voiceSendQueueRef.current) {
+      voiceSendQueueRef.current.enqueue(chunk.bytes).catch(err => handleVoiceChunkSendFailure(generation, err));
+      return;
+    }
+    const result = voiceInputBufferRef.current?.append(chunk.bytes);
+    if (result?.overflow) {
+      logVoiceInputDiagnostic('warn', 'buffer_overflow', {
+        connected: connectedRef.current,
+        byteCount: result.stats.byteCount,
+        bufferedDurationMs: result.stats.durationMs,
+        maxBytes: result.stats.maxBytes,
+      });
+      void cancelVoiceInput('error', {
+        message: 'Registry connection is too slow for voice input. Try again.',
+      });
+    }
+  };
+
   const finishVoiceInput = async () => {
+    const generation = voiceStartGenerationRef.current;
     const streamId = voiceStreamIdRef.current;
     logVoiceInputState('debug', 'finish_requested', {streamIdPresent: !!streamId});
     stopVoiceCapture();
-    resetVoiceRecordingUi();
+    voicePendingFinishRef.current = true;
+    setVoiceRecordingStatus('finishing');
     if (!streamId) {
-      clearVoiceInputState();
-      logVoiceInputState('warn', 'finish_without_stream');
-      return;
+      const ready = await waitForVoiceStreamReady(generation, VOICE_INPUT_FINISH_WAIT_MS);
+      if (!ready) {
+        logVoiceInputState('warn', 'finish_without_stream');
+        await cancelVoiceInput('error', {
+          message: 'Registry reconnect timed out before voice input could finish.',
+        });
+        return;
+      }
     }
     try {
-      await service.finishSpeech({streamId});
+      const queue = voiceSendQueueRef.current;
+      if (queue) {
+        await queue.drain();
+      }
+      const activeStreamId = voiceStreamIdRef.current;
+      if (!activeStreamId || !isVoiceGenerationActive(generation)) {
+        return;
+      }
+      await service.finishSpeech({streamId: activeStreamId});
+      resetVoiceRecordingUi();
       logVoiceInputState('debug', 'finish_completed');
     } catch (err) {
-      clearVoiceInputState();
+      if (!isVoiceGenerationActive(generation)) {
+        return;
+      }
       logVoiceInputState('error', 'finish_failed', {
         error: formatVoiceInputDiagnosticError(err),
       });
-      setError(err instanceof Error ? err.message : String(err));
+      await cancelVoiceInput('error', {
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   };
 
@@ -8550,7 +8786,7 @@ function App() {
       logVoiceInputState('warn', 'start_ignored_disabled');
       return;
     }
-    if (!connected) {
+    if (!connected && !voiceInputReconnectAvailable()) {
       logVoiceInputState('warn', 'start_ignored_disconnected');
       setError('Connect Registry before using voice input.');
       return;
@@ -8571,11 +8807,25 @@ function App() {
       insertStart,
       insertEnd,
     });
+    if (!connected) {
+      logVoiceInputState('warn', 'start_buffering_disconnected', {
+        reconnectAvailable: voiceInputReconnectAvailable(),
+      });
+    }
+    const generation = voiceStartGenerationRef.current + 1;
+    voiceStartGenerationRef.current = generation;
     voiceSessionRef.current = createVoiceInputSession(baseText, insertStart, insertEnd);
+    voiceInputBufferRef.current = createVoiceInputBuffer({
+      maxDurationMs: DEFAULT_VOICE_INPUT_BUFFER_MAX_MS,
+    });
+    voiceSendQueueRef.current = null;
+    voicePendingFinishRef.current = false;
+    voiceRuntimeKeyRef.current = currentVoiceInputRuntimeKey();
     voiceStartedAtRef.current = Date.now();
     voiceSeqRef.current = 0;
     voiceRecordingRef.current = true;
     setVoiceRecording(true);
+    setVoiceRecordingStatus('buffering');
     setVoiceCancelIntent(false);
     setVoiceElapsedMs(0);
     setVoiceLevel(0);
@@ -8586,58 +8836,18 @@ function App() {
     setChatConfigMenuOptionId('');
     setChatConfigOverflowOpen(false);
 
+    void runVoiceStartLoop(generation, settings, apiKey);
+
     try {
-      const response = await service.startSpeech({
-        provider: 'volcengine',
-        model: settings.model,
-        apiKey,
-        audio: {
-          format: 'pcm',
-          codec: 'raw',
-          rate: 16000,
-          bits: 16,
-          channel: 1,
-        },
-      });
-      logVoiceInputState('debug', 'start_response', {hasStreamId: !!response.streamId});
-      if (!response.streamId) {
-        throw new Error('speech.start returned no streamId');
-      }
-      if (!voiceRecordingRef.current) {
-        logVoiceInputState('warn', 'start_response_after_cancel', {streamIdPresent: true});
-        await service.cancelSpeech({streamId: response.streamId, reason: 'gesture'});
-        return;
-      }
-      voiceStreamIdRef.current = response.streamId;
       logVoiceInputState('debug', 'microphone_start_requested');
       const capture = await startMicrophonePCMStream({
         targetRate: 16000,
         chunkBytes: 6400,
         onLevel: level => setVoiceLevel(level),
-        onChunk: chunk => {
-          const streamId = voiceStreamIdRef.current;
-          if (!voiceRecordingRef.current || !streamId) {
-            return;
-          }
-          voiceSeqRef.current += 1;
-          service.sendSpeechChunk({
-            streamId,
-            seq: voiceSeqRef.current,
-            pcm: chunk.base64,
-          }).catch(err => {
-            logVoiceInputDiagnostic('error', 'chunk_send_failed', {
-              connected,
-              hasStream: !!voiceStreamIdRef.current,
-              seq: voiceSeqRef.current,
-              error: formatVoiceInputDiagnosticError(err),
-            });
-            setError(err instanceof Error ? err.message : String(err));
-            cancelVoiceInput('error').catch(() => undefined);
-          });
-        },
+        onChunk: chunk => handleVoicePCMChunk(generation, chunk),
       });
       logVoiceInputState('debug', 'microphone_started');
-      if (!voiceRecordingRef.current) {
+      if (!isVoiceGenerationActive(generation)) {
         logVoiceInputState('warn', 'microphone_started_after_cancel');
         capture.stop();
         return;
@@ -8654,6 +8864,16 @@ function App() {
       setError(err instanceof Error ? err.message : String(err));
     }
   };
+
+  useEffect(() => {
+    if (!voiceRecordingRef.current && !voiceStreamIdRef.current) {
+      return;
+    }
+    if (isVoiceInputContextCurrent()) {
+      return;
+    }
+    void cancelVoiceInput('gesture', {restoreComposer: false});
+  }, [selectedChatKey, projectId]);
 
   const buildChatAttachmentsFromBlocks = (blocks: RegistryChatContentBlock[]): ChatAttachment[] => {
     const attachments: ChatAttachment[] = [];
@@ -11248,6 +11468,10 @@ function App() {
         if (!payload || payload.streamId !== voiceStreamIdRef.current || !voiceSessionRef.current) {
           return;
         }
+        if (!isVoiceInputContextCurrent()) {
+          void cancelVoiceInput('gesture', {restoreComposer: false});
+          return;
+        }
         const nextText = voiceSessionRef.current.applyTranscript(payload.text);
         updateChatComposerText(nextText);
         window.setTimeout(resizeChatComposerTextarea, 0);
@@ -11391,7 +11615,7 @@ function App() {
       }
     });
     const unsubscribeClose = service.onClose(() => {
-      if (voiceRecordingRef.current || voiceStreamIdRef.current) {
+      if (voiceStreamIdRef.current) {
         void cancelVoiceInput('disconnect');
       }
       setConnected(false);
@@ -15155,6 +15379,7 @@ function App() {
               ) : null}
               {voiceRecording ? (
                 <VoiceRecordingBar
+                  status={voiceRecordingStatus}
                   cancelIntent={voiceCancelIntent}
                   elapsedMs={voiceElapsedMs}
                   level={voiceLevel}

@@ -4,6 +4,7 @@ export type VoiceRecordingBarProps = {
   cancelIntent: boolean;
   elapsedMs: number;
   level?: number;
+  status?: 'buffering' | 'recording' | 'finishing';
 };
 
 function formatElapsed(elapsedMs: number): string {
@@ -17,6 +18,7 @@ export function VoiceRecordingBar({
   cancelIntent,
   elapsedMs,
   level = 0.35,
+  status = 'recording',
 }: VoiceRecordingBarProps) {
   const bars = [0.42, 0.72, 1, 0.62, 0.88].map((scale, index) => (
     <span
@@ -25,6 +27,12 @@ export function VoiceRecordingBar({
     />
   ));
 
+  const statusText = status === 'buffering'
+    ? 'Connecting...'
+    : status === 'finishing'
+      ? 'Finishing...'
+      : 'Recording';
+
   return (
     <div className={`voice-recording-bar${cancelIntent ? ' cancel-intent' : ''}`} role="status" aria-live="polite">
       <span className="voice-recording-dot" aria-hidden="true" />
@@ -32,7 +40,7 @@ export function VoiceRecordingBar({
         {bars}
       </span>
       <span className="voice-recording-text">
-        {cancelIntent ? 'Release to cancel' : 'Recording'}
+        {cancelIntent ? 'Release to cancel' : statusText}
       </span>
       <span className="voice-recording-time">{formatElapsed(elapsedMs)}</span>
     </div>
