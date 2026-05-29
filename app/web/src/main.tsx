@@ -198,6 +198,12 @@ import {startMicrophonePCMStream, type MicrophonePCMStream} from './features/spe
 import {createVoiceInputBuffer, DEFAULT_VOICE_INPUT_BUFFER_MAX_MS, type VoiceInputBuffer} from './features/speech/voiceInputBuffer';
 import {createVoiceInputSendQueue, type VoiceInputSendQueue} from './features/speech/voiceInputSendQueue';
 import {createVoiceInputSession, type VoiceInputSession} from './features/speech/useVoiceInputController';
+import {
+  VOICE_AUDIO_CHUNK_BYTES,
+  VOICE_LONG_TIMEOUT_MS,
+  VOICE_SHORT_TIMEOUT_MS,
+  type VoiceRecordingStatus,
+} from './features/speech/voiceInputConstants';
 import {isSpeechErrorEvent, isSpeechTranscriptEvent} from './features/speech/registrySpeechClient';
 import {DEFAULT_SPEECH_SETTINGS, SPEECH_MODEL_OPTIONS, normalizeSpeechSettings} from './features/speech/speechSettings';
 import {
@@ -397,7 +403,6 @@ type ChatComposerDraft = {
   text: string;
   attachments: ChatAttachment[];
 };
-type VoiceRecordingStatus = 'buffering' | 'recording' | 'finishing';
 type PendingChatPrompt = {
   sessionId: string;
   blocks: RegistryChatContentBlock[];
@@ -580,8 +585,6 @@ const CODE_LINE_HEIGHT_OPTIONS = [1.35, 1.45, 1.5, 1.6, 1.7] as const;
 const CODE_TAB_SIZE_OPTIONS = [2, 4, 8] as const;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
-const VOICE_INPUT_FINISH_WAIT_MS = 3000;
-const VOICE_INPUT_FINAL_WAIT_MS = 3000;
 const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
 const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
@@ -3434,6 +3437,7 @@ function App() {
   const voiceFinalTimerRef = useRef<number | null>(null);
   const voiceReconnectBufferingRef = useRef(false);
   const voiceCaptureGenerationRef = useRef(0);
+  const voiceRemoteStartRequestedRef = useRef(false);
   const voiceActiveSettingsRef = useRef<ReturnType<typeof normalizeSpeechSettings> | null>(null);
   const voiceActiveApiKeyRef = useRef('');
   const voiceRuntimeKeyRef = useRef('');
@@ -8363,6 +8367,9 @@ function App() {
     if (chatSending) {
       return;
     }
+    if (voiceAwaitingFinalRef.current) {
+      return;
+    }
     const sourceAttachments = options.attachmentsOverride ?? chatAttachments;
     const trimmedText = (options.textOverride ?? chatComposerText).trim();
     if (trimmedText === '/cancel' && sourceAttachments.length === 0 && !options.blocksOverride) {
@@ -8498,6 +8505,7 @@ function App() {
     voicePendingFinishRef.current = false;
     voiceAwaitingFinalRef.current = false;
     voiceReconnectBufferingRef.current = false;
+    voiceRemoteStartRequestedRef.current = false;
     voiceActiveSettingsRef.current = null;
     voiceActiveApiKeyRef.current = '';
     voiceRuntimeKeyRef.current = '';
@@ -8652,6 +8660,7 @@ function App() {
     voiceSendQueueRef.current = null;
     voiceStreamIdRef.current = '';
     voiceSeqRef.current = 0;
+    voiceRemoteStartRequestedRef.current = false;
   };
 
   const completeVoiceInputFinalizing = (generation: number) => {
@@ -8669,7 +8678,7 @@ function App() {
     voiceFinalTimerRef.current = window.setTimeout(() => {
       voiceFinalTimerRef.current = null;
       completeVoiceInputFinalizing(generation);
-    }, VOICE_INPUT_FINAL_WAIT_MS);
+    }, VOICE_LONG_TIMEOUT_MS);
   };
 
   const isVoiceInputActive = () => (
@@ -8781,6 +8790,7 @@ function App() {
       return false;
     }
     voiceStreamIdRef.current = response.streamId;
+    voiceRemoteStartRequestedRef.current = true;
     voiceSendQueueRef.current = createVoiceInputSendQueue({
       streamId: response.streamId,
       sendChunk: async payload => {
@@ -8818,7 +8828,7 @@ function App() {
         try {
           await connect({silentReconnect: true});
         } catch {
-          await waitForVoiceInputRetry(RECONNECT_RETRY_DELAY_MS);
+          await waitForVoiceInputRetry(VOICE_SHORT_TIMEOUT_MS);
           continue;
         }
       }
@@ -8829,7 +8839,7 @@ function App() {
         }
       } catch (err) {
         if (isVoiceInputStartRetryableError(err)) {
-          await waitForVoiceInputRetry(RECONNECT_RETRY_DELAY_MS);
+          await waitForVoiceInputRetry(VOICE_SHORT_TIMEOUT_MS);
           continue;
         }
         if (!isVoiceGenerationActive(generation)) {
@@ -8858,7 +8868,7 @@ function App() {
       if (remaining <= 0) {
         return false;
       }
-      await waitForVoiceInputRetry(Math.min(100, remaining));
+      await waitForVoiceInputRetry(Math.min(VOICE_SHORT_TIMEOUT_MS, remaining));
     }
     return false;
   };
@@ -8890,7 +8900,24 @@ function App() {
 
   const createVoiceMicrophoneCapture = () => startMicrophonePCMStream({
     targetRate: 16000,
-    chunkBytes: 6400,
+    chunkBytes: VOICE_AUDIO_CHUNK_BYTES,
+    onReady: () => {
+      const generation = voiceCaptureGenerationRef.current;
+      if (generation <= 0 || !isVoiceGenerationActive(generation)) {
+        return;
+      }
+      setVoiceRecordingStatus(voiceStreamIdRef.current ? 'recording' : 'buffering');
+      if (voiceRemoteStartRequestedRef.current) {
+        return;
+      }
+      const settings = voiceActiveSettingsRef.current;
+      const apiKey = voiceActiveApiKeyRef.current;
+      if (!settings || !apiKey) {
+        return;
+      }
+      voiceRemoteStartRequestedRef.current = true;
+      void runVoiceStartLoop(generation, settings, apiKey);
+    },
     onLevel: level => {
       if (voiceCaptureGenerationRef.current > 0) {
         setVoiceLevel(level);
@@ -8928,7 +8955,7 @@ function App() {
     voicePendingFinishRef.current = true;
     setVoiceRecordingStatus('finishing');
     if (!streamId) {
-      const ready = await waitForVoiceStreamReady(generation, VOICE_INPUT_FINISH_WAIT_MS);
+      const ready = await waitForVoiceStreamReady(generation, VOICE_LONG_TIMEOUT_MS);
       if (!ready) {
         logVoiceInputState('warn', 'finish_without_stream');
         await cancelVoiceInput('error', {
@@ -8948,7 +8975,13 @@ function App() {
       }
       await service.finishSpeech({streamId: activeStreamId});
       voiceAwaitingFinalRef.current = true;
-      resetVoiceRecordingUi();
+      voiceRecordingRef.current = false;
+      voiceInteractionModeRef.current = null;
+      setVoiceInteractionMode(null);
+      setVoiceRecording(true);
+      setVoiceRecordingStatus('recognizing');
+      setVoiceCancelIntent(false);
+      setVoiceLevel(0);
       scheduleVoiceFinalTimeout(generation);
       logVoiceInputState('debug', 'finish_completed');
     } catch (err) {
@@ -9027,6 +9060,7 @@ function App() {
     voicePendingFinishRef.current = false;
     voiceAwaitingFinalRef.current = false;
     voiceReconnectBufferingRef.current = false;
+    voiceRemoteStartRequestedRef.current = false;
     voiceActiveSettingsRef.current = settings;
     voiceActiveApiKeyRef.current = apiKey;
     voiceRuntimeKeyRef.current = currentVoiceInputRuntimeKey();
@@ -9037,7 +9071,7 @@ function App() {
     voiceRecordingRef.current = true;
     setVoiceInteractionMode(interactionMode);
     setVoiceRecording(true);
-    setVoiceRecordingStatus('buffering');
+    setVoiceRecordingStatus('permission');
     setVoiceCancelIntent(false);
     setVoiceElapsedMs(0);
     setVoiceLevel(0);
@@ -9047,8 +9081,6 @@ function App() {
     setChatFileMentionMenuOpen(false);
     setChatConfigMenuOptionId('');
     setChatConfigOverflowOpen(false);
-
-    void runVoiceStartLoop(generation, settings, apiKey);
 
     try {
       logVoiceInputState('debug', 'microphone_start_requested');
@@ -9063,6 +9095,7 @@ function App() {
         return;
       }
       voiceCaptureRef.current = capture;
+      setVoiceRecordingStatus('starting');
     } catch (err) {
       stopVoiceCapture();
       clearVoiceInputState();
@@ -11688,9 +11721,11 @@ function App() {
           void cancelVoiceInput('gesture', {restoreComposer: false});
           return;
         }
-        const nextText = voiceSessionRef.current.applyTranscript(payload.text);
-        updateChatComposerText(nextText);
-        window.setTimeout(() => resizeChatComposerTextarea({scrollToEnd: true}), 0);
+        if (payload.text !== '') {
+          const nextText = voiceSessionRef.current.applyTranscript(payload.text);
+          updateChatComposerText(nextText);
+          window.setTimeout(() => resizeChatComposerTextarea({scrollToEnd: true}), 0);
+        }
         if (payload.final) {
           stopVoiceCapture();
           completeVoiceInputFinalizing(voiceStartGenerationRef.current);
@@ -15562,7 +15597,7 @@ function App() {
                       recording={voiceRecording}
                       recordingMode={voiceInteractionMode}
                       hasSendableContent={chatComposerHasSendableContent}
-                      disabled={chatAttachmentUploadPending}
+                      disabled={chatAttachmentUploadPending || voiceRecordingStatus === 'recognizing'}
                       readOnly={chatSending}
                       onSend={() => sendChatMessage().catch(() => undefined)}
                       onStart={startVoiceInput}

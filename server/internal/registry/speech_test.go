@@ -267,6 +267,91 @@ func TestSpeechFinishReleasesActiveStreamImmediately(t *testing.T) {
 	}
 }
 
+func TestSpeechStartCancelsClosingStreamForConnection(t *testing.T) {
+	provider := newFakeSpeechProvider()
+	s := New(Config{})
+	s.speech = newSpeechServiceWithOptions(provider, speechServiceOptions{
+		idleTimeout:         time.Second,
+		startTimeout:        time.Second,
+		finishTimeout:       time.Second,
+		closingRouteTimeout: time.Second,
+	})
+	ts := httptestNewRegistryServer(t, s.Handler())
+
+	client := dialWS(t, "http://"+ts+"/ws")
+	defer client.Close()
+	connectRegistryClient(t, client)
+
+	firstStreamID := startFakeSpeechStreamWithRequestID(t, client, 2)
+	firstStream := provider.stream
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 3,
+		Type:      "request",
+		Method:    "speech.finish",
+		Payload: map[string]any{
+			"streamId": firstStreamID,
+		},
+	})
+	_ = mustReadEnvelope(t, client)
+
+	secondStreamID := startFakeSpeechStreamWithRequestID(t, client, 4)
+	if secondStreamID == firstStreamID {
+		t.Fatalf("new streamID=%q, want a new stream", secondStreamID)
+	}
+	select {
+	case <-firstStream.cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("new speech.start did not cancel closing stream")
+	}
+}
+
+func TestSpeechCancelCancelsClosingStream(t *testing.T) {
+	provider := newFakeSpeechProvider()
+	s := New(Config{})
+	s.speech = newSpeechServiceWithOptions(provider, speechServiceOptions{
+		idleTimeout:         time.Second,
+		startTimeout:        time.Second,
+		finishTimeout:       time.Second,
+		closingRouteTimeout: time.Second,
+	})
+	ts := httptestNewRegistryServer(t, s.Handler())
+
+	client := dialWS(t, "http://"+ts+"/ws")
+	defer client.Close()
+	connectRegistryClient(t, client)
+
+	streamID := startFakeSpeechStreamWithRequestID(t, client, 2)
+	stream := provider.stream
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 3,
+		Type:      "request",
+		Method:    "speech.finish",
+		Payload: map[string]any{
+			"streamId": streamID,
+		},
+	})
+	_ = mustReadEnvelope(t, client)
+
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 4,
+		Type:      "request",
+		Method:    "speech.cancel",
+		Payload: map[string]any{
+			"streamId": streamID,
+			"reason":   "user",
+		},
+	})
+	cancelResp := mustReadEnvelope(t, client)
+	if cancelResp.Type != "response" || cancelResp.Method != "speech.cancel" {
+		t.Fatalf("speech.cancel response=%#v", cancelResp)
+	}
+	select {
+	case <-stream.cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("speech.cancel did not cancel closing stream")
+	}
+}
+
 func TestSpeechFinishKeepsClosingRouteForFinalTranscript(t *testing.T) {
 	provider := newFakeSpeechProvider()
 	s := New(Config{})

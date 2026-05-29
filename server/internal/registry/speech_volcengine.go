@@ -179,7 +179,7 @@ func (s *volcengineSpeechStream) readLoop(events speechEventSink) {
 			}
 			return
 		}
-		if parsed.HasTranscript {
+		if parsed.HasTranscript || parsed.Final {
 			events.Transcript(parsed.Text, parsed.Final)
 		}
 		if parsed.Final {
@@ -204,7 +204,8 @@ func buildVolcengineFullClientRequest(audio speechAudioConfig) ([]byte, error) {
 			"model_name":       volcengineSpeechModelName,
 			"enable_itn":       true,
 			"enable_punc":      true,
-			"show_utterances":  true,
+			"enable_ddc":       true,
+			"show_utterances":  false,
 			"result_type":      "full",
 			"enable_nonstream": true,
 		},

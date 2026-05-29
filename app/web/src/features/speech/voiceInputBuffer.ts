@@ -1,5 +1,10 @@
-export const VOICE_INPUT_PCM_BYTES_PER_SECOND = 16000 * 2 * 1;
-export const DEFAULT_VOICE_INPUT_BUFFER_MAX_MS = 5000;
+import {
+  VOICE_LONG_TIMEOUT_MS,
+  VOICE_PCM_BYTES_PER_SECOND,
+} from './voiceInputConstants';
+
+export const VOICE_INPUT_PCM_BYTES_PER_SECOND = VOICE_PCM_BYTES_PER_SECOND;
+export const DEFAULT_VOICE_INPUT_BUFFER_MAX_MS = VOICE_LONG_TIMEOUT_MS;
 
 export type VoiceInputBufferStats = {
   byteCount: number;
@@ -27,17 +32,31 @@ export type VoiceInputBuffer = {
   stats: () => VoiceInputBufferStats;
 };
 
-function resolveMaxBytes(maxDurationMs: number, bytesPerSecond: number): number {
-  return Math.max(1, Math.floor((Math.max(1, maxDurationMs) * Math.max(1, bytesPerSecond)) / 1000));
+function resolveMaxBytes(
+  maxDurationMs: number,
+  bytesPerSecond: number,
+): number {
+  return Math.max(
+    1,
+    Math.floor(
+      (Math.max(1, maxDurationMs) * Math.max(1, bytesPerSecond)) / 1000,
+    ),
+  );
 }
 
-function cloneBytes(bytes: Uint8Array<ArrayBufferLike>): Uint8Array<ArrayBufferLike> {
+function cloneBytes(
+  bytes: Uint8Array<ArrayBufferLike>,
+): Uint8Array<ArrayBufferLike> {
   return bytes.slice();
 }
 
-export function createVoiceInputBuffer(options: VoiceInputBufferOptions = {}): VoiceInputBuffer {
-  const bytesPerSecond = options.bytesPerSecond ?? VOICE_INPUT_PCM_BYTES_PER_SECOND;
-  const maxDurationMs = options.maxDurationMs ?? DEFAULT_VOICE_INPUT_BUFFER_MAX_MS;
+export function createVoiceInputBuffer(
+  options: VoiceInputBufferOptions = {},
+): VoiceInputBuffer {
+  const bytesPerSecond =
+    options.bytesPerSecond ?? VOICE_INPUT_PCM_BYTES_PER_SECOND;
+  const maxDurationMs =
+    options.maxDurationMs ?? DEFAULT_VOICE_INPUT_BUFFER_MAX_MS;
   const maxBytes = resolveMaxBytes(maxDurationMs, bytesPerSecond);
   let chunks: Uint8Array<ArrayBufferLike>[] = [];
   let byteCount = 0;

@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	defaultSpeechIdleTimeout         = 10 * time.Second
+	defaultSpeechIdleTimeout         = 15 * time.Second
 	defaultSpeechStartTimeout        = 15 * time.Second
-	defaultSpeechFinishTimeout       = 5 * time.Second
-	defaultSpeechClosingRouteTimeout = 3 * time.Second
+	defaultSpeechFinishTimeout       = 15 * time.Second
+	defaultSpeechClosingRouteTimeout = 15 * time.Second
 )
 
 type speechProviderStartRequest struct {
@@ -153,15 +153,27 @@ func (s *speechService) handleStart(peer *peerConn, state *connectionState, in e
 		peer:         peer,
 		cancel:       cancel,
 	}
-	var old *activeSpeechStream
+	var oldStreams []*activeSpeechStream
 	s.mu.Lock()
 	if existing := s.connActive[state.id]; existing != "" {
-		old = s.detachStreamLocked(state.id, existing)
+		if old := s.detachStreamLocked(state.id, existing); old != nil {
+			oldStreams = append(oldStreams, old)
+		}
+	}
+	for closingStreamID, closing := range s.closingStreams {
+		if closing.connectionID != state.id {
+			continue
+		}
+		if old := s.detachClosingStreamLocked(closingStreamID); old != nil {
+			oldStreams = append(oldStreams, old)
+		}
 	}
 	s.streams[streamID] = active
 	s.connActive[state.id] = streamID
 	s.mu.Unlock()
-	cancelSpeechProviderStream(old)
+	for _, old := range oldStreams {
+		cancelSpeechProviderStream(old)
+	}
 
 	stream, err := s.startProvider(ctx, speechProviderStartRequest{
 		Provider: payload.Provider,
@@ -248,12 +260,11 @@ func (s *speechService) handleCancel(peer *peerConn, state *connectionState, in 
 		_ = writeSpeechError(peer, in.RequestID, in.Method, codeInvalidArgument, "invalid speech.cancel payload", nil)
 		return
 	}
-	stream, ok := s.lookupOwnedStream(state.id, payload.StreamID)
-	if !ok {
+	stream := s.detachOwnedStream(state.id, payload.StreamID)
+	if stream == nil {
 		_ = writeSpeechError(peer, in.RequestID, in.Method, codeNotFound, "speech stream not found", map[string]any{"streamId": payload.StreamID})
 		return
 	}
-	stream = s.detachStream(state.id, payload.StreamID)
 	cancelSpeechProviderStream(stream)
 	_ = writeSpeechResponse(peer, in.RequestID, in.Method, speechOKPayload{OK: true, StreamID: payload.StreamID})
 }
@@ -412,6 +423,19 @@ func (s *speechService) detachStream(connectionID string, streamID string) *acti
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.detachStreamLocked(connectionID, streamID)
+}
+
+func (s *speechService) detachOwnedStream(connectionID string, streamID string) *activeSpeechStream {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if stream := s.detachStreamLocked(connectionID, streamID); stream != nil {
+		return stream
+	}
+	stream := s.closingStreams[streamID]
+	if stream == nil || stream.connectionID != connectionID {
+		return nil
+	}
+	return s.detachClosingStreamLocked(streamID)
 }
 
 func (s *speechService) detachClosingStream(streamID string) *activeSpeechStream {

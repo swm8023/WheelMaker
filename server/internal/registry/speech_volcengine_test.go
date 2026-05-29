@@ -3,10 +3,13 @@ package registry
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"io"
 	"testing"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestVolcengineFullClientRequestFrame(t *testing.T) {
@@ -40,7 +43,8 @@ func TestVolcengineFullClientRequestFrame(t *testing.T) {
 	if request["model_name"] != "bigmodel" ||
 		request["enable_itn"] != true ||
 		request["enable_punc"] != true ||
-		request["show_utterances"] != true ||
+		request["enable_ddc"] != true ||
+		request["show_utterances"] != false ||
 		request["result_type"] != "full" ||
 		request["enable_nonstream"] != true {
 		t.Fatalf("request payload=%#v", request)
@@ -139,6 +143,30 @@ func TestParseVolcengineFinalAndErrorFrames(t *testing.T) {
 	}
 }
 
+func TestVolcengineReadLoopEmitsFinalEmptyTranscript(t *testing.T) {
+	finalBody := gzipJSON(t, map[string]any{})
+	finalFrame := append([]byte{0x11, 0x93, 0x11, 0x00}, int32Bytes(-3)...)
+	finalFrame = append(finalFrame, uint32Bytes(uint32(len(finalBody)))...)
+	finalFrame = append(finalFrame, finalBody...)
+	events := &recordingSpeechEvents{done: make(chan struct{})}
+	stream := &volcengineSpeechStream{
+		ctx:    context.Background(),
+		cancel: func() {},
+		conn: &scriptedVolcengineConn{
+			reads: []scriptedVolcengineRead{{messageType: websocket.BinaryMessage, payload: finalFrame}},
+		},
+	}
+
+	stream.readLoop(events)
+
+	if len(events.transcripts) != 1 {
+		t.Fatalf("transcript count=%d, want 1", len(events.transcripts))
+	}
+	if events.transcripts[0].text != "" || !events.transcripts[0].final {
+		t.Fatalf("transcript=%#v, want final empty", events.transcripts[0])
+	}
+}
+
 func gzipJSON(t *testing.T, value any) []byte {
 	t.Helper()
 	raw, err := json.Marshal(value)
@@ -181,3 +209,51 @@ func uint32Bytes(value uint32) []byte {
 	binary.BigEndian.PutUint32(out[:], value)
 	return out[:]
 }
+
+type scriptedVolcengineRead struct {
+	messageType int
+	payload     []byte
+	err         error
+}
+
+type scriptedVolcengineConn struct {
+	reads []scriptedVolcengineRead
+	index int
+}
+
+func (c *scriptedVolcengineConn) WriteMessage(_ int, _ []byte) error {
+	return nil
+}
+
+func (c *scriptedVolcengineConn) ReadMessage() (int, []byte, error) {
+	if c.index >= len(c.reads) {
+		return 0, nil, io.EOF
+	}
+	next := c.reads[c.index]
+	c.index++
+	return next.messageType, next.payload, next.err
+}
+
+func (c *scriptedVolcengineConn) Close() error {
+	return nil
+}
+
+type recordingSpeechEvents struct {
+	transcripts []struct {
+		text  string
+		final bool
+	}
+	done chan struct{}
+}
+
+func (e *recordingSpeechEvents) Transcript(text string, final bool) {
+	e.transcripts = append(e.transcripts, struct {
+		text  string
+		final bool
+	}{text: text, final: final})
+	if final {
+		close(e.done)
+	}
+}
+
+func (e *recordingSpeechEvents) Error(_ string, _ string, _ bool) {}

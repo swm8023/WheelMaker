@@ -1,10 +1,11 @@
 import React from 'react';
+import type { VoiceRecordingStatus } from './voiceInputConstants';
 
 export type VoiceRecordingBarProps = {
   cancelIntent: boolean;
   elapsedMs: number;
   level?: number;
-  status?: 'buffering' | 'recording' | 'finishing';
+  status?: VoiceRecordingStatus;
 };
 
 function formatElapsed(elapsedMs: number): string {
@@ -23,18 +24,35 @@ export function VoiceRecordingBar({
   const bars = [0.42, 0.72, 1, 0.62, 0.88].map((scale, index) => (
     <span
       key={index}
-      style={{'--voice-bar-scale': String(Math.max(0.3, Math.min(1.25, scale + level * 0.35)))} as React.CSSProperties}
+      style={
+        {
+          '--voice-bar-scale': String(
+            Math.max(0.3, Math.min(1.25, scale + level * 0.35)),
+          ),
+        } as React.CSSProperties
+      }
     />
   ));
 
-  const statusText = status === 'buffering'
-    ? 'Connecting...'
-    : status === 'finishing'
+  const statusText =
+    status === 'permission'
+      ? 'Waiting for microphone...'
+      : status === 'starting'
+      ? 'Starting...'
+      : status === 'buffering'
+      ? 'Connecting...'
+      : status === 'finishing'
       ? 'Finishing...'
+      : status === 'recognizing'
+      ? 'Recognizing...'
       : 'Recording';
 
   return (
-    <div className={`voice-recording-bar${cancelIntent ? ' cancel-intent' : ''}`} role="status" aria-live="polite">
+    <div
+      className={`voice-recording-bar${cancelIntent ? ' cancel-intent' : ''}`}
+      role="status"
+      aria-live="polite"
+    >
       <span className="voice-recording-dot" aria-hidden="true" />
       <span className="voice-recording-wave" aria-hidden="true">
         {bars}

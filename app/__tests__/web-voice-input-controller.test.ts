@@ -7,14 +7,18 @@ import {
 describe('voice input controller helpers', () => {
   test('replaces the active voice segment instead of appending text', () => {
     expect(replaceVoiceSegment('hi world', 3, 8, 'there')).toBe('hi there');
-    expect(replaceVoiceSegment('prefix suffix', 7, 7, 'voice ')).toBe('prefix voice suffix');
+    expect(replaceVoiceSegment('prefix suffix', 7, 7, 'voice ')).toBe(
+      'prefix voice suffix',
+    );
   });
 
   test('tracks transcript replacement and restores base text on cancel', () => {
     const session = createVoiceInputSession('hello world', 6, 11);
 
     expect(session.applyTranscript('WheelMaker')).toBe('hello WheelMaker');
-    expect(session.applyTranscript('WheelMaker speech')).toBe('hello WheelMaker speech');
+    expect(session.applyTranscript('WheelMaker speech')).toBe(
+      'hello WheelMaker speech',
+    );
     expect(session.cancel()).toBe('hello world');
   });
 
@@ -27,12 +31,12 @@ describe('voice input controller helpers', () => {
     expect(session.currentTranscriptText()).toBe('你好世界');
   });
 
-  test('keeps earlier live speech when a provider emits a shorter segment-only transcript', () => {
+  test('replaces live speech with shorter full transcript from the provider', () => {
     const session = createVoiceInputSession('prefix suffix', 7, 7);
 
     expect(session.applyTranscript('我想打开')).toBe('prefix 我想打开suffix');
-    expect(session.applyTranscript('语音输入')).toBe('prefix 我想打开语音输入suffix');
-    expect(session.currentTranscriptText()).toBe('我想打开语音输入');
+    expect(session.applyTranscript('语音输入')).toBe('prefix 语音输入suffix');
+    expect(session.currentTranscriptText()).toBe('语音输入');
   });
 
   test('detects swipe-up cancellation threshold', () => {

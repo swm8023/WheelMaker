@@ -1,8 +1,16 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
-import {VoiceRecordingBar} from '../web/src/features/speech/VoiceRecordingBar';
+import { VoiceRecordingBar } from '../web/src/features/speech/VoiceRecordingBar';
 
-function renderText(status: 'buffering' | 'recording' | 'finishing') {
+function renderText(
+  status:
+    | 'permission'
+    | 'starting'
+    | 'buffering'
+    | 'recording'
+    | 'finishing'
+    | 'recognizing',
+) {
   let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
   ReactTestRenderer.act(() => {
     renderer = ReactTestRenderer.create(
@@ -19,9 +27,12 @@ function renderText(status: 'buffering' | 'recording' | 'finishing') {
 
 describe('VoiceRecordingBar', () => {
   test('renders voice input transfer states', () => {
+    expect(renderText('permission')).toContain('Waiting for microphone...');
+    expect(renderText('starting')).toContain('Starting...');
     expect(renderText('buffering')).toContain('Connecting...');
     expect(renderText('recording')).toContain('Recording');
     expect(renderText('finishing')).toContain('Finishing...');
+    expect(renderText('recognizing')).toContain('Recognizing...');
   });
 
   test('cancel intent overrides transfer state copy', () => {
