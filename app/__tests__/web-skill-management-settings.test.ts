@@ -6,16 +6,18 @@ const mainTsx = fs.readFileSync(path.join(root, 'web/src/main.tsx'), 'utf8');
 const stylesCss = fs.readFileSync(path.join(root, 'web/src/styles.css'), 'utf8');
 
 describe('skill management settings UI source structure', () => {
-  test('adds Skills as a settings detail and More row after Update', () => {
+  test('adds Skills as a settings detail and mobile shortcut bar entry', () => {
     expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | 'portRelay' | 'debugLogs' | null;");
     expect(mainTsx).toContain("settingsDetailView === 'skills'");
     expect(mainTsx).toContain('renderSkillsSettingsDetail(options)');
+    expect(mainTsx).not.toContain("renderSettingsSection('More'");
 
-    const moreStart = mainTsx.indexOf("renderSettingsSection('More'");
-    const moreEnd = mainTsx.indexOf("renderSettingsSection(", moreStart + 1);
-    const moreSection = mainTsx.slice(moreStart, moreEnd > moreStart ? moreEnd : undefined);
-    expect(moreSection.indexOf("setSettingsDetailView('update')")).toBeLessThan(moreSection.indexOf("setSettingsDetailView('skills')"));
-    expect(moreSection.indexOf("setSettingsDetailView('skills')")).toBeLessThan(moreSection.indexOf("setSettingsDetailView('tokenStats')"));
+    const mobileBarStart = mainTsx.indexOf('const mobileSettingsShortcutBar = !isWide && sidebarSettingsOpen ? (');
+    const mobileBarEnd = mainTsx.indexOf('const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (', mobileBarStart);
+    const mobileBar = mainTsx.slice(mobileBarStart, mobileBarEnd);
+    expect(mobileBar.indexOf('title="Update"')).toBeLessThan(mobileBar.indexOf('title="Skills"'));
+    expect(mobileBar.indexOf('title="Skills"')).toBeLessThan(mobileBar.indexOf('title="Port Relay"'));
+    expect(mobileBar).toContain("openSettingsDetail('skills')");
   });
 
   test('adds desktop Skills shortcut between Update and Token Stats', () => {

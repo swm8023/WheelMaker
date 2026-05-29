@@ -6,17 +6,19 @@ const mainTsx = fs.readFileSync(path.join(root, 'web/src/main.tsx'), 'utf8');
 const stylesCss = fs.readFileSync(path.join(root, 'web/src/styles.css'), 'utf8');
 
 describe('port relay settings UI source structure', () => {
-  test('adds Port Relay as a settings detail in More', () => {
+  test('adds Port Relay as a settings detail and mobile shortcut bar entry', () => {
     expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | 'portRelay' | 'debugLogs' | null;");
     expect(mainTsx).toContain("settingsDetailView === 'portRelay'");
     expect(mainTsx).toContain('renderPortRelaySettingsDetail(options)');
     expect(mainTsx).toContain("setSettingsDetailView('portRelay')");
+    expect(mainTsx).not.toContain("renderSettingsSection('More'");
 
-    const moreStart = mainTsx.indexOf("renderSettingsSection('More'");
-    const moreEnd = mainTsx.indexOf("renderSettingsSection(", moreStart + 1);
-    const moreSection = mainTsx.slice(moreStart, moreEnd > moreStart ? moreEnd : undefined);
-    expect(moreSection.indexOf("setSettingsDetailView('database')")).toBeLessThan(moreSection.indexOf("setSettingsDetailView('portRelay')"));
-    expect(moreSection.indexOf("setSettingsDetailView('portRelay')")).toBeLessThan(moreSection.indexOf('requestClearLocalCache'));
+    const mobileBarStart = mainTsx.indexOf('const mobileSettingsShortcutBar = !isWide && sidebarSettingsOpen ? (');
+    const mobileBarEnd = mainTsx.indexOf('const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (', mobileBarStart);
+    const mobileBar = mainTsx.slice(mobileBarStart, mobileBarEnd);
+    expect(mobileBar.indexOf('title="Skills"')).toBeLessThan(mobileBar.indexOf('title="Port Relay"'));
+    expect(mobileBar.indexOf('title="Port Relay"')).toBeLessThan(mobileBar.indexOf('title="Token Stats"'));
+    expect(mobileBar).toContain("openSettingsDetail('portRelay')");
   });
 
   test('renders Port Relay controls and service hooks', () => {

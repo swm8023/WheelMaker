@@ -6330,6 +6330,9 @@ function App() {
     }
     setSidebarSettingsOpen(true);
     setSidebarCollapsed(false);
+    if (detail === 'skills') {
+      setSkillsError('');
+    }
     if (detail === 'tokenStats') {
       setTokenStatsError('');
     }
@@ -13824,103 +13827,6 @@ function App() {
         </label>
         </>
         ), 'code')}
-        {renderSettingsSection('More', (
-        <>
-        <button
-          type="button"
-          className="settings-row settings-detail-row"
-          onClick={() => {
-            setSettingsDetailView('update');
-          }}
-        >
-          <span>
-            <span className="codicon codicon-cloud-download settings-row-icon" aria-hidden="true" />
-            Update
-          </span>
-          <span className="codicon codicon-chevron-right" />
-        </button>
-        <button
-          type="button"
-          className="settings-row settings-detail-row"
-          onClick={() => {
-            setSkillsError('');
-            setSettingsDetailView('skills');
-          }}
-        >
-          <span>
-            <span className="codicon codicon-extensions settings-row-icon" aria-hidden="true" />
-            Skills
-          </span>
-          <span className="codicon codicon-chevron-right" />
-        </button>
-        <button
-          type="button"
-          className="settings-row settings-detail-row"
-          onClick={() => {
-            setTokenStatsError('');
-            setSettingsDetailView('tokenStats');
-          }}
-        >
-          <span>
-            <span className="codicon codicon-graph-line settings-row-icon" aria-hidden="true" />
-            Token Stats
-          </span>
-          <span className="codicon codicon-chevron-right" />
-        </button>
-        <button
-          type="button"
-          className="settings-row settings-detail-row"
-          onClick={() => {
-            setSettingsDetailView('ccSwitch');
-          }}
-        >
-          <span>
-            <span className="codicon codicon-arrow-swap settings-row-icon" aria-hidden="true" />
-            CC Switch
-          </span>
-          <span className="codicon codicon-chevron-right" />
-        </button>
-        <button
-          type="button"
-          className="settings-row settings-detail-row"
-          onClick={() => {
-            setSettingsDetailView('database');
-            openDatabasePanel();
-          }}
-        >
-          <span>
-            <span className="codicon codicon-database settings-row-icon" aria-hidden="true" />
-            Database
-          </span>
-          <span className="codicon codicon-chevron-right" />
-        </button>
-        <button
-          type="button"
-          className="settings-row settings-detail-row"
-          onClick={() => {
-            setPortRelayError('');
-            setSettingsDetailView('portRelay');
-          }}
-        >
-          <span>
-            <span className="codicon codicon-radio-tower settings-row-icon" aria-hidden="true" />
-            Port Relay
-          </span>
-          <span className="codicon codicon-chevron-right" />
-        </button>
-        <button
-          type="button"
-          className="settings-row settings-danger-row"
-          onClick={requestClearLocalCache}
-        >
-          <span>
-            <span className="codicon codicon-trash settings-row-icon" aria-hidden="true" />
-            Clear Local Cache
-          </span>
-          <span className="codicon codicon-chevron-right" />
-        </button>
-        </>
-        ), 'list-unordered')}
         {renderSettingsSection('Debug', (
         <>
         <label className="settings-row sidebar-setting-row">
@@ -13974,6 +13880,31 @@ function App() {
         </button>
         <button
           type="button"
+          className="settings-row settings-detail-row"
+          onClick={() => {
+            setSettingsDetailView('database');
+            openDatabasePanel();
+          }}
+        >
+          <span>
+            <span className="codicon codicon-database settings-row-icon" aria-hidden="true" />
+            Database
+          </span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
+        <button
+          type="button"
+          className="settings-row settings-danger-row"
+          onClick={requestClearLocalCache}
+        >
+          <span>
+            <span className="codicon codicon-trash settings-row-icon" aria-hidden="true" />
+            Clear Local Cache
+          </span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
+        <button
+          type="button"
           className="settings-row settings-danger-row"
           onClick={handleRegistryDebugLogout}
         >
@@ -13999,7 +13930,7 @@ function App() {
               <div className="mobile-chat-toolbar" aria-label="Chat tools">
                 <button
                   type="button"
-                  className={`mobile-chat-toolbar-icon drawer-settings-icon-btn${sidebarSettingsOpen && !settingsDetailView ? ' active' : ''}`}
+                  className="drawer-settings-icon-btn"
                   onClick={() => {
                     setProjectMenuOpen(false);
                     setSettingsDetailView(null);
@@ -14012,31 +13943,7 @@ function App() {
                 </button>
                 <button
                   type="button"
-                  className={`mobile-chat-toolbar-icon drawer-settings-icon-btn${sidebarSettingsOpen && settingsDetailView === 'update' ? ' active' : ''}`}
-                  onClick={() => {
-                    setProjectMenuOpen(false);
-                    openSettingsDetail('update');
-                  }}
-                  title="Update"
-                  aria-label="Update"
-                >
-                  <span className="codicon codicon-cloud-download" />
-                </button>
-                <button
-                  type="button"
-                  className={`mobile-chat-toolbar-icon drawer-settings-icon-btn${sidebarSettingsOpen && settingsDetailView === 'portRelay' ? ' active' : ''}`}
-                  onClick={() => {
-                    setProjectMenuOpen(false);
-                    openSettingsDetail('portRelay');
-                  }}
-                  title="Port Relay"
-                  aria-label="Port Relay"
-                >
-                  <span className="codicon codicon-radio-tower" />
-                </button>
-                <button
-                  type="button"
-                  className={`mobile-chat-toolbar-icon header-btn refresh-btn drawer-project-refresh${hasPendingProjectUpdates && !mobileProjectSessionsRefreshing && !reconnecting ? ' has-update-badge' : ''}`}
+                  className={`header-btn refresh-btn drawer-project-refresh${hasPendingProjectUpdates && !mobileProjectSessionsRefreshing && !reconnecting ? ' has-update-badge' : ''}`}
                   onClick={() => refreshMobileChatProjectSessions().catch(() => undefined)}
                   title={reconnecting ? 'Reconnecting...' : 'Refresh chats'}
                   disabled={mobileProjectSessionsRefreshing || reconnecting}
@@ -16615,6 +16522,66 @@ function App() {
   const mobileSettingsActions = settingsDetailView
     ? renderSettingsDetailActions(settingsDetailView)
     : <span className="mobile-settings-action-spacer" aria-hidden="true" />;
+  const mobileSettingsShortcutBar = !isWide && sidebarSettingsOpen ? (
+    <nav className="mobile-settings-shortcut-bar" aria-label="Settings shortcuts">
+      <button
+        type="button"
+        className={`mobile-settings-shortcut-button${settingsDetailView === null ? ' active' : ''}`}
+        onClick={() => {
+          setSettingsDetailView(null);
+        }}
+        title="Settings"
+        aria-label="Settings"
+      >
+        <span className="codicon codicon-settings-gear" />
+      </button>
+      <button
+        type="button"
+        className={`mobile-settings-shortcut-button${settingsDetailView === 'update' ? ' active' : ''}`}
+        onClick={() => openSettingsDetail('update')}
+        title="Update"
+        aria-label="Update"
+      >
+        <span className="codicon codicon-cloud-download" />
+      </button>
+      <button
+        type="button"
+        className={`mobile-settings-shortcut-button${settingsDetailView === 'skills' ? ' active' : ''}`}
+        onClick={() => openSettingsDetail('skills')}
+        title="Skills"
+        aria-label="Skills"
+      >
+        <span className="codicon codicon-extensions" />
+      </button>
+      <button
+        type="button"
+        className={`mobile-settings-shortcut-button${settingsDetailView === 'portRelay' ? ' active' : ''}`}
+        onClick={() => openSettingsDetail('portRelay')}
+        title="Port Relay"
+        aria-label="Port Relay"
+      >
+        <span className="codicon codicon-radio-tower" />
+      </button>
+      <button
+        type="button"
+        className={`mobile-settings-shortcut-button${settingsDetailView === 'tokenStats' ? ' active' : ''}`}
+        onClick={() => openSettingsDetail('tokenStats')}
+        title="Token Stats"
+        aria-label="Token Stats"
+      >
+        <span className="codicon codicon-graph-line" />
+      </button>
+      <button
+        type="button"
+        className={`mobile-settings-shortcut-button${settingsDetailView === 'ccSwitch' ? ' active' : ''}`}
+        onClick={() => openSettingsDetail('ccSwitch')}
+        title="CC Switch"
+        aria-label="CC Switch"
+      >
+        <span className="codicon codicon-arrow-swap" />
+      </button>
+    </nav>
+  ) : null;
 
   const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (
     <div
@@ -16641,6 +16608,7 @@ function App() {
           {renderSettingsContent(false, { hideDetailHeader: true })}
         </div>
       </div>
+      {mobileSettingsShortcutBar}
     </div>
   ) : null;
   const portRelayMobileFrameOverlay = mobilePortRelayFrameOpen

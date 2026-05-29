@@ -2,14 +2,14 @@ import fs from 'fs';
 import path from 'path';
 
 describe('agent package update settings UI source structure', () => {
-  test('adds Update to More settings and keeps Chat focused on chat options', () => {
+  test('moves shortcut details out of More and keeps Chat focused on chat options', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
 
     expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | 'portRelay' | 'debugLogs' | null;");
     expect(mainTsx).toContain("settingsDetailView === 'update'");
     expect(mainTsx).toContain('renderUpdateSettingsDetail(options)');
-    expect(mainTsx).toContain("renderSettingsSection('More'");
+    expect(mainTsx).not.toContain("renderSettingsSection('More'");
     expect(mainTsx).not.toContain("renderSettingsSection('Storage'");
 
     const chatStart = mainTsx.indexOf("renderSettingsSection('Chat'");
@@ -22,21 +22,17 @@ describe('agent package update settings UI source structure', () => {
     expect(chatSection).not.toContain('Token Stats');
     expect(chatSection).not.toContain('CC Switch');
 
-    const moreStart = mainTsx.indexOf("renderSettingsSection('More'");
-    expect(moreStart).toBeGreaterThan(codeDisplayStart);
-    const moreSection = mainTsx.slice(moreStart);
-    const updateIndex = moreSection.indexOf("setSettingsDetailView('update')");
-    const skillsIndex = moreSection.indexOf("setSettingsDetailView('skills')");
-    const tokenStatsIndex = moreSection.indexOf("setSettingsDetailView('tokenStats')");
-    const ccSwitchIndex = moreSection.indexOf("setSettingsDetailView('ccSwitch')");
-    const databaseIndex = moreSection.indexOf("setSettingsDetailView('database')");
-    const clearCacheIndex = moreSection.indexOf('requestClearLocalCache');
-    expect(updateIndex).toBeGreaterThanOrEqual(0);
-    expect(updateIndex).toBeLessThan(skillsIndex);
-    expect(skillsIndex).toBeLessThan(tokenStatsIndex);
-    expect(tokenStatsIndex).toBeLessThan(ccSwitchIndex);
-    expect(ccSwitchIndex).toBeLessThan(databaseIndex);
-    expect(databaseIndex).toBeLessThan(clearCacheIndex);
+    const debugStart = mainTsx.indexOf("renderSettingsSection('Debug'");
+    expect(debugStart).toBeGreaterThan(codeDisplayStart);
+    const debugSection = mainTsx.slice(debugStart);
+    expect(debugSection).not.toContain("setSettingsDetailView('update')");
+    expect(debugSection).not.toContain("setSettingsDetailView('skills')");
+    expect(debugSection).not.toContain("setSettingsDetailView('tokenStats')");
+    expect(debugSection).not.toContain("setSettingsDetailView('ccSwitch')");
+    expect(debugSection).not.toContain("setSettingsDetailView('portRelay')");
+    expect(debugSection.indexOf("setSettingsDetailView('database')")).toBeGreaterThanOrEqual(0);
+    expect(debugSection.indexOf("setSettingsDetailView('database')")).toBeLessThan(debugSection.indexOf('requestClearLocalCache'));
+    expect(debugSection.indexOf('requestClearLocalCache')).toBeLessThan(debugSection.indexOf('handleRegistryDebugLogout'));
   });
 
   test('renders Update detail with scan, task polling, and npm confirmation flow hooks', () => {
@@ -300,7 +296,7 @@ describe('agent package update settings UI source structure', () => {
     expect(agentTagBlock).toContain('text-transform: none;');
   });
 
-  test('adds desktop shortcuts and a compact mobile Update toolbar shortcut', () => {
+  test('adds desktop shortcuts and a mobile Settings-only shortcut bar', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
@@ -333,19 +329,36 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain("settingsDetailView === 'portRelay'");
 
     const floatingStart = mainTsx.indexOf('const floatingControlStack = !isWide ? (');
-    const mobileSettingsStart = mainTsx.indexOf('const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (', floatingStart);
-    const mobileOnly = mainTsx.slice(floatingStart, mobileSettingsStart);
+    const mobileBarStart = mainTsx.indexOf('const mobileSettingsShortcutBar = !isWide && sidebarSettingsOpen ? (', floatingStart);
+    const mobileOnly = mainTsx.slice(floatingStart, mobileBarStart);
     expect(mobileOnly).not.toContain("openSettingsDetail('update')");
+
+    const mobileBarEnd = mainTsx.indexOf('const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (', mobileBarStart);
+    expect(mobileBarStart).toBeGreaterThanOrEqual(0);
+    expect(mobileBarEnd).toBeGreaterThan(mobileBarStart);
+    const mobileBar = mainTsx.slice(mobileBarStart, mobileBarEnd);
+    expect(mobileBar.indexOf('title="Settings"')).toBeLessThan(mobileBar.indexOf('title="Update"'));
+    expect(mobileBar.indexOf('title="Update"')).toBeLessThan(mobileBar.indexOf('title="Skills"'));
+    expect(mobileBar.indexOf('title="Skills"')).toBeLessThan(mobileBar.indexOf('title="Port Relay"'));
+    expect(mobileBar.indexOf('title="Port Relay"')).toBeLessThan(mobileBar.indexOf('title="Token Stats"'));
+    expect(mobileBar.indexOf('title="Token Stats"')).toBeLessThan(mobileBar.indexOf('title="CC Switch"'));
+    expect(mobileBar).toContain("openSettingsDetail('update')");
+    expect(mobileBar).toContain("openSettingsDetail('skills')");
+    expect(mobileBar).toContain("openSettingsDetail('portRelay')");
+    expect(mobileBar).toContain("openSettingsDetail('tokenStats')");
+    expect(mobileBar).toContain("openSettingsDetail('ccSwitch')");
+    expect(mobileBar).toContain('setSettingsDetailView(null);');
 
     const mobileToolbarStart = mainTsx.indexOf('<div className="mobile-chat-toolbar"');
     const mobileToolbarEnd = mainTsx.indexOf('{renderChatHubSummary()}', mobileToolbarStart);
     expect(mobileToolbarStart).toBeGreaterThanOrEqual(0);
     expect(mobileToolbarEnd).toBeGreaterThan(mobileToolbarStart);
     const mobileToolbar = mainTsx.slice(mobileToolbarStart, mobileToolbarEnd);
-    expect(mobileToolbar).toContain("openSettingsDetail('update')");
-    expect(mobileToolbar).toContain('codicon-cloud-download');
-    expect(mobileToolbar.indexOf('title="Open settings"')).toBeLessThan(mobileToolbar.indexOf('title="Update"'));
-    expect(mobileToolbar.indexOf('title="Update"')).toBeLessThan(mobileToolbar.indexOf('title="Port Relay"'));
+    expect(mobileToolbar).toContain('title="Open settings"');
+    expect(mobileToolbar).not.toContain('title="Update"');
+    expect(mobileToolbar).not.toContain('title="Port Relay"');
+    expect(mobileToolbar).not.toContain("openSettingsDetail('update')");
+    expect(mobileToolbar).not.toContain("openSettingsDetail('portRelay')");
 
     const mobileToolbarBlock = stylesCss.match(/\.mobile-chat-toolbar \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileToolbarBlock).toContain('gap: 4px;');
@@ -353,12 +366,10 @@ describe('agent package update settings UI source structure', () => {
     expect(mobileToolbarBlock).not.toContain('border: 1px solid');
     expect(mobileToolbarBlock).not.toContain('border-radius: 10px;');
 
-    const mobileToolbarIconBlock = stylesCss.match(/\.mobile-chat-toolbar-icon \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(mobileToolbarIconBlock).toContain('width: 36px;');
-    expect(mobileToolbarIconBlock).toContain('height: 34px;');
-    expect(mobileToolbarIconBlock).toContain('border-radius: 8px;');
-    expect(mobileToolbarIconBlock).toContain('box-shadow: none;');
-    expect(mobileToolbarIconBlock).not.toContain('border-radius: 999px;');
-    expect(stylesCss).toContain('.mobile-chat-toolbar-icon.active');
+    expect(stylesCss).toContain('.mobile-settings-shortcut-bar {');
+    expect(stylesCss).toContain('.mobile-settings-shortcut-button {');
+    expect(stylesCss).toContain('.mobile-settings-shortcut-button.active::before');
+    expect(stylesCss).toContain('padding: 0 0 env(safe-area-inset-bottom, 0px);');
+    expect(stylesCss).not.toContain('.mobile-chat-toolbar-icon.active');
   });
 });

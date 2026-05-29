@@ -69,11 +69,18 @@ describe('web registry debug settings', () => {
     expect(stylesCss).toContain('.debug-log-entry.error');
   });
 
-  test('places the debug settings section at the bottom of settings', () => {
+  test('places debug maintenance settings at the bottom after code display', () => {
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
 
+    const codeDisplaySectionIndex = mainTsx.indexOf("renderSettingsSection('Code Display'");
     const debugSectionIndex = mainTsx.indexOf("renderSettingsSection('Debug'");
-    const moreSectionIndex = mainTsx.indexOf("renderSettingsSection('More'");
-    expect(debugSectionIndex).toBeGreaterThan(moreSectionIndex);
+    expect(debugSectionIndex).toBeGreaterThan(codeDisplaySectionIndex);
+    expect(mainTsx).not.toContain("renderSettingsSection('More'");
+
+    const debugSection = mainTsx.slice(debugSectionIndex);
+    expect(debugSection.indexOf('Open Debug Panel')).toBeLessThan(debugSection.indexOf('Logs'));
+    expect(debugSection.indexOf('Logs')).toBeLessThan(debugSection.indexOf('Database'));
+    expect(debugSection.indexOf('Database')).toBeLessThan(debugSection.indexOf('Clear Local Cache'));
+    expect(debugSection.indexOf('Clear Local Cache')).toBeLessThan(debugSection.indexOf('Logout'));
   });
 });

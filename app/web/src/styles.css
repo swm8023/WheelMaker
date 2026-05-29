@@ -748,7 +748,7 @@ textarea,
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 14px 0 calc(env(safe-area-inset-bottom, 0px) + 22px);
+  padding: 14px 0 calc(env(safe-area-inset-bottom, 0px) + 82px);
   background: var(--bg);
 }
 
@@ -828,6 +828,56 @@ textarea,
 .mobile-settings-screen .settings-detail-row {
   min-height: 56px;
   font-size: 14px;
+}
+
+.mobile-settings-shortcut-bar {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  align-items: center;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 62%, var(--panel-3));
+  padding: 0 0 env(safe-area-inset-bottom, 0px);
+}
+
+.mobile-settings-shortcut-button {
+  position: relative;
+  height: 48px;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-settings-shortcut-button .codicon {
+  font-size: 22px;
+}
+
+.mobile-settings-shortcut-button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.mobile-settings-shortcut-button.active {
+  color: var(--text);
+}
+
+.mobile-settings-shortcut-button.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
 }
 
 .settings-detail-page {
@@ -5143,30 +5193,6 @@ textarea,
   gap: 4px;
   flex: 0 1 auto;
   background: transparent;
-}
-
-.mobile-chat-toolbar-icon {
-  flex: 0 0 auto;
-  width: 36px;
-  height: 34px;
-  min-width: 36px;
-  min-height: 34px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  box-shadow: none;
-  color: color-mix(in srgb, var(--muted) 86%, var(--text));
-  transition: background 120ms ease, color 120ms ease;
-}
-
-.mobile-chat-toolbar-icon:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--hover) 76%, transparent);
-  color: var(--text);
-}
-
-.mobile-chat-toolbar-icon.active {
-  background: color-mix(in srgb, var(--accent) 13%, transparent);
-  color: var(--text);
 }
 
 .mobile-chat-drawer-header .chat-hub-summary {

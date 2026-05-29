@@ -726,12 +726,17 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('<div className="chat-hub-empty">No hubs</div>');
     expect(mainTsx).toContain('<div className="mobile-chat-toolbar" aria-label="Chat tools">');
     expect(mainTsx).not.toContain('<span className="mobile-chat-drawer-title">Chats</span>');
-    expect(mainTsx).toContain('title="Port Relay"');
-    expect(mainTsx).toContain('aria-label="Port Relay"');
-    expect(mainTsx).toContain("openSettingsDetail('portRelay')");
     expect(mainTsx).toContain('renderChatHubSummary()');
+    const mobileToolbarStart = mainTsx.indexOf('<div className="mobile-chat-toolbar"');
+    const mobileToolbarEnd = mainTsx.indexOf('{renderChatHubSummary()}', mobileToolbarStart);
+    const mobileToolbar = mainTsx.slice(mobileToolbarStart, mobileToolbarEnd);
+    expect(mobileToolbar).toContain('title="Open settings"');
+    expect(mobileToolbar).not.toContain('title="Update"');
+    expect(mobileToolbar).not.toContain('title="Port Relay"');
+    expect(mobileToolbar).not.toContain("openSettingsDetail('update')");
+    expect(mobileToolbar).not.toContain("openSettingsDetail('portRelay')");
     expect(mainTsx).toMatch(
-      /<div className="mobile-chat-toolbar" aria-label="Chat tools">[\s\S]*?title="Open settings"[\s\S]*?openSettingsDetail\('portRelay'\)[\s\S]*?title="Port Relay"[\s\S]*?refreshMobileChatProjectSessions\(\)[\s\S]*?<\/div>[\s\S]*?\{renderChatHeaderSearchControls\(true\)\}[\s\S]*?\{renderChatHubSummary\(\)\}/,
+      /<div className="mobile-chat-toolbar" aria-label="Chat tools">[\s\S]*?title="Open settings"[\s\S]*?refreshMobileChatProjectSessions\(\)[\s\S]*?<\/div>[\s\S]*?\{renderChatHeaderSearchControls\(true\)\}[\s\S]*?\{renderChatHubSummary\(\)\}/,
     );
     expect(mainTsx).toMatch(
       /<div className=\{`sidebar-title-row\$\{chatSidebarTitleSearchOpen \? ' search-open' : ''\}`\}>[\s\S]*?<span className="sidebar-title-text">\{wideSidebarTitle\}<\/span>[\s\S]*?\{renderChatHubSummary\(\)\}[\s\S]*?\{renderChatHeaderSearchControls\(false\)\}/,
@@ -751,7 +756,8 @@ describe('web chat integration', () => {
     const mobileChatToolbarBlock = stylesCss.match(/\.mobile-chat-toolbar \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileChatToolbarBlock).toContain('display: inline-flex;');
     expect(mobileChatToolbarBlock).toContain('justify-content: flex-start;');
-    expect(stylesCss).toContain('.mobile-chat-toolbar-icon {');
+    expect(stylesCss).not.toContain('.mobile-chat-toolbar-icon {');
+    expect(stylesCss).toContain('.drawer-settings-icon-btn {');
     expect(stylesCss).toContain('.mobile-chat-drawer-header .chat-hub-summary {');
     expect(stylesCss).toContain('.sidebar-title-row .chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary {');
@@ -1378,27 +1384,27 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const renderMobileChatSessionSheet = () => {');
     expect(mainTsx).toContain('className={`mobile-chat-drawer-header${sessionSearchHeaderExpanded ? \' search-open\' : \'\'}`}');
     expect(mainTsx).toContain('<div className="mobile-chat-toolbar" aria-label="Chat tools">');
-    expect(mainTsx).toContain("openSettingsDetail('portRelay')");
     expect(mainTsx).not.toContain('<span className="mobile-chat-drawer-title">Chats</span>');
     expect(mainTsx).toContain('className="mobile-project-session-nav"');
     expect(mainTsx).toContain('className="mobile-project-sheet"');
     expect(mainTsx).toContain('className="mobile-project-session-error"');
     expect(mainTsx).toContain('if (!isWide) setDrawerOpen(false);');
     expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
-    expect(mainTsx).toContain("setSettingsDetailView('tokenStats');");
+    expect(mainTsx).toContain("openSettingsDetail('tokenStats')");
     expect(mainTsx).toContain("settingsDetailView === 'tokenStats'");
     expect(mainTsx).toContain('const renderSettingsSection = (title: string, rows: React.ReactNode, icon?: string) => (');
     expect(mainTsx).toContain("renderSettingsSection('Appearance'");
     expect(mainTsx).toContain("renderSettingsSection('Chat'");
     expect(mainTsx).toContain("renderSettingsSection('Code Display'");
-    expect(mainTsx).toContain("renderSettingsSection('More'");
+    expect(mainTsx).toContain("renderSettingsSection('Debug'");
+    expect(mainTsx).not.toContain("renderSettingsSection('More'");
     const appearanceSettingsIndex = mainTsx.indexOf("renderSettingsSection('Appearance'");
     const chatSettingsIndex = mainTsx.indexOf("renderSettingsSection('Chat'");
     const codeDisplaySettingsIndex = mainTsx.indexOf("renderSettingsSection('Code Display'");
-    const moreSettingsIndex = mainTsx.indexOf("renderSettingsSection('More'");
+    const debugSettingsIndex = mainTsx.indexOf("renderSettingsSection('Debug'");
     expect(appearanceSettingsIndex).toBeLessThan(chatSettingsIndex);
     expect(chatSettingsIndex).toBeLessThan(codeDisplaySettingsIndex);
-    expect(codeDisplaySettingsIndex).toBeLessThan(moreSettingsIndex);
+    expect(codeDisplaySettingsIndex).toBeLessThan(debugSettingsIndex);
     expect(mainTsx).toContain("setSettingsDetailView('database');");
     expect(mainTsx).toContain("settingsDetailView === 'database'");
     expect(mainTsx).toContain('renderDatabaseSettingsDetail(options)');
@@ -1413,6 +1419,8 @@ describe('web chat integration', () => {
     expect(mobileSheetStart).toBeGreaterThanOrEqual(0);
     expect(mobileSheetEnd).toBeGreaterThan(mobileSheetStart);
     const mobileSheet = mainTsx.slice(mobileSheetStart, mobileSheetEnd);
+    expect(mobileSheet).not.toContain("openSettingsDetail('portRelay')");
+    expect(mobileSheet).not.toContain("openSettingsDetail('update')");
     expect(mobileSheet).not.toContain('className="project-wrap"');
     expect(mobileSheet).toContain('renderProjectSessionActionMenu(targetProjectId, session)');
     expect(mobileSheet).toContain('onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}');
