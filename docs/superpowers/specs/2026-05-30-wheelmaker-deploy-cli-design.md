@@ -27,6 +27,7 @@ The transitional implementation introduces `wheelmaker-deploy` while keeping exi
 - New `wheelmaker-updater` invokes installed `wheelmaker-deploy bootstrap-update`; it does not fall back to refresh scripts.
 - `deploy` may install and configure `wheelmaker-updater`.
 - `update` and `bootstrap-update` must not build, install, stop, start, replace, or reconfigure `wheelmaker-updater`.
+- Reserve an updater self-upgrade command for a later phase; it is not implemented or invoked in the transitional version.
 - No ACP or agent global package installation is performed by `wheelmaker-deploy`.
 - `app` Web build dependencies are synced with `npm ci --include=dev` only when Web publish is enabled.
 - No automatic backup or rollback is performed.
@@ -42,6 +43,7 @@ The transitional implementation introduces `wheelmaker-deploy` while keeping exi
 - Do not auto-enable Linux lingering.
 - Do not add automatic rollback or backup.
 - Do not install ACP or agent global dependencies.
+- Do not implement updater self-upgrade in the transitional version.
 - Do not fully implement uninstall in the transitional CLI.
 
 ## Command Surface
@@ -50,12 +52,13 @@ The transitional implementation introduces `wheelmaker-deploy` while keeping exi
 wheelmaker-deploy deploy [options]
 wheelmaker-deploy bootstrap-update [options]
 wheelmaker-deploy update [options]
+wheelmaker-deploy upgrade-updater [options]
 wheelmaker-deploy service start|stop|restart|status
 wheelmaker-deploy service uninstall
 wheelmaker-deploy doctor [options]
 ```
 
-`service uninstall` is reserved in the interface but returns a clear not-implemented error in the transitional version. Existing uninstall scripts remain available.
+`upgrade-updater` and `service uninstall` are reserved in the interface but return clear not-implemented errors in the transitional version. Existing uninstall scripts remain available.
 
 ## Options
 
@@ -88,6 +91,7 @@ Defaults:
 | `deploy` | yes | yes | yes | yes | yes | yes | yes | yes |
 | `bootstrap-update` | yes | no | deploy CLI temp only | no | no | no | no | no |
 | `update` | no | yes | yes | yes | yes | no | yes | no |
+| `upgrade-updater` | no | no | no | no | no | no | no | reserved |
 | `service start` | no | no | no | no | no | no | start | no |
 | `service stop` | no | no | no | no | no | no | stop | no |
 | `service restart` | no | no | no | no | no | no | restart | no |
@@ -359,6 +363,24 @@ Manual signal semantics stay unchanged:
 - `skip-web-publish` remains accepted for compatibility and maps to a deploy CLI invocation with `--no-web`.
 - Plain signals are treated as `full-update`.
 
+## Updater Self-Upgrade
+
+Updater self-upgrade is reserved for a later phase and is not implemented in the transitional CLI.
+
+The intended future shape is an external handoff, not in-place replacement by the updater process:
+
+1. `wheelmaker-deploy` builds a new updater binary into a staging path.
+2. It starts an independent one-shot upgrade job that is not part of the running updater service process tree.
+3. The one-shot job stops the updater service, replaces the updater binary, starts the updater service, and exits.
+
+Platform-specific future handoff mechanisms:
+
+- Windows: detached process, temporary scheduled task, or one-shot service.
+- Linux: `systemd-run --user` transient unit.
+- macOS: independent LaunchAgent or detached helper process.
+
+No automatic call to this flow is made by `deploy`, `bootstrap-update`, or `update` in the transitional version.
+
 ## Doctor
 
 `wheelmaker-deploy doctor` checks but does not modify:
@@ -386,6 +408,7 @@ Linux no-linger is a failing doctor result.
 - `update-publish.*` remains signal-only.
 - `deploy` installs and configures updater services.
 - `update` and `bootstrap-update` do not touch updater services or updater binaries.
+- `upgrade-updater` exists only as a reserved command and returns not implemented.
 - Linux deploy fails when lingering is disabled.
 - First deploy creates a runnable local config and starts services.
 - Helper start, stop, restart, and status wrappers are generated.
