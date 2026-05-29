@@ -368,13 +368,13 @@ export function VoiceInputButton({
         if (disabled) {
           return;
         }
+        if (consumeSuppressedClick()) {
+          return;
+        }
         if (recording && pointerRef.current) {
           clearActivePointer();
           clearSuppressedClick();
           void Promise.resolve(onFinish());
-          return;
-        }
-        if (consumeSuppressedClick()) {
           return;
         }
         if (recording) {
