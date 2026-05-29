@@ -26,8 +26,11 @@ function Assert-NotContains {
   }
 }
 
-Assert-Contains -Text $deployBat -Needle "update + build + stop + deploy + start + publish web"
-Assert-Contains -Text $deployBat -Needle 'scripts\refresh_server.ps1'
+Assert-Contains -Text $deployBat -Needle "WheelMaker All-in-One Deploy"
+Assert-Contains -Text $deployBat -Needle "wheelmaker-deploy.exe"
+Assert-Contains -Text $deployBat -Needle "go build"
+Assert-Contains -Text $deployBat -Needle " deploy "
+Assert-NotContains -Text $deployBat -Needle 'scripts\refresh_server.ps1'
 Assert-NotContains -Text $deployBat -Needle 'pushd "%~dp0app"'
 Assert-NotContains -Text $deployBat -Needle "npm run build:web:release"
 Assert-NotContains -Text $deployBat -Needle "[FAILED] web publish exited with code"
@@ -36,4 +39,4 @@ Assert-NotContains -Text $deployBat -Needle "syncing app Web dependencies"
 Assert-NotContains -Text $deployBat -Needle "publish_desktop.ps1"
 Assert-NotContains -Text $deployBat -Needle "publish-desktop.bat"
 
-Write-Host "deploy.bat internal web publish checks passed"
+Write-Host "deploy.bat deploy-cli wrapper checks passed"

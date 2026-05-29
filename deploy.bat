@@ -2,50 +2,46 @@
 setlocal
 title WheelMaker Deploy
 
+set "_REPO=%~dp0"
+if "%_REPO:~-1%"=="\" set "_REPO=%_REPO:~0,-1%"
+set "_BIN=%USERPROFILE%\.wheelmaker\bin"
+set "_DEPLOY_EXE=%_BIN%\wheelmaker-deploy.exe"
+
 echo ============================================
 echo   WheelMaker All-in-One Deploy
 echo ============================================
 echo.
-echo   update + build + stop + deploy + start + publish web
+echo   wheelmaker-deploy deploy: update + build + install + configure + publish web
 echo.
 echo ============================================
 echo.
 
-REM ---- prefer PowerShell 7 (pwsh); auto-install via winget if missing ----
-where pwsh >nul 2>&1
-if %errorlevel% equ 0 goto :run_script
+if not exist "%_DEPLOY_EXE%" (
+  echo [INFO] wheelmaker-deploy.exe not found. Building bootstrap CLI...
+  where go >nul 2>&1
+  if errorlevel 1 (
+    echo [FAILED] Go is required to build wheelmaker-deploy.exe
+    exit /b 1
+  )
+  if not exist "%_BIN%" mkdir "%_BIN%"
+  pushd "%_REPO%\server"
+  go build -o "%_DEPLOY_EXE%" .\cmd\wheelmaker-deploy
+  set "_BUILD_EXIT=%errorlevel%"
+  popd
+  if not "%_BUILD_EXIT%"=="0" (
+    echo [FAILED] go build wheelmaker-deploy.exe exited with code %_BUILD_EXIT%
+    exit /b %_BUILD_EXIT%
+  )
+)
 
-echo [INFO] pwsh not found. Attempting install via winget...
-winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
-if %errorlevel% neq 0 goto :fallback_ps5
-
-REM winget succeeded; refresh PATH from registry so pwsh is visible this session
-for /f "usebackq tokens=2,*" %%A in (`reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v PATH 2^>nul`) do set "_machinepath=%%B"
-for /f "usebackq tokens=2,*" %%A in (`reg query "HKCU\Environment" /v PATH 2^>nul`) do set "_userpath=%%B"
-if defined _userpath (set "PATH=%_machinepath%;%_userpath%") else (set "PATH=%_machinepath%")
-where pwsh >nul 2>&1
-if %errorlevel% equ 0 goto :run_script
-
-:fallback_ps5
-echo [WARN] Using Windows PowerShell 5.x. For best results install PowerShell 7:
-echo         winget install Microsoft.PowerShell
-set "_PS=powershell"
-goto :do_run
-
-:run_script
-set "_PS=pwsh"
-
-:do_run
-%_PS% -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\refresh_server.ps1"
-
-if %errorlevel% neq 0 (
+"%_DEPLOY_EXE%" deploy --repo "%_REPO%" %*
+set "_EXIT=%errorlevel%"
+if not "%_EXIT%"=="0" (
   echo.
-  echo [FAILED] deploy exited with code %errorlevel%
-  pause
-  exit /b %errorlevel%
+  echo [FAILED] deploy exited with code %_EXIT%
+  exit /b %_EXIT%
 )
 
 echo.
 echo [OK] deploy complete
-pause
 exit /b 0

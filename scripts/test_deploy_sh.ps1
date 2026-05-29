@@ -24,15 +24,16 @@ function Assert-NotContains {
 }
 
 Assert-Contains "WheelMaker All-in-One Deploy"
-Assert-Contains "scripts/refresh_server.sh"
 Assert-Contains "supports macOS and Linux"
-Assert-Contains "scripts/refresh_server_linux.sh"
-Assert-Contains 'refresh_script="scripts/refresh_server.sh"'
-Assert-Contains 'refresh_script="scripts/refresh_server_linux.sh"'
-Assert-Contains 'bash "$refresh_script" "$@"'
+Assert-Contains "wheelmaker-deploy"
+Assert-Contains "go build"
+Assert-Contains " deploy "
 Assert-Contains "publish web"
 Assert-Contains "deploy.sh supports macOS and Linux"
 Assert-Contains "deploy.bat on Windows"
+Assert-NotContains "scripts/refresh_server.sh"
+Assert-NotContains "scripts/refresh_server_linux.sh"
+Assert-NotContains 'bash "$refresh_script" "$@"'
 Assert-NotContains "deploy.sh is macOS-only"
 Assert-NotContains "app/node_modules/.bin/webpack"
 
