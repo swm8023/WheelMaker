@@ -9,26 +9,29 @@ describe('web voice input local buffering wiring', () => {
       'utf8',
     );
 
-    expect(mainTsx).toContain('import {createVoiceInputBuffer');
-    expect(mainTsx).toContain("from './features/speech/voiceInputBuffer';");
-    expect(mainTsx).toContain('import {createVoiceInputSendQueue');
-    expect(mainTsx).toContain("from './features/speech/voiceInputSendQueue';");
+    expect(mainTsx).toContain("from './features/speech/voiceInputRuntime';");
+    expect(mainTsx).not.toContain("from './features/speech/audioCapture';");
+    expect(mainTsx).not.toContain("from './features/speech/voiceInputBuffer';");
+    expect(mainTsx).not.toContain(
+      "from './features/speech/voiceInputSendQueue';",
+    );
     expect(mainTsx).toContain("from './features/speech/voiceInputConstants';");
+    expect(mainTsx).toContain("from './features/speech/voiceInputFlow';");
     expect(mainTsx).toContain('VOICE_LONG_TIMEOUT_MS');
     expect(mainTsx).toContain('VOICE_SHORT_TIMEOUT_MS');
-    expect(mainTsx).toContain('VOICE_AUDIO_CHUNK_BYTES');
+    expect(mainTsx).not.toContain('VOICE_AUDIO_CHUNK_BYTES');
     expect(mainTsx).toContain('const voiceInputReconnectAvailable = () => (');
     expect(mainTsx).toContain(
       "logVoiceInputState('warn', 'start_buffering_disconnected'",
     );
-    expect(mainTsx).toContain(
+    expect(mainTsx).not.toContain(
       "message.includes('speech stream already active')",
     );
     expect(mainTsx).toContain(
-      'voiceInputBufferRef.current = createVoiceInputBuffer({',
+      'voiceInputBufferRef.current = createDefaultVoiceInputBuffer();',
     );
     expect(mainTsx).toContain(
-      'voiceSendQueueRef.current = createVoiceInputSendQueue({',
+      'voiceSendQueueRef.current = createDefaultVoiceInputSendQueue({',
     );
     expect(mainTsx).toContain('voiceSendQueueRef.current.enqueue(chunk.bytes)');
     expect(mainTsx).toContain('await queue.drain();');

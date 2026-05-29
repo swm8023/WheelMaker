@@ -194,16 +194,29 @@ import {
   type CodeThemeId,
   type DiffRenderLine,
 } from './services/shikiRenderer';
-import {startMicrophonePCMStream, type MicrophonePCMStream} from './features/speech/audioCapture';
-import {createVoiceInputBuffer, DEFAULT_VOICE_INPUT_BUFFER_MAX_MS, type VoiceInputBuffer} from './features/speech/voiceInputBuffer';
-import {createVoiceInputSendQueue, type VoiceInputSendQueue} from './features/speech/voiceInputSendQueue';
 import {createVoiceInputSession, type VoiceInputSession} from './features/speech/useVoiceInputController';
 import {
-  VOICE_AUDIO_CHUNK_BYTES,
   VOICE_LONG_TIMEOUT_MS,
   VOICE_SHORT_TIMEOUT_MS,
   type VoiceRecordingStatus,
 } from './features/speech/voiceInputConstants';
+import {
+  createDefaultVoiceInputBuffer,
+  createDefaultVoiceInputSendQueue,
+  startVoiceInputMicrophoneStream,
+  type MicrophonePCMStream,
+  type VoiceInputBuffer,
+  type VoiceInputSendQueue,
+} from './features/speech/voiceInputRuntime';
+import {
+  isVoiceGenerationActive as isVoiceGenerationActiveSnapshot,
+  isVoiceInputActive as isVoiceInputSnapshotActive,
+  isVoiceInputContextCurrent as isVoiceInputSnapshotContextCurrent,
+  isVoiceInputStartRetryableError,
+  isVoiceInputStreamRetryableError,
+  resolveVoiceCaptureReadyStatus,
+  type VoiceInputRuntimeSnapshot,
+} from './features/speech/voiceInputFlow';
 import {isSpeechErrorEvent, isSpeechTranscriptEvent} from './features/speech/registrySpeechClient';
 import {DEFAULT_SPEECH_SETTINGS, SPEECH_MODEL_OPTIONS, normalizeSpeechSettings} from './features/speech/speechSettings';
 import {
@@ -8546,39 +8559,26 @@ function App() {
     encodeChatSessionKey(selectedChatKeyRef.current) || projectIdRef.current
   );
 
+  const voiceInputRuntimeSnapshot = (): VoiceInputRuntimeSnapshot => ({
+    generation: voiceStartGenerationRef.current,
+    expectedRuntimeKey: voiceRuntimeKeyRef.current,
+    currentRuntimeKey: currentVoiceInputRuntimeKey(),
+    recording: voiceRecordingRef.current,
+    streamId: voiceStreamIdRef.current,
+    awaitingFinal: voiceAwaitingFinalRef.current,
+  });
+
   const isVoiceInputContextCurrent = () => {
-    const expected = voiceRuntimeKeyRef.current;
-    return !expected || expected === currentVoiceInputRuntimeKey();
+    return isVoiceInputSnapshotContextCurrent(voiceInputRuntimeSnapshot());
   };
 
   const isVoiceGenerationActive = (generation: number) => (
-    voiceStartGenerationRef.current === generation &&
-    (voiceRecordingRef.current || !!voiceStreamIdRef.current) &&
-    isVoiceInputContextCurrent()
+    isVoiceGenerationActiveSnapshot(voiceInputRuntimeSnapshot(), generation)
   );
 
   const waitForVoiceInputRetry = (ms: number) => new Promise<void>(resolve => {
     window.setTimeout(resolve, ms);
   });
-
-  const isVoiceInputStartRetryableError = (err: unknown) => {
-    const message = formatVoiceInputDiagnosticError(err).toLowerCase();
-    return message.includes('websocket is not connected') ||
-      message.includes('connect timeout') ||
-      message.includes('closed during connect') ||
-      message.includes('connection closed before response') ||
-      message.includes('request timed out') ||
-      message.includes('session is not ready') ||
-      message.includes('speech stream already active');
-  };
-
-  const isVoiceInputStreamRetryableError = (err: unknown) => {
-    const message = formatVoiceInputDiagnosticError(err).toLowerCase();
-    return isVoiceInputStartRetryableError(err) ||
-      message.includes('provider disconnected') ||
-      message.includes('speech provider disconnected') ||
-      message.includes('speech stream idle timeout');
-  };
 
   const cancelVoiceInput = async (
     reason: RegistrySpeechCancelPayload['reason'] = 'user',
@@ -8682,7 +8682,7 @@ function App() {
   };
 
   const isVoiceInputActive = () => (
-    voiceRecordingRef.current || !!voiceStreamIdRef.current || voiceAwaitingFinalRef.current
+    isVoiceInputSnapshotActive(voiceInputRuntimeSnapshot())
   );
 
   const handleVoiceRegistryClosedDuringInput = (source: 'close' | 'chunk' | 'speech_error', err?: unknown) => {
@@ -8709,9 +8709,7 @@ function App() {
       return true;
     }
     if (!voiceInputBufferRef.current) {
-      voiceInputBufferRef.current = createVoiceInputBuffer({
-        maxDurationMs: DEFAULT_VOICE_INPUT_BUFFER_MAX_MS,
-      });
+      voiceInputBufferRef.current = createDefaultVoiceInputBuffer();
     }
     voiceReconnectBufferingRef.current = true;
     setVoiceRecordingStatus('buffering');
@@ -8791,7 +8789,7 @@ function App() {
     }
     voiceStreamIdRef.current = response.streamId;
     voiceRemoteStartRequestedRef.current = true;
-    voiceSendQueueRef.current = createVoiceInputSendQueue({
+    voiceSendQueueRef.current = createDefaultVoiceInputSendQueue({
       streamId: response.streamId,
       sendChunk: async payload => {
         voiceSeqRef.current = payload.seq;
@@ -8898,15 +8896,16 @@ function App() {
     }
   };
 
-  const createVoiceMicrophoneCapture = () => startMicrophonePCMStream({
-    targetRate: 16000,
-    chunkBytes: VOICE_AUDIO_CHUNK_BYTES,
+  const createVoiceMicrophoneCapture = () => startVoiceInputMicrophoneStream({
     onReady: () => {
       const generation = voiceCaptureGenerationRef.current;
       if (generation <= 0 || !isVoiceGenerationActive(generation)) {
         return;
       }
-      setVoiceRecordingStatus(voiceStreamIdRef.current ? 'recording' : 'buffering');
+      setVoiceRecordingStatus(resolveVoiceCaptureReadyStatus({
+        hasStream: !!voiceStreamIdRef.current,
+        pendingFinish: voicePendingFinishRef.current,
+      }));
       if (voiceRemoteStartRequestedRef.current) {
         return;
       }
@@ -9053,9 +9052,7 @@ function App() {
     const generation = voiceStartGenerationRef.current + 1;
     voiceStartGenerationRef.current = generation;
     voiceSessionRef.current = createVoiceInputSession(baseText, insertStart, insertEnd);
-    voiceInputBufferRef.current = createVoiceInputBuffer({
-      maxDurationMs: DEFAULT_VOICE_INPUT_BUFFER_MAX_MS,
-    });
+    voiceInputBufferRef.current = createDefaultVoiceInputBuffer();
     voiceSendQueueRef.current = null;
     voicePendingFinishRef.current = false;
     voiceAwaitingFinalRef.current = false;
