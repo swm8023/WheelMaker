@@ -2986,6 +2986,12 @@ textarea,
   flex-direction: column;
 }
 
+.workspace-left .sidebar-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 .sidebar-title-row {
   position: relative;
   flex: 0 0 34px;

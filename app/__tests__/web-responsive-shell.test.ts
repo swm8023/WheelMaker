@@ -2,6 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import { transformSync } from '@babel/core';
 
+function cssRuleBlock(stylesCss: string, selector: string): string {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = stylesCss.match(new RegExp(`${escapedSelector} \\{([\\s\\S]*?)\\}`));
+  return match?.[1] ?? '';
+}
+
 describe('web responsive shell split', () => {
   test('defines desktop and mobile shells behind one responsive shell module', () => {
     const projectRoot = path.join(__dirname, '..');
@@ -91,5 +97,22 @@ describe('web responsive shell split', () => {
     expect(disconnectedReturn).toMatch(
       /className=\{`page theme-\$\{themeMode\}`\}[\s\S]*?<DesktopTitleBar title="WheelMaker" \/>[\s\S]*?<div className="connect">/,
     );
+  });
+
+  test('keeps wide sidebar settings scrollable inside the desktop shell', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    expect(mainTsx).toMatch(/const wideSidebarMain = sidebarSettingsOpen\s*\?\s*renderSettingsContent\(false\)/);
+    expect(mainTsx).toContain('<div className="sidebar-scroll">');
+
+    const workspaceLeftBlock = cssRuleBlock(stylesCss, '.workspace-left');
+    expect(workspaceLeftBlock).toContain('overflow: hidden;');
+
+    const wideSidebarScrollBlock = cssRuleBlock(stylesCss, '.workspace-left .sidebar-scroll');
+    expect(wideSidebarScrollBlock).toContain('overflow-x: hidden;');
+    expect(wideSidebarScrollBlock).toContain('overflow-y: auto;');
+    expect(wideSidebarScrollBlock).toContain('scrollbar-gutter: stable;');
   });
 });
