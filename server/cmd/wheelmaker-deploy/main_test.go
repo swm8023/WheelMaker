@@ -70,6 +70,14 @@ func (r testRunner) Run(_ context.Context, dir string, name string, args ...stri
 		*r.events = append(*r.events, "npm "+strings.Join(args, " "))
 	case name == "go" && len(args) >= 4 && args[0] == "build":
 		*r.events = append(*r.events, "go build "+buildLabelFromOutput(args[2]))
+		if err := os.MkdirAll(filepath.Dir(args[2]), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(args[2], []byte(buildLabelFromOutput(args[2])), 0o755); err != nil {
+			return "", err
+		}
+	case strings.Contains(filepath.Base(name), "wheelmaker-deploy-next"):
+		*r.events = append(*r.events, "run wheelmaker-deploy-next "+strings.Join(args, " "))
 	case name == "exec":
 		*r.events = append(*r.events, "exec "+strings.Join(args, " "))
 	default:
@@ -159,7 +167,7 @@ func TestDeployPipelineOrder(t *testing.T) {
 		"go build wheelmaker-updater",
 		"go build wheelmaker-deploy",
 		"npm run build:web:release",
-		"service stop hub-monitor",
+		"service stop all",
 		"install wheelmaker",
 		"install wheelmaker-monitor",
 		"install wheelmaker-updater",
@@ -172,6 +180,9 @@ func TestDeployPipelineOrder(t *testing.T) {
 	}
 	if diff := cmpStringSlices(*h.events, want); diff != "" {
 		t.Fatal(diff)
+	}
+	for _, name := range []string{"wheelmaker", "wheelmaker-monitor", "wheelmaker-updater", "wheelmaker-deploy"} {
+		assertFileContains(t, filepath.Join(h.cfg.InstallDir, binaryName(name)), name)
 	}
 }
 
@@ -248,8 +259,23 @@ func TestBootstrapBuildsTempDeployAndExecsUpdate(t *testing.T) {
 	assertEventsContainInOrder(t, *h.events,
 		"git pull --ff-only origin main",
 		"go build wheelmaker-deploy-next",
-		"exec wheelmaker-deploy-next update",
+		"run wheelmaker-deploy-next update",
 	)
+}
+
+func TestBootstrapPassesNoWebToUpdate(t *testing.T) {
+	h := newDeployHarness(t)
+	h.cfg.Mode = modeBootstrapUpdate
+	h.cfg.NoWeb = true
+	if err := runBootstrapUpdateWithDeps(context.Background(), h.cfg, h.deps); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	for _, event := range *h.events {
+		if strings.Contains(event, "run wheelmaker-deploy-next update") && strings.Contains(event, "--no-web") {
+			return
+		}
+	}
+	t.Fatalf("bootstrap update command did not include --no-web: %#v", *h.events)
 }
 
 func TestLinuxUnitContentRequiresRestartAlways(t *testing.T) {

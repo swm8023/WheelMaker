@@ -62,10 +62,9 @@ go build -o bin/windows_amd64/wheelmaker-monitor.exe ./cmd/wheelmaker-monitor/
 go build -o bin/windows_amd64/wheelmaker-updater.exe ./cmd/wheelmaker-updater/
 
 # Root-level helper scripts
-powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1                      # full deploy (services)
-powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1 -SkipUpdate -SkipBuild -SkipDeploy    # restart services only
-powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1 -SkipUpdate -SkipBuild -SkipDeploy -SkipRestart # stop services only
-# deployed wrappers under ~/.wheelmaker: start.bat / stop.bat / refresh_server.ps1
+../deploy.bat                    # build temporary wheelmaker-deploy and run full deploy
+../deploy.sh                     # macOS/Linux full deploy
+# deployed wrappers under ~/.wheelmaker: start/stop/restart/status .bat and .sh
 ```
 
 ## Key Invariants (do not break)

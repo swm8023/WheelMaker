@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -200,16 +201,67 @@ func runUpdateRoundWithOptions(ctx context.Context, cfg UpdaterConfig, runner co
 	if _, err := os.Stat(invocation.command); err != nil {
 		return fmt.Errorf("wheelmaker-deploy missing: %w", err)
 	}
+	command := invocation.command
+	if runtimeGOOS == "windows" {
+		command, err = prepareWindowsDeployBootstrap(invocation.command, cfg.InstallDir)
+		if err != nil {
+			return err
+		}
+	}
 
-	logger.Info("[updater] invoke %s %s", invocation.command, strings.Join(invocation.args, " "))
+	logger.Info("[updater] invoke %s %s", command, strings.Join(invocation.args, " "))
 
-	_, err = runner.CombinedOutput(ctx, cfg.RepoDir, invocation.command, invocation.args...)
+	_, err = runner.CombinedOutput(ctx, cfg.RepoDir, command, invocation.args...)
 	if err != nil {
 		return err
 	}
 
 	logger.Info("[updater] run deploy cli complete")
 	return nil
+}
+
+func prepareWindowsDeployBootstrap(src string, installDir string) (string, error) {
+	dir := filepath.Join(installDir, ".bootstrap")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create deploy bootstrap dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, "wheelmaker-deploy-bootstrap-*.exe")
+	if err != nil {
+		return "", fmt.Errorf("create deploy bootstrap copy: %w", err)
+	}
+	dst := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close deploy bootstrap copy: %w", err)
+	}
+	if err := copyFile(src, dst); err != nil {
+		_ = os.Remove(dst)
+		return "", fmt.Errorf("copy deploy bootstrap: %w", err)
+	}
+	return dst, nil
+}
+
+func copyFile(src string, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(dst, info.Mode().Perm())
 }
 
 type deployInvocation struct {

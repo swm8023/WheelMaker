@@ -4,8 +4,8 @@ title WheelMaker Deploy
 
 set "_REPO=%~dp0"
 if "%_REPO:~-1%"=="\" set "_REPO=%_REPO:~0,-1%"
-set "_BIN=%USERPROFILE%\.wheelmaker\bin"
-set "_DEPLOY_EXE=%_BIN%\wheelmaker-deploy.exe"
+set "_BOOTSTRAP_DIR=%USERPROFILE%\.wheelmaker\build\bootstrap"
+set "_DEPLOY_EXE=%_BOOTSTRAP_DIR%\wheelmaker-deploy.exe"
 
 echo ============================================
 echo   WheelMaker All-in-One Deploy
@@ -16,22 +16,20 @@ echo.
 echo ============================================
 echo.
 
-if not exist "%_DEPLOY_EXE%" (
-  echo [INFO] wheelmaker-deploy.exe not found. Building bootstrap CLI...
-  where go >nul 2>&1
-  if errorlevel 1 (
-    echo [FAILED] Go is required to build wheelmaker-deploy.exe
-    exit /b 1
-  )
-  if not exist "%_BIN%" mkdir "%_BIN%"
-  pushd "%_REPO%\server"
-  go build -o "%_DEPLOY_EXE%" .\cmd\wheelmaker-deploy
-  set "_BUILD_EXIT=%errorlevel%"
-  popd
-  if not "%_BUILD_EXIT%"=="0" (
-    echo [FAILED] go build wheelmaker-deploy.exe exited with code %_BUILD_EXIT%
-    exit /b %_BUILD_EXIT%
-  )
+echo [INFO] Building bootstrap wheelmaker-deploy.exe...
+where go >nul 2>&1
+if errorlevel 1 (
+  echo [FAILED] Go is required to build wheelmaker-deploy.exe
+  exit /b 1
+)
+if not exist "%_BOOTSTRAP_DIR%" mkdir "%_BOOTSTRAP_DIR%"
+pushd "%_REPO%\server"
+go build -o "%_DEPLOY_EXE%" .\cmd\wheelmaker-deploy
+set "_BUILD_EXIT=%errorlevel%"
+popd
+if not "%_BUILD_EXIT%"=="0" (
+  echo [FAILED] go build wheelmaker-deploy.exe exited with code %_BUILD_EXIT%
+  exit /b %_BUILD_EXIT%
 )
 
 "%_DEPLOY_EXE%" deploy --repo "%_REPO%" %*

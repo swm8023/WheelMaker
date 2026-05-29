@@ -28,6 +28,7 @@ function Assert-NotContains {
 
 Assert-Contains -Text $deployBat -Needle "WheelMaker All-in-One Deploy"
 Assert-Contains -Text $deployBat -Needle "wheelmaker-deploy.exe"
+Assert-Contains -Text $deployBat -Needle ".wheelmaker\build\bootstrap"
 Assert-Contains -Text $deployBat -Needle "go build"
 Assert-Contains -Text $deployBat -Needle " deploy "
 Assert-NotContains -Text $deployBat -Needle 'scripts\refresh_server.ps1'

@@ -40,177 +40,86 @@ This model works well when you want one machine to expose the public entrypoint 
 | Machine A / internal | `127.0.0.1:9630` | Registry listener |
 | Machine A / internal | `127.0.0.1:9631` | Monitor listener |
 
-### 1. Refresh, build, and install services
+### 1. Deploy, build, and install services
 
 Requirements:
 
-- **Go 1.22+**
-- **Node.js 22+**
-- an elevated Windows terminal
+- **Go 1.26+**
+- **Node.js 22.11+**
+- `git`
+- `npm`
+- an elevated Windows terminal on Windows
+- `launchctl` on macOS, or `systemctl --user` on Linux
+- on Linux, lingering enabled for the deploy user:
 
-One-shot refresh:
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+One-shot deploy from the repository root:
 
 ```bat
 deploy.bat
 ```
 
-Or run the script directly:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1
-```
-
-The refresh flow will:
-
-- pull with `git pull --ff-only`, stashing local changes first if needed
-- install ACP CLI dependencies if needed
-- run `npm ci --include=dev` for the Web app before Web publish
-- build `wheelmaker.exe`, `wheelmaker-monitor.exe`, and `wheelmaker-updater.exe`
-- deploy binaries to `~\.wheelmaker\bin\`
-- preserve or initialize `~\.wheelmaker\config.json`
-- generate `start.bat` and `stop.bat`
-- register or update these Windows services:
-  - `WheelMaker`
-  - `WheelMakerMonitor`
-  - `WheelMakerUpdater`
-- publish the Web UI to `~\.wheelmaker\web`
-- write `~\.wheelmaker\release.json` with the published Git SHA
-- start the services and enable auto-start
-
-If `config.json` is created for the first time, the script stops before restart so you can fill it in and run the same command again.
-
-### macOS / Linux Machine A deployment
-
-WheelMaker can also run as a complete Machine A on macOS or Linux. macOS uses current-user LaunchAgents; Linux uses current-user systemd units. This path runs after login as the active user, so agent CLIs can keep using the same `$HOME`, npm global packages, PATH, and user-scoped auth state.
-
-Requirements:
-
-- **Go 1.26+**
-- **Node.js 22.11+**
-- `git`
-- `npm`
-- `launchctl` on macOS, or `systemctl --user` on Linux
-- the agent CLIs you plan to use, already installed and logged in for the current user
-
-One-shot refresh from the repository root:
-
 ```bash
 bash deploy.sh
 ```
 
+`deploy.bat` and `deploy.sh` only prepare the bootstrap environment: each run builds a fresh temporary `wheelmaker-deploy` CLI under `~/.wheelmaker/build/bootstrap`, then calls `wheelmaker-deploy deploy`.
+
 After the initial service setup, request an updater-driven update and Web publish without recreating service files:
+
+```bat
+update-publish.bat
+```
 
 ```bash
 bash update-publish.sh
 ```
 
-The refresh flow will:
+The deploy CLI flow will:
 
-- pull with `git pull --ff-only`, stashing local changes first if needed
-- run `npm ci --include=dev` after updating so new app package dependencies are installed before Web publish
-- build the current machine architecture binaries
-- install `wheelmaker`, `wheelmaker-monitor`, and `wheelmaker-updater` to `~/.wheelmaker/bin`
-- preserve or initialize `~/.wheelmaker/config.json`
+- pull with `git pull --ff-only`
+- run `npm ci --include=dev` for the Web app before Web publish
+- build `wheelmaker`, `wheelmaker-monitor`, `wheelmaker-updater`, and `wheelmaker-deploy`
 - publish the Web UI to `~/.wheelmaker/web`
+- stop services before replacing binaries
+- install binaries to `~/.wheelmaker/bin`
+- preserve an existing `~/.wheelmaker/config.json`, or create a runnable default for this WheelMaker checkout with the registry listening locally
+- generate `start`, `stop`, `restart`, and `status` wrapper scripts under `~/.wheelmaker`
+- register or update services:
+  - Windows: `WheelMaker`, `WheelMakerMonitor`, `WheelMakerUpdater`
+  - macOS: `com.wheelmaker.hub`, `com.wheelmaker.monitor`, `com.wheelmaker.updater`
+  - Linux: `wheelmaker-hub.service`, `wheelmaker-monitor.service`, `wheelmaker-updater.service`
 - write `~/.wheelmaker/release.json` with the published Git SHA
-- generate LaunchAgent plist files under `~/Library/LaunchAgents` on macOS, or systemd user units under `~/.config/systemd/user` on Linux
-- start these runtime jobs:
-  - `com.wheelmaker.hub`
-  - `com.wheelmaker.monitor`
-  - `com.wheelmaker.updater`
+- start services
 
-Lifecycle commands:
+Lifecycle commands after deployment:
 
-```bash
-bash deploy.sh status
-bash deploy.sh start
-bash deploy.sh stop
-bash deploy.sh restart
-bash deploy.sh uninstall
+```powershell
+~/.wheelmaker/start.bat
+~/.wheelmaker/stop.bat
+~/.wheelmaker/restart.bat
+~/.wheelmaker/status.bat
 ```
 
-Or call the underlying script directly:
-
 ```bash
-bash scripts/refresh_server.sh status
-bash scripts/refresh_server.sh start
-bash scripts/refresh_server.sh stop
-bash scripts/refresh_server.sh restart
-bash scripts/refresh_server.sh uninstall
+~/.wheelmaker/start.sh
+~/.wheelmaker/stop.sh
+~/.wheelmaker/restart.sh
+~/.wheelmaker/status.sh
 ```
 
-`uninstall` removes the LaunchAgent or systemd user-service registrations and service files, but keeps `~/.wheelmaker/config.json`, logs, SQLite state, and Web assets.
-
-The shell deploy script does not install or configure Nginx, Caddy, certificates, or public ports. Point your own reverse proxy at the same contract used by Windows:
-
-| External path | Local target |
-| --- | --- |
-| `/` | static files from `~/.wheelmaker/web` |
-| `/ws` | `http://127.0.0.1:9630` with WebSocket upgrade |
-| `/monitor/` | `http://127.0.0.1:9631` |
-
-### Linux Machine A deployment
-
-WheelMaker can also run as a complete Machine A on Linux using current-user `systemd --user` services. This path runs under the active user account, so agent CLIs can keep using the same `$HOME`, npm global packages, PATH, SSH keys, and local auth files.
-
-Requirements:
-
-- **Go 1.26+**
-- **Node.js 22.11+**
-- `git`
-- `npm`
-- `systemd` with a usable `systemctl --user` session
-- the agent CLIs you plan to use, already installed and logged in for the current user
-
-One-shot refresh from the repository root:
+You can also call the CLI directly:
 
 ```bash
-bash deploy.sh
+~/.wheelmaker/bin/wheelmaker-deploy service restart
 ```
 
-The Linux refresh flow will:
+The legacy `scripts/refresh_server.ps1`, `scripts/refresh_server.sh`, and `scripts/refresh_server_linux.sh` scripts are kept for compatibility, but the new deploy path does not call them.
 
-- pull with `git pull --ff-only` when the worktree is clean
-- build the current Linux architecture binaries
-- install `wheelmaker`, `wheelmaker-monitor`, and `wheelmaker-updater` to `~/.wheelmaker/bin`
-- preserve or initialize `~/.wheelmaker/config.json`
-- publish the Web UI to `~/.wheelmaker/web`
-- write the current shell environment to `~/.wheelmaker/systemd.env`
-- generate user unit files under `~/.config/systemd/user`
-- start these `systemd --user` services:
-  - `wheelmaker-hub.service`
-  - `wheelmaker-monitor.service`
-  - `wheelmaker-updater.service`
-
-Lifecycle commands:
-
-```bash
-bash deploy.sh status
-bash deploy.sh start
-bash deploy.sh stop
-bash deploy.sh restart
-bash deploy.sh uninstall
-```
-
-Or call the underlying script directly:
-
-```bash
-bash scripts/refresh_server_linux.sh status
-bash scripts/refresh_server_linux.sh start
-bash scripts/refresh_server_linux.sh stop
-bash scripts/refresh_server_linux.sh restart
-bash scripts/refresh_server_linux.sh uninstall
-```
-
-`uninstall` stops and disables the user services and removes their unit files, but keeps `~/.wheelmaker/config.json`, logs, SQLite state, and Web assets.
-
-The Linux deploy script does not install or configure Nginx, Caddy, certificates, public ports, or lingering. If you need the user services to start before interactive login, enable lingering yourself:
-
-```bash
-loginctl enable-linger "$USER"
-```
-
-Point your own reverse proxy at the same contract used by Windows and macOS:
+The deploy scripts do not install or configure Nginx, Caddy, certificates, or public ports. Point your own reverse proxy at this contract:
 
 | External path | Local target |
 | --- | --- |
@@ -472,29 +381,42 @@ On iOS, the installed app opens from the home screen in a standalone-style windo
 ```powershell
 ~/.wheelmaker/start.bat
 ~/.wheelmaker/stop.bat
-~/.wheelmaker/refresh_server.ps1
+~/.wheelmaker/restart.bat
+~/.wheelmaker/status.bat
 ```
 
-Default refresh flow:
+```bash
+~/.wheelmaker/start.sh
+~/.wheelmaker/stop.sh
+~/.wheelmaker/restart.sh
+~/.wheelmaker/status.sh
+```
+
+Default deploy flow:
 
 ```text
-update -> deps -> build -> stop -> deploy -> publish web -> write release manifest -> restart
+pull -> npm ci -> build -> publish web -> stop -> install -> config -> write release manifest -> start
 ```
 
-Optional skips:
+Common deploy flags:
 
-- `-SkipUpdate`
-- `-SkipDeps`
-- `-SkipBuild`
-- `-SkipStop`
-- `-SkipDeploy`
-- `-SkipInstall`
-- `-SkipWebPublish`
-- `-SkipRestart`
+- `--no-pull`
+- `--no-npm`
+- `--no-build`
+- `--no-install`
+- `--no-restart`
+- `--no-config`
+- `--no-web`
+- `--no-updater`
 
 The updater trigger path is:
 
-- `update-publish.bat` / `update-publish.sh` writes a `full-update` signal. The updater runs pull, deps, build, install, Web publish, release manifest write, then restarts Hub and Monitor.
+- `update-publish.bat` / `update-publish.sh` writes a `full-update` signal.
+- `WheelMakerUpdater` calls the installed `wheelmaker-deploy bootstrap-update`.
+- `bootstrap-update` pulls the repository, builds a temporary latest deploy CLI, then runs `update` to rebuild and replace Hub, Monitor, and the deploy CLI, publish Web, write the release manifest, and restart Hub and Monitor.
+- On Windows, `WheelMakerUpdater` runs a temporary copy of the installed deploy CLI first, so the installed deploy CLI can be replaced during the update.
+
+`WheelMakerUpdater` self-upgrade is reserved but not implemented in this transitional CLI.
 
 ### 8. Quick validation checklist
 
@@ -652,8 +574,9 @@ npm run build:web:release
 
 Script overview:
 
-- `scripts\refresh_server.ps1` — service-first build and deployment
-- `update-publish.bat` / `update-publish.sh` — async full update and Web publish trigger
+- `deploy.bat` / `deploy.sh` — build a temporary `wheelmaker-deploy` CLI and run the unified deploy flow
+- `scripts\refresh_server.ps1`, `scripts\refresh_server.sh`, `scripts\refresh_server_linux.sh` — legacy compatibility deploy scripts
+- `update-publish.bat` / `update-publish.sh` — signal `WheelMakerUpdater` to run the deploy CLI update path
 - `app\scripts\export_web_release.ps1` — export Web assets to `~\.wheelmaker\web`
 
 ## License

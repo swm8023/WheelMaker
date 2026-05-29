@@ -3,8 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 repo_root="$(pwd)"
-bin_dir="${HOME}/.wheelmaker/bin"
-deploy_cli="${bin_dir}/wheelmaker-deploy"
+bootstrap_dir="${HOME}/.wheelmaker/build/bootstrap"
+deploy_cli="${bootstrap_dir}/wheelmaker-deploy"
 
 cat <<'BANNER'
 ============================================
@@ -30,16 +30,14 @@ case "$(uname -s)" in
     ;;
 esac
 
-if [[ ! -x "$deploy_cli" ]]; then
-  echo "[INFO] wheelmaker-deploy not found. Building bootstrap CLI..."
-  command -v go >/dev/null 2>&1 || {
-    echo "[FAILED] Go is required to build wheelmaker-deploy" >&2
-    exit 1
-  }
-  mkdir -p "$bin_dir"
-  (cd "${repo_root}/server" && go build -o "$deploy_cli" ./cmd/wheelmaker-deploy)
-  chmod +x "$deploy_cli"
-fi
+echo "[INFO] Building bootstrap wheelmaker-deploy..."
+command -v go >/dev/null 2>&1 || {
+  echo "[FAILED] Go is required to build wheelmaker-deploy" >&2
+  exit 1
+}
+mkdir -p "$bootstrap_dir"
+(cd "${repo_root}/server" && go build -o "$deploy_cli" ./cmd/wheelmaker-deploy)
+chmod +x "$deploy_cli"
 
 "$deploy_cli" deploy --repo "$repo_root" "$@"
 

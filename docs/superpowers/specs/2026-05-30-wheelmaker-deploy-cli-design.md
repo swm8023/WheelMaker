@@ -120,7 +120,7 @@ Defaults:
    - `wheelmaker-updater`
    - `wheelmaker-deploy`
 7. Publish Web with `npm run build:web:release` unless `--no-web`.
-8. Stop hub and monitor if services are installed and restart is enabled.
+8. Stop services that will be replaced if restart is enabled.
 9. Install binaries into `--bin`.
 10. Create config if missing.
 11. Generate helper wrappers.
@@ -260,7 +260,7 @@ Updater service arguments include:
 --repo <repo> --install-dir <bin> --time <HH:mm>
 ```
 
-The top-level `deploy.bat` remains responsible for transitional UAC elevation. `wheelmaker-deploy deploy` detects missing elevation for service configuration and returns an actionable error.
+`wheelmaker-deploy deploy` detects missing elevation for service configuration and returns an actionable error.
 
 ### macOS
 
@@ -334,7 +334,7 @@ Rules:
 
 `deploy.bat` and `deploy.sh` become thin top-level launchers:
 
-- Build `wheelmaker-deploy` when it is missing.
+- Build a temporary `wheelmaker-deploy` every run.
 - Call `wheelmaker-deploy deploy` directly.
 - Do not call `scripts/refresh_server.*`.
 
@@ -356,6 +356,8 @@ full-update
 ```
 
 If the deploy CLI is missing, updater logs a clear error and does not fall back to refresh scripts. Running `deploy.bat` or `deploy.sh` repairs the installation.
+
+On Windows, updater first copies the installed deploy CLI to a temporary bootstrap executable and runs that copy, so the update path can replace `~/.wheelmaker/bin/wheelmaker-deploy.exe`.
 
 Manual signal semantics stay unchanged:
 

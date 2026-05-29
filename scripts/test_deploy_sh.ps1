@@ -26,6 +26,7 @@ function Assert-NotContains {
 Assert-Contains "WheelMaker All-in-One Deploy"
 Assert-Contains "supports macOS and Linux"
 Assert-Contains "wheelmaker-deploy"
+Assert-Contains ".wheelmaker/build/bootstrap"
 Assert-Contains "go build"
 Assert-Contains " deploy "
 Assert-Contains "publish web"

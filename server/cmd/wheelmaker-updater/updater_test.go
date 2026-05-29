@@ -68,7 +68,7 @@ func TestRunUpdateRound_RunsDeployCLI(t *testing.T) {
 
 	repoDir := t.TempDir()
 	installDir := filepath.Join(t.TempDir(), "bin")
-	deployPath := createDeployCLI(t, installDir, "windows")
+	createDeployCLI(t, installDir, "windows")
 
 	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: installDir, DailyTime: "03:00"}
 	f := &fakeRunner{results: map[string]fakeResult{}}
@@ -81,11 +81,24 @@ func TestRunUpdateRound_RunsDeployCLI(t *testing.T) {
 	for _, c := range f.calls {
 		got = append(got, c.dir+"|"+c.name+" "+strings.Join(c.args, " "))
 	}
+	if len(f.calls) != 1 {
+		t.Fatalf("expected one windows deploy call, got %d", len(f.calls))
+	}
 	want := []string{
-		repoDir + "|" + deployPath + " bootstrap-update --repo " + repoDir + " --bin " + installDir + " --time 03:00",
+		repoDir + "|" + f.calls[0].name + " bootstrap-update --repo " + repoDir + " --bin " + installDir + " --time 03:00",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands mismatch\n got: %#v\nwant: %#v", got, want)
+	}
+	if base := filepath.Base(f.calls[0].name); !strings.HasPrefix(base, "wheelmaker-deploy-bootstrap-") || !strings.HasSuffix(base, ".exe") {
+		t.Fatalf("windows updater should invoke a bootstrap copy, got %q", f.calls[0].name)
+	}
+	raw, err := os.ReadFile(f.calls[0].name)
+	if err != nil {
+		t.Fatalf("read bootstrap copy: %v", err)
+	}
+	if string(raw) != "deploy cli" {
+		t.Fatalf("bootstrap copy content=%q", string(raw))
 	}
 }
 

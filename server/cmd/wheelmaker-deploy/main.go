@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"html"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -248,7 +249,7 @@ func runDeployWithDeps(ctx context.Context, cfg deployConfig, deps deployDeps) e
 		return err
 	}
 	if !cfg.NoRestart {
-		if err := deps.Services.Stop(ctx, false); err != nil {
+		if err := deps.Services.Stop(ctx, !cfg.NoUpdater); err != nil {
 			return err
 		}
 	}
@@ -328,8 +329,11 @@ func runBootstrapUpdateWithDeps(ctx context.Context, cfg deployConfig, deps depl
 	if _, err := deps.Runner.Run(ctx, filepath.Join(cfg.RepoRoot, "server"), "go", "build", "-o", next, "./cmd/wheelmaker-deploy"); err != nil {
 		return err
 	}
-	args := []string{"wheelmaker-deploy-next", "update", "--repo", cfg.RepoRoot, "--bin", cfg.InstallDir, "--time", cfg.UpdaterTime, "--no-pull", "--no-config", "--no-updater"}
-	_, err := deps.Runner.Run(ctx, cfg.RepoRoot, "exec", args...)
+	args := []string{"update", "--repo", cfg.RepoRoot, "--bin", cfg.InstallDir, "--time", cfg.UpdaterTime, "--no-pull", "--no-config", "--no-updater"}
+	if cfg.NoWeb {
+		args = append(args, "--no-web")
+	}
+	_, err := deps.Runner.Run(ctx, cfg.RepoRoot, next, args...)
 	return err
 }
 
@@ -451,9 +455,85 @@ func installBuiltBinaries(cfg deployConfig, deps deployDeps, includeUpdater bool
 		return fmt.Errorf("create install dir: %w", err)
 	}
 	for _, name := range names {
+		src := filepath.Join(cfg.BuildRoot, binaryName(name))
+		dst := filepath.Join(cfg.InstallDir, binaryName(name))
+		if err := copyFileReplace(src, dst); err != nil {
+			return fmt.Errorf("install %s: %w", name, err)
+		}
 		deps.record("install " + name)
 	}
 	return nil
+}
+
+func copyFileReplace(src string, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("stat source: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("source is a directory: %s", src)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("create destination dir: %w", err)
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer in.Close()
+	tmp, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp destination: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("copy: %w", err)
+	}
+	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod temp destination: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp destination: %w", err)
+	}
+	if err := renameWithRetry(tmpPath, dst); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
+func renameWithRetry(src string, dst string) error {
+	attempts := 1
+	if runtime.GOOS == "windows" {
+		attempts = 10
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		if err := os.Rename(src, dst); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if removeErr := os.Remove(dst); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			lastErr = removeErr
+		} else if err := os.Rename(src, dst); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if runtime.GOOS == "windows" {
+			time.Sleep(300 * time.Millisecond)
+		}
+	}
+	return fmt.Errorf("rename temp destination: %w", lastErr)
 }
 
 func ensureConfig(cfg deployConfig, deps deployDeps) (bool, error) {
