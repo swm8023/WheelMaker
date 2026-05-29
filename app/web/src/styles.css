@@ -12,6 +12,7 @@
   --danger: #f48771;
   --line-num: #858585;
   --wm-safe-area-top: env(safe-area-inset-top, 0px);
+  --wm-safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --mobile-floating-control-lane: 56px;
 }
 
@@ -2318,6 +2319,7 @@ textarea,
   background: color-mix(in srgb, var(--panel) 34%, transparent);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
   transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, backdrop-filter 180ms ease;
 }
 
@@ -2325,12 +2327,14 @@ textarea,
 .floating-control-stack[data-backdrop-tone='mixed'] .drawer-toggle-bubble {
   background: color-mix(in srgb, var(--panel) 64%, transparent);
   backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
 }
 
 .floating-control-stack[data-backdrop-tone='light'] .floating-nav-group,
 .floating-control-stack[data-backdrop-tone='light'] .drawer-toggle-bubble {
   background: color-mix(in srgb, var(--panel) 88%, transparent);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .floating-nav-group {
@@ -2350,8 +2354,8 @@ textarea,
   width: 40px;
   height: 40px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 72%, transparent);
   transform: translateY(calc(var(--floating-nav-index, 0) * 40px));
   transition: transform 180ms ease;
 }
@@ -2374,7 +2378,7 @@ textarea,
 }
 
 .floating-nav-button[data-active='true'] {
-  color: var(--text);
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
 }
 
 .drawer-toggle-bubble {
@@ -2406,8 +2410,9 @@ textarea,
 }
 
 .drawer-toggle-bubble[data-active='true'] {
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: transparent;
+  border-color: color-mix(in srgb, var(--accent) 72%, transparent);
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
 }
 
 .port-relay-floating-bubble {
@@ -2421,11 +2426,29 @@ textarea,
 }
 
 .floating-control-stack[data-backdrop-tone='mixed'] .drawer-toggle-bubble[data-active='true'] {
-  background: color-mix(in srgb, var(--accent) 40%, var(--panel));
+  background: transparent;
+  border-color: color-mix(in srgb, var(--accent) 72%, transparent);
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
 }
 
 .floating-control-stack[data-backdrop-tone='light'] .drawer-toggle-bubble[data-active='true'] {
-  background: color-mix(in srgb, var(--accent) 48%, var(--panel));
+  background: transparent;
+  border-color: color-mix(in srgb, var(--accent) 72%, transparent);
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
+}
+
+.floating-control-stack[data-idle='true'] {
+  opacity: 0.34;
+  filter: none;
+}
+
+.floating-control-stack[data-idle='true'] .floating-nav-group,
+.floating-control-stack[data-idle='true'] .drawer-toggle-bubble,
+.floating-control-stack[data-idle='true'] .gesture-nav-button {
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .port-relay-target-switch-menu {
@@ -2659,6 +2682,7 @@ textarea,
   background: color-mix(in srgb, var(--panel) 34%, transparent);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
   color: var(--text);
   display: inline-flex;
   align-items: center;
@@ -2722,9 +2746,9 @@ textarea,
 
 .gesture-nav-option[data-active='true'],
 .gesture-nav-option[data-candidate='true'] {
-  color: var(--text);
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
+  background: transparent;
+  border-color: color-mix(in srgb, var(--accent) 72%, transparent);
 }
 
 .gesture-nav-option[data-candidate='true'] {

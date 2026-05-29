@@ -619,6 +619,7 @@ const PROJECT_PIN_LONG_PRESS_MS = 450;
 const PROJECT_SESSION_LONG_PRESS_MS = 450;
 const DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO = 0.45;
 const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;
+const FLOATING_CONTROL_IDLE_DELAY_MS = 3000;
 const PORT_RELAY_FLOATING_SLOT_STORAGE_KEY = 'wheelmaker:portRelayFloatingSlot';
 const PORT_RELAY_FLOATING_SIDE_STORAGE_KEY = 'wheelmaker:portRelayFloatingSide';
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
@@ -2058,6 +2059,14 @@ function readSafeAreaTopInset(): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function readSafeAreaBottomInset(): number {
+  const value = window
+    .getComputedStyle(document.documentElement)
+    .getPropertyValue('--wm-safe-area-bottom');
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 type UnifiedDiffRow = {
   kind: 'context' | 'added' | 'removed' | 'separator';
   oldLineNumber: number | null;
@@ -2951,6 +2960,7 @@ function App() {
   const [windowWidth, setWindowWidth] = useState<number>(window.innerWidth);
   const [windowHeight, setWindowHeight] = useState<number>(window.innerHeight);
   const [safeAreaTopInset, setSafeAreaTopInset] = useState<number>(() => readSafeAreaTopInset());
+  const [safeAreaBottomInset, setSafeAreaBottomInset] = useState<number>(() => readSafeAreaBottomInset());
   const layoutMode = resolveLayoutMode(windowWidth);
   const isWide = layoutMode === 'desktop';
   const supportsChatClipboardFiles = useMemo(() => {
@@ -3023,9 +3033,12 @@ function App() {
   const floatingControlStackRef = useRef<HTMLDivElement | null>(null);
   const [floatingBackdropTone, setFloatingBackdropTone] = useState<FloatingBackdropTone>('dark');
   const [floatingSidePulse, setFloatingSidePulse] = useState<PersistedFloatingControlSide | ''>('');
+  const [floatingControlsIdle, setFloatingControlsIdle] = useState(false);
+  const [floatingControlActivityTick, setFloatingControlActivityTick] = useState(0);
   const floatingBackdropToneRef = useRef<FloatingBackdropTone>('dark');
   const floatingControlSideRef = useRef(floatingControlSide);
   const floatingSidePulseTimerRef = useRef<number | null>(null);
+  const floatingControlIdleTimerRef = useRef<number | null>(null);
   const floatingBackdropToneMeasuredAtRef = useRef(0);
   const floatingBackdropToneRafRef = useRef<number | null>(null);
   const floatingBackdropToneTimerRef = useRef<number | null>(null);
@@ -4975,6 +4988,7 @@ function App() {
       setWindowWidth(window.innerWidth);
       setWindowHeight(window.innerHeight);
       setSafeAreaTopInset(readSafeAreaTopInset());
+      setSafeAreaBottomInset(readSafeAreaBottomInset());
     };
     onResize();
     window.addEventListener('resize', onResize);
@@ -5562,14 +5576,16 @@ function App() {
     if (isWide) {
       return { minTop: 0, maxTop: 0 };
     }
-    const minTop = Math.max(safeAreaTopInset + 12, 56);
+    const minTop = Math.max(safeAreaTopInset + 6, 6);
+    const bottomInset = Math.max(safeAreaBottomInset + 6, 6);
     const maxTop = Math.max(
       minTop,
-      windowHeight - floatingKeyboardOffset - floatingControlStackHeight - 18,
+      windowHeight - floatingKeyboardOffset - floatingControlStackHeight - bottomInset,
     );
     return { minTop, maxTop };
   }, [
     isWide,
+    safeAreaBottomInset,
     safeAreaTopInset,
     windowHeight,
     floatingKeyboardOffset,
@@ -5709,6 +5725,38 @@ function App() {
       floatingSidePulseTimerRef.current = null;
     }
   }, []);
+  const clearFloatingControlIdleTimer = useCallback(() => {
+    if (floatingControlIdleTimerRef.current !== null) {
+      window.clearTimeout(floatingControlIdleTimerRef.current);
+      floatingControlIdleTimerRef.current = null;
+    }
+  }, []);
+  const wakeFloatingControls = useCallback(() => {
+    clearFloatingControlIdleTimer();
+    setFloatingControlsIdle(false);
+    setFloatingControlActivityTick(tick => tick + 1);
+  }, [clearFloatingControlIdleTimer]);
+  const floatingControlsIdleBlocked =
+    isWide ||
+    drawerOpen ||
+    !!floatingDragState?.active ||
+    !!floatingDragState?.pressing ||
+    gestureNavigationExpanded ||
+    portRelayTargetMenuOpen ||
+    chatQuickSwitchMenuOpen ||
+    mobilePortRelayFrameOpen;
+  useEffect(() => {
+    clearFloatingControlIdleTimer();
+    if (floatingControlsIdleBlocked) {
+      setFloatingControlsIdle(false);
+      return;
+    }
+    floatingControlIdleTimerRef.current = window.setTimeout(() => {
+      setFloatingControlsIdle(true);
+      floatingControlIdleTimerRef.current = null;
+    }, FLOATING_CONTROL_IDLE_DELAY_MS);
+    return clearFloatingControlIdleTimer;
+  }, [clearFloatingControlIdleTimer, floatingControlActivityTick, floatingControlsIdleBlocked]);
   const pulseFloatingControlSide = useCallback(
     (side: PersistedFloatingControlSide) => {
       clearFloatingSidePulseTimer();
@@ -16357,8 +16405,11 @@ function App() {
         className="floating-control-stack"
         data-backdrop-tone={floatingBackdropTone}
         data-drag-state={floatingDragVisualState}
+        data-idle={floatingControlsIdle}
         data-side={floatingControlSide}
         style={effectiveFloatingControlStackStyle}
+        onPointerDownCapture={wakeFloatingControls}
+        onClickCapture={wakeFloatingControls}
         onPointerDown={gestureNavigation ? undefined : beginFloatingPress}
         onPointerMove={gestureNavigation ? handleGestureNavigationPointerMove : handleFloatingPointerMove}
         onPointerUp={event => {
@@ -16471,6 +16522,7 @@ function App() {
             <button
               type="button"
               className="gesture-nav-button gesture-nav-drawer-button"
+              data-active={drawerOpen}
               onPointerDown={handleGestureNavigationButtonPointerDown}
               onClick={handleFloatingDrawerToggle}
               title="Toggle drawer"

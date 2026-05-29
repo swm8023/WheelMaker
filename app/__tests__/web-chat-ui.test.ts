@@ -635,12 +635,15 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toContain('.floating-nav-indicator {');
     expect(stylesCss).toMatch(
-      /\.floating-nav-indicator \{[\s\S]*background: color-mix\(in srgb, var\(--accent\) 28%, transparent\);[\s\S]*border: 1px solid color-mix\(in srgb, var\(--accent\) 32%, transparent\);/,
+      /\.floating-nav-indicator \{[\s\S]*background: transparent;[\s\S]*border: 1px solid color-mix\(in srgb, var\(--accent\) 72%, transparent\);/,
+    );
+    expect(stylesCss).toMatch(
+      /\.floating-nav-button\[data-active='true'\] \{[\s\S]*color: color-mix\(in srgb, var\(--accent\) 88%, var\(--text\)\);[\s\S]*\}/,
     );
     expect(stylesCss).toContain(".floating-nav-button[data-active='true']:hover {");
     expect(stylesCss).toContain('.drawer-toggle-bubble {');
     expect(stylesCss).toMatch(
-      /\.drawer-toggle-bubble\[data-active='true'\] \{[\s\S]*background: color-mix\(in srgb, var\(--accent\) 28%, transparent\);[\s\S]*border-color: color-mix\(in srgb, var\(--accent\) 32%, transparent\);/,
+      /\.drawer-toggle-bubble\[data-active='true'\] \{[\s\S]*background: transparent;[\s\S]*border-color: color-mix\(in srgb, var\(--accent\) 72%, transparent\);[\s\S]*color: color-mix\(in srgb, var\(--accent\) 88%, var\(--text\)\);/,
     );
     expect(stylesCss).toContain('-webkit-tap-highlight-color: transparent;');
     expect(stylesCss).toContain('.breadcrumb-title {');
@@ -1312,6 +1315,12 @@ describe('web chat integration', () => {
     const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
     const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
 
+    expect(mainTsx).toContain('const FLOATING_CONTROL_IDLE_DELAY_MS = 3000;');
+    expect(mainTsx).toContain('const [floatingControlsIdle, setFloatingControlsIdle] = useState(false);');
+    expect(mainTsx).toContain('const floatingControlsIdleBlocked =');
+    expect(mainTsx).toContain('const wakeFloatingControls = useCallback(() => {');
+    expect(mainTsx).toContain('data-idle={floatingControlsIdle}');
+    expect(mainTsx).toContain('onPointerDownCapture={wakeFloatingControls}');
     expect(mainTsx).toContain('data-backdrop-tone={floatingBackdropTone}');
     expect(mainTsx).toContain('requestFloatingBackdropToneMeasure');
     expect(mainTsx).toContain('FLOATING_BACKDROP_TONE_THROTTLE_MS');
@@ -1321,6 +1330,26 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.floating-control-stack\[data-backdrop-tone='light'\] \.floating-nav-group,[\s\S]*\.floating-control-stack\[data-backdrop-tone='light'\] \.drawer-toggle-bubble \{[\s\S]*background: color-mix\(in srgb, var\(--panel\) 88%, transparent\);[\s\S]*backdrop-filter: blur\(8px\);[\s\S]*\}/,
     );
+    expect(stylesCss).toMatch(
+      /\.floating-control-stack\[data-idle='true'\] \{[\s\S]*opacity: 0\.34;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.floating-control-stack\[data-idle='true'\] \.floating-nav-group,[\s\S]*\.floating-control-stack\[data-idle='true'\] \.drawer-toggle-bubble,[\s\S]*\.floating-control-stack\[data-idle='true'\] \.gesture-nav-button \{[\s\S]*background: transparent;[\s\S]*box-shadow: none;[\s\S]*backdrop-filter: none;[\s\S]*\}/,
+    );
+  });
+
+  test('allows a wider vertical drag range for the mobile floating controls', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
+
+    expect(stylesCss).toContain('--wm-safe-area-bottom: env(safe-area-inset-bottom, 0px);');
+    expect(mainTsx).toContain('function readSafeAreaBottomInset(): number {');
+    expect(mainTsx).toContain('const [safeAreaBottomInset, setSafeAreaBottomInset] = useState<number>(() => readSafeAreaBottomInset());');
+    expect(mainTsx).toContain('setSafeAreaBottomInset(readSafeAreaBottomInset());');
+    expect(mainTsx).toContain('const minTop = Math.max(safeAreaTopInset + 6, 6);');
+    expect(mainTsx).toContain('const bottomInset = Math.max(safeAreaBottomInset + 6, 6);');
+    expect(mainTsx).toContain('windowHeight - floatingKeyboardOffset - floatingControlStackHeight - bottomInset');
   });
 
   test('mobile chat drawer uses a cross-project project session sheet', () => {
