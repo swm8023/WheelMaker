@@ -13941,15 +13941,6 @@ function App() {
                 >
                   <span className="codicon codicon-settings-gear" />
                 </button>
-                <button
-                  type="button"
-                  className={`header-btn refresh-btn drawer-project-refresh${hasPendingProjectUpdates && !mobileProjectSessionsRefreshing && !reconnecting ? ' has-update-badge' : ''}`}
-                  onClick={() => refreshMobileChatProjectSessions().catch(() => undefined)}
-                  title={reconnecting ? 'Reconnecting...' : 'Refresh chats'}
-                  disabled={mobileProjectSessionsRefreshing || reconnecting}
-                >
-                  {mobileProjectSessionsRefreshing ? '...' : refreshButtonContent}
-                </button>
               </div>
               {renderChatHeaderSearchControls(true)}
               {renderChatHubSummary()}

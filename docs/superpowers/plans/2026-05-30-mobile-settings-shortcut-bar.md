@@ -313,7 +313,7 @@ In the existing `renderSettingsSection('Debug', ...)` block, add the `Database` 
 
 - [ ] **Step 3: Simplify the mobile Chat toolbar**
 
-In `renderMobileChatSessionSheet`, keep only the Settings shortcut and refresh button inside `<div className="mobile-chat-toolbar" aria-label="Chat tools">`.
+In `renderMobileChatSessionSheet`, keep only the Settings shortcut inside `<div className="mobile-chat-toolbar" aria-label="Chat tools">`.
 
 Use this Settings button markup:
 
@@ -334,6 +334,7 @@ Use this Settings button markup:
 ```
 
 Delete the `Update` and `Port Relay` buttons from that toolbar.
+Delete the refresh button from that toolbar as well so the Chat header left tool group contains only Settings.
 
 - [ ] **Step 4: Add CSS for the mobile Settings bar and padding**
 

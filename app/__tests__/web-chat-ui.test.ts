@@ -735,8 +735,10 @@ describe('web chat integration', () => {
     expect(mobileToolbar).not.toContain('title="Port Relay"');
     expect(mobileToolbar).not.toContain("openSettingsDetail('update')");
     expect(mobileToolbar).not.toContain("openSettingsDetail('portRelay')");
+    expect(mobileToolbar).not.toContain('refreshMobileChatProjectSessions()');
+    expect(mobileToolbar).not.toContain('title={reconnecting ? \'Reconnecting...\' : \'Refresh chats\'}');
     expect(mainTsx).toMatch(
-      /<div className="mobile-chat-toolbar" aria-label="Chat tools">[\s\S]*?title="Open settings"[\s\S]*?refreshMobileChatProjectSessions\(\)[\s\S]*?<\/div>[\s\S]*?\{renderChatHeaderSearchControls\(true\)\}[\s\S]*?\{renderChatHubSummary\(\)\}/,
+      /<div className="mobile-chat-toolbar" aria-label="Chat tools">[\s\S]*?title="Open settings"[\s\S]*?<\/div>[\s\S]*?\{renderChatHeaderSearchControls\(true\)\}[\s\S]*?\{renderChatHubSummary\(\)\}/,
     );
     expect(mainTsx).toMatch(
       /<div className=\{`sidebar-title-row\$\{chatSidebarTitleSearchOpen \? ' search-open' : ''\}`\}>[\s\S]*?<span className="sidebar-title-text">\{wideSidebarTitle\}<\/span>[\s\S]*?\{renderChatHubSummary\(\)\}[\s\S]*?\{renderChatHeaderSearchControls\(false\)\}/,

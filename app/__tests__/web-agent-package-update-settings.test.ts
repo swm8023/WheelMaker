@@ -359,6 +359,8 @@ describe('agent package update settings UI source structure', () => {
     expect(mobileToolbar).not.toContain('title="Port Relay"');
     expect(mobileToolbar).not.toContain("openSettingsDetail('update')");
     expect(mobileToolbar).not.toContain("openSettingsDetail('portRelay')");
+    expect(mobileToolbar).not.toContain('refreshMobileChatProjectSessions()');
+    expect(mobileToolbar).not.toContain('title={reconnecting ? \'Reconnecting...\' : \'Refresh chats\'}');
 
     const mobileToolbarBlock = stylesCss.match(/\.mobile-chat-toolbar \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileToolbarBlock).toContain('gap: 4px;');

@@ -113,7 +113,6 @@ Remove these Chat-header shortcuts:
 Keep:
 
 - the existing Settings button
-- the existing refresh button
 - search controls and hub summary
 
 The Settings button styling should return to the same baseline treatment used by other mobile header buttons. It should no longer look like a mini shortcuts group that carries Settings, Update, and Port Relay together.
