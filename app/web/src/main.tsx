@@ -29,6 +29,7 @@ import {
   type PortRelayTarget,
 } from './portRelayTargets';
 import { initializePWAFoundation } from './pwa';
+import { installWebFreshnessAutoRefresh } from './pwa/webFreshness';
 import { DesktopTitleBar } from './shell/DesktopTitleBar';
 import {resolveDesktopChatQuickSwitchContextMenu} from './shell/desktop/chatQuickSwitchContextMenu';
 import { submitDesktopRemoteWebCandidate } from './shell/desktop/webSource';
@@ -586,6 +587,12 @@ function ThinkingBlock({ content, isStreaming }: ThinkingBlockProps) {
 }
 
 const pwaFoundation = initializePWAFoundation();
+installWebFreshnessAutoRefresh({
+  currentBuild: {
+    sha: __WHEELMAKER_WEB_BUILD_SHA__,
+    builtAt: __WHEELMAKER_WEB_BUILD_TIME__,
+  },
+});
 const registryDebugStore = createRegistryDebugStore();
 const service = new RegistryWorkspaceService(registryDebugStore.recordCaptureEvent);
 const workspaceStore = new WorkspaceStore();

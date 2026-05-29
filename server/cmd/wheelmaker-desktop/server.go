@@ -164,7 +164,41 @@ func serveEmbeddedDesktopAsset(w http.ResponseWriter, r *http.Request, assets fs
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
+	setDesktopAssetCacheControl(w.Header(), name)
 	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
+}
+
+func setDesktopAssetCacheControl(header http.Header, name string) {
+	if value := desktopAssetCacheControl(name); value != "" {
+		header.Set("Cache-Control", value)
+	}
+}
+
+func desktopAssetCacheControl(name string) string {
+	base := path.Base(name)
+	switch base {
+	case "index.html", "service-worker.js":
+		return "no-cache, must-revalidate"
+	case "runtime-config.js", "web-build.json":
+		return "no-store"
+	}
+	if isImmutableDesktopAsset(base) {
+		return "public, max-age=31536000, immutable"
+	}
+	return ""
+}
+
+func isImmutableDesktopAsset(base string) bool {
+	ext := strings.ToLower(path.Ext(base))
+	if strings.HasPrefix(base, "bundle.") && (ext == ".js" || ext == ".css") {
+		return true
+	}
+	switch ext {
+	case ".woff", ".woff2", ".ttf", ".eot", ".svg":
+		return true
+	default:
+		return false
+	}
 }
 
 func buildDesktopRemoteAssetURL(remoteBase string, name string) (string, bool) {

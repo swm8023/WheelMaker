@@ -144,6 +144,37 @@ func TestDesktopAssetHandlerServesStaticAsset(t *testing.T) {
 	}
 }
 
+func TestDesktopAssetHandlerSetsFreshWebCacheHeaders(t *testing.T) {
+	handler := newDesktopAssetHandler(fstest.MapFS{
+		"index.html":        {Data: []byte("<html></html>")},
+		"service-worker.js": {Data: []byte("self.addEventListener('install', () => {})")},
+		"runtime-config.js": {Data: []byte("window.__WHEELMAKER_RUNTIME_CONFIG__ = {};")},
+		"web-build.json":    {Data: []byte(`{"sha":"abc"}`)},
+		"bundle.abc123.js":  {Data: []byte("console.log('wm')")},
+	})
+
+	tests := []struct {
+		path string
+		want string
+	}{
+		{path: "/", want: "no-cache, must-revalidate"},
+		{path: "/index.html", want: "no-cache, must-revalidate"},
+		{path: "/service-worker.js", want: "no-cache, must-revalidate"},
+		{path: "/runtime-config.js", want: "no-store"},
+		{path: "/web-build.json", want: "no-store"},
+		{path: "/bundle.abc123.js", want: "public, max-age=31536000, immutable"},
+	}
+
+	for _, tt := range tests {
+		req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if got := rec.Header().Get("Cache-Control"); got != tt.want {
+			t.Fatalf("%s Cache-Control=%q want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestDesktopAssetHandlerFallsBackToIndexForWorkspaceRoute(t *testing.T) {
 	handler := newDesktopAssetHandler(fstest.MapFS{
 		"index.html": {Data: []byte("<html>shell</html>")},

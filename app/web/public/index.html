@@ -9,13 +9,17 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
     <link rel="apple-touch-icon" href="/icons/icon.svg" />
-    <link rel="stylesheet" href="/bundle.css" />
+    <% for (const href of (htmlWebpackPlugin.files.css || []).filter(file => file.includes('/bundle'))) { %>
+    <link rel="stylesheet" href="<%= href %>" />
+    <% } %>
     <title>WheelMaker</title>
     <script src="/runtime-config.js"></script>
   </head>
   <body>
     <div id="root"></div>
-    <script src="/bundle.js"></script>
+    <% for (const src of (htmlWebpackPlugin.files.js || []).filter(file => file.includes('/bundle'))) { %>
+    <script src="<%= src %>"></script>
+    <% } %>
   </body>
 </html>
 

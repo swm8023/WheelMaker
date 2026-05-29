@@ -1,7 +1,7 @@
 /* eslint-env serviceworker */
 
-const CACHE_NAME = 'wheelmaker-web-pwa-v6';
-const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon.svg'];
+const CACHE_NAME = 'wheelmaker-web-pwa-v7';
+const ICON_ASSETS = ['/icons/icon.svg'];
 function showLocalNotification(payload = {}) {
   const title = payload.title || 'WheelMaker';
   const body = payload.body || 'You have new updates';
@@ -18,7 +18,7 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then(cache => cache.addAll(SHELL))
+      .then(cache => cache.addAll(ICON_ASSETS))
       .then(() => self.skipWaiting()),
   );
 });
@@ -44,10 +44,6 @@ async function networkFirst(request) {
   } catch (error) {
     const cached = await caches.match(request);
     if (cached) return cached;
-    if (request.mode === 'navigate') {
-      const shell = await caches.match('/index.html');
-      if (shell) return shell;
-    }
     throw error;
   }
 }
@@ -117,6 +113,8 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/ws')) return;
   if (url.pathname.endsWith('/service-worker.js')) return;
+  if (url.pathname.endsWith('/runtime-config.js')) return;
+  if (url.pathname.endsWith('/web-build.json')) return;
 
   if (req.mode === 'navigate') {
     event.respondWith(networkFirst(req));
