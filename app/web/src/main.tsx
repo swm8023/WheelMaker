@@ -148,6 +148,7 @@ import {
   createMobileSettingsHistoryState,
   isMobileSettingsHistoryState,
   mobileSettingsHistoryKey,
+  resolveMobileSettingsHistoryWriteAction,
   resolveMobileSettingsPopAction,
   type MobileSettingsHistoryDetail,
 } from './services/mobileSettingsHistory';
@@ -6448,10 +6449,18 @@ function App() {
       return;
     }
     const nextKey = mobileSettingsHistoryKey(settingsDetailView as MobileSettingsHistoryDetail | null);
-    if (mobileSettingsHistoryKeyRef.current === nextKey) {
+    const historyWriteAction = resolveMobileSettingsHistoryWriteAction({
+      currentKey: mobileSettingsHistoryKeyRef.current,
+      nextDetail: settingsDetailView as MobileSettingsHistoryDetail | null,
+    });
+    if (historyWriteAction === 'none') {
       return;
     }
-    window.history.pushState(createMobileSettingsHistoryState(settingsDetailView as MobileSettingsHistoryDetail | null), '', window.location.href);
+    if (historyWriteAction === 'replace') {
+      window.history.replaceState(createMobileSettingsHistoryState(settingsDetailView as MobileSettingsHistoryDetail | null), '', window.location.href);
+    } else {
+      window.history.pushState(createMobileSettingsHistoryState(settingsDetailView as MobileSettingsHistoryDetail | null), '', window.location.href);
+    }
     mobileSettingsHistoryKeyRef.current = nextKey;
   }, [isWide, sidebarSettingsOpen, settingsDetailView]);
   useEffect(() => {
@@ -6500,6 +6509,11 @@ function App() {
     }
     setSidebarSettingsOpen(false);
   }, [isWide, sidebarSettingsOpen, settingsDetailView, setSidebarSettingsOpen]);
+  const handleMobileSettingsRootShortcut = useCallback(() => {
+    if (settingsDetailView !== null) {
+      handleSettingsDetailBack();
+    }
+  }, [handleSettingsDetailBack, settingsDetailView]);
   const clampDesktopSidebarWidthForViewport = useCallback((width: number) => {
     const viewportMax = windowWidth > 0
       ? Math.floor(windowWidth * DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO)
@@ -16518,13 +16532,12 @@ function App() {
       <button
         type="button"
         className={`mobile-settings-shortcut-button${settingsDetailView === null ? ' active' : ''}`}
-        onClick={() => {
-          setSettingsDetailView(null);
-        }}
+        onClick={handleMobileSettingsRootShortcut}
         title="Settings"
         aria-label="Settings"
       >
         <span className="codicon codicon-settings-gear" />
+        <span className="mobile-settings-shortcut-label">Settings</span>
       </button>
       <button
         type="button"
@@ -16534,6 +16547,7 @@ function App() {
         aria-label="Update"
       >
         <span className="codicon codicon-cloud-download" />
+        <span className="mobile-settings-shortcut-label">Update</span>
       </button>
       <button
         type="button"
@@ -16543,6 +16557,7 @@ function App() {
         aria-label="Skills"
       >
         <span className="codicon codicon-extensions" />
+        <span className="mobile-settings-shortcut-label">Skills</span>
       </button>
       <button
         type="button"
@@ -16552,6 +16567,7 @@ function App() {
         aria-label="Port Relay"
       >
         <span className="codicon codicon-radio-tower" />
+        <span className="mobile-settings-shortcut-label">Port Relay</span>
       </button>
       <button
         type="button"
@@ -16561,6 +16577,7 @@ function App() {
         aria-label="Token Stats"
       >
         <span className="codicon codicon-graph-line" />
+        <span className="mobile-settings-shortcut-label">Token Stats</span>
       </button>
       <button
         type="button"
@@ -16570,6 +16587,7 @@ function App() {
         aria-label="CC Switch"
       >
         <span className="codicon codicon-arrow-swap" />
+        <span className="mobile-settings-shortcut-label">CC Switch</span>
       </button>
     </nav>
   ) : null;

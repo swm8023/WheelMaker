@@ -347,7 +347,9 @@ describe('agent package update settings UI source structure', () => {
     expect(mobileBar).toContain("openSettingsDetail('portRelay')");
     expect(mobileBar).toContain("openSettingsDetail('tokenStats')");
     expect(mobileBar).toContain("openSettingsDetail('ccSwitch')");
-    expect(mobileBar).toContain('setSettingsDetailView(null);');
+    expect(mobileBar).toContain('onClick={handleMobileSettingsRootShortcut}');
+    expect(mobileBar).toContain('className="mobile-settings-shortcut-label">Settings</span>');
+    expect(mobileBar).toContain('className="mobile-settings-shortcut-label">CC Switch</span>');
 
     const mobileToolbarStart = mainTsx.indexOf('<div className="mobile-chat-toolbar"');
     const mobileToolbarEnd = mainTsx.indexOf('{renderChatHubSummary()}', mobileToolbarStart);
@@ -370,7 +372,14 @@ describe('agent package update settings UI source structure', () => {
 
     expect(stylesCss).toContain('.mobile-settings-shortcut-bar {');
     expect(stylesCss).toContain('.mobile-settings-shortcut-button {');
+    expect(stylesCss).toContain('.mobile-settings-shortcut-label {');
     expect(stylesCss).toContain('.mobile-settings-shortcut-button.active::before');
+    const mobileShortcutButtonBlock = stylesCss.match(/\.mobile-settings-shortcut-button \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileShortcutButtonBlock).toContain('height: 58px;');
+    expect(mobileShortcutButtonBlock).toContain('flex-direction: column;');
+    const mobileShortcutActiveBlock = stylesCss.match(/\.mobile-settings-shortcut-button\.active::before \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileShortcutActiveBlock).toContain('top: 0;');
+    expect(mobileShortcutActiveBlock).not.toContain('bottom: 0;');
     expect(stylesCss).toContain('padding: 0 0 env(safe-area-inset-bottom, 0px);');
     expect(stylesCss).not.toContain('.mobile-chat-toolbar-icon.active');
   });

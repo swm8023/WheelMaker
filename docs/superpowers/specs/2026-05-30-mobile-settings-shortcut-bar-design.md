@@ -27,8 +27,9 @@ Mobile Chat currently also has compact toolbar shortcuts for `Update` and `Port 
 Add a Settings-only bottom activity bar on mobile, matching the desktop activity bar visual language:
 
 - flat icon buttons
+- visible labels below icons
 - same muted icon tone
-- active state using the accent indicator and active foreground
+- active state using a top accent indicator and active foreground
 - background aligned with the activity bar surface
 - safe-area padding at the bottom
 
@@ -96,7 +97,7 @@ The bottom bar should use stable dimensions:
 
 - fixed icon-button hit targets similar to desktop
 - horizontal layout
-- no labels, only icon buttons with `title` and `aria-label`
+- short labels below each icon
 - bottom safe-area padding
 
 The detail page top title bar and right-side detail actions remain unchanged. The bottom activity bar is an additional navigation surface, not a replacement for the back button.

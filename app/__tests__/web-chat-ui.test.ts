@@ -598,6 +598,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.mobile-settings-group {');
     expect(stylesCss).toContain('.mobile-settings-screen .settings-row {');
     expect(stylesCss).toContain('.mobile-settings-screen .settings-danger-row {');
+    expect(stylesCss).toContain('.mobile-settings-shortcut-label {');
     expect(stylesCss).not.toContain('.project-menu-state');
     expect(stylesCss).toMatch(
       /\.project-menu-hub \{[\s\S]*background: color-mix\(in srgb, var\(--accent\) 18%, var\(--panel-2\)\);/,

@@ -13,6 +13,7 @@ export type MobileSettingsHistoryState = {
 };
 
 export type MobileSettingsPopAction = 'back-to-list' | 'close-settings' | 'none';
+export type MobileSettingsHistoryWriteAction = 'push' | 'replace' | 'none';
 
 const MOBILE_SETTINGS_HISTORY_MARKER = 'mobile-settings';
 
@@ -45,6 +46,23 @@ export function isMobileSettingsHistoryState(input: unknown): input is MobileSet
 
 export function mobileSettingsHistoryKey(detail: MobileSettingsHistoryDetail | null): string {
   return `mobile-settings:${detail ?? 'root'}`;
+}
+
+export function resolveMobileSettingsHistoryWriteAction({
+  currentKey,
+  nextDetail,
+}: {
+  currentKey: string | null;
+  nextDetail: MobileSettingsHistoryDetail | null;
+}): MobileSettingsHistoryWriteAction {
+  const nextKey = mobileSettingsHistoryKey(nextDetail);
+  if (currentKey === nextKey) {
+    return 'none';
+  }
+  if (currentKey === null || currentKey === mobileSettingsHistoryKey(null)) {
+    return 'push';
+  }
+  return 'replace';
 }
 
 export function resolveMobileSettingsPopAction({

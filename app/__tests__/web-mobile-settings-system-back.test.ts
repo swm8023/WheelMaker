@@ -5,6 +5,7 @@ import {
   isMobileSettingsHistoryState,
   mobileSettingsHistoryKey,
   resolveMobileSettingsPopAction,
+  resolveMobileSettingsHistoryWriteAction,
 } from '../web/src/services/mobileSettingsHistory';
 
 function readMain(): string {
@@ -59,17 +60,47 @@ describe('mobile settings system back', () => {
     })).toBe('none');
   });
 
+  test('replaces history when switching between mobile settings details', () => {
+    expect(resolveMobileSettingsHistoryWriteAction({
+      currentKey: null,
+      nextDetail: null,
+    })).toBe('push');
+
+    expect(resolveMobileSettingsHistoryWriteAction({
+      currentKey: mobileSettingsHistoryKey(null),
+      nextDetail: 'update',
+    })).toBe('push');
+
+    expect(resolveMobileSettingsHistoryWriteAction({
+      currentKey: mobileSettingsHistoryKey('update'),
+      nextDetail: 'skills',
+    })).toBe('replace');
+
+    expect(resolveMobileSettingsHistoryWriteAction({
+      currentKey: mobileSettingsHistoryKey('skills'),
+      nextDetail: null,
+    })).toBe('replace');
+
+    expect(resolveMobileSettingsHistoryWriteAction({
+      currentKey: mobileSettingsHistoryKey('skills'),
+      nextDetail: 'skills',
+    })).toBe('none');
+  });
+
   test('wires mobile settings to history and mobile title actions', () => {
     const main = readMain();
 
     expect(main).toContain("} from './services/mobileSettingsHistory';");
     expect(main).toContain('window.history.pushState(createMobileSettingsHistoryState(settingsDetailView');
+    expect(main).toContain('window.history.replaceState(createMobileSettingsHistoryState(settingsDetailView');
+    expect(main).toContain('resolveMobileSettingsHistoryWriteAction({');
     expect(main).toContain("window.addEventListener('popstate', handleMobileSettingsPopState)");
     expect(main).toContain('resolveMobileSettingsPopAction({');
     expect(main).toContain('const mobileSettingsTitle = settingsDetailView');
     expect(main).toContain('const mobileSettingsActions = settingsDetailView');
     expect(main).toContain('renderSettingsContent(false, { hideDetailHeader: true })');
     expect(main).toContain('handleMobileSettingsBackButton');
+    expect(main).toContain('handleMobileSettingsRootShortcut');
     expect(main).toContain('renderSettingsDetailActions(settingsDetailView)');
     expect(main).not.toContain('mobileSettingsSwipe');
   });

@@ -6,6 +6,8 @@
 
 **Architecture:** Keep the change inside the existing React source-structure pattern in `app/web/src/main.tsx` and `app/web/src/styles.css`. Add no new routing or data model; all shortcuts reuse existing `settingsDetailView` detail pages and existing refresh/detail action behavior.
 
+**Follow-up:** The bar uses visible labels below icons, a top active indicator, and replaces mobile Settings detail history entries when users switch between shortcuts so back exits predictably.
+
 **Tech Stack:** React, TypeScript, CSS, Jest source-structure tests, npm scripts in `app/`.
 
 ---
