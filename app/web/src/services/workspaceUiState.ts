@@ -1,9 +1,9 @@
 import type { LayoutMode } from './responsiveLayout';
 import type {
   PersistedFloatingControlSide,
-  PersistedFloatingControlSlot,
   PersistedTab,
 } from './workspacePersistence';
+import { sanitizeFloatingControlYRatio } from './mobileFloatingControls';
 
 export type WorkspaceUiStateValue<T> = T | ((current: T) => T);
 
@@ -37,7 +37,7 @@ export type WorkspaceUiState = {
   };
   mobile: {
     drawerOpen: boolean;
-    floatingControlSlot: PersistedFloatingControlSlot;
+    floatingControlYRatio: number;
     floatingControlSide: PersistedFloatingControlSide;
     chatConfigOverflowOpen: boolean;
   };
@@ -57,7 +57,7 @@ export type WorkspaceUiStateInput = {
   desktopCollapsedProjectIds?: unknown;
   pinnedProjectIds?: unknown;
   drawerOpen?: unknown;
-  floatingControlSlot?: unknown;
+  floatingControlYRatio?: unknown;
   floatingControlSide?: unknown;
   chatConfigOverflowOpen?: unknown;
   chatKeyboardInset?: unknown;
@@ -74,8 +74,8 @@ export type WorkspaceUiAction =
   | { type: 'desktop/setSidebarWidth'; next: WorkspaceUiStateValue<number> }
   | { type: 'mobile/setDrawerOpen'; next: WorkspaceUiStateValue<boolean> }
   | {
-      type: 'mobile/setFloatingControlSlot';
-      next: WorkspaceUiStateValue<PersistedFloatingControlSlot>;
+      type: 'mobile/setFloatingControlYRatio';
+      next: WorkspaceUiStateValue<number>;
     }
   | {
       type: 'mobile/setFloatingControlSide';
@@ -104,16 +104,6 @@ function resolveNext<T>(current: T, next: WorkspaceUiStateValue<T>): T {
 
 function sanitizeTab(value: unknown): PersistedTab {
   return value === 'chat' || value === 'git' ? value : 'file';
-}
-
-function sanitizeFloatingControlSlot(value: unknown): PersistedFloatingControlSlot {
-  return value === 'upper' ||
-    value === 'upper-middle' ||
-    value === 'center' ||
-    value === 'lower-middle' ||
-    value === 'lower'
-    ? value
-    : 'upper-middle';
 }
 
 function sanitizeFloatingControlSide(value: unknown): PersistedFloatingControlSide {
@@ -170,7 +160,7 @@ export function createWorkspaceUiState(input: WorkspaceUiStateInput = {}): Works
     },
     mobile: {
       drawerOpen: typeof input.drawerOpen === 'boolean' ? input.drawerOpen : false,
-      floatingControlSlot: sanitizeFloatingControlSlot(input.floatingControlSlot),
+      floatingControlYRatio: sanitizeFloatingControlYRatio(input.floatingControlYRatio),
       floatingControlSide: sanitizeFloatingControlSide(input.floatingControlSide),
       chatConfigOverflowOpen:
         typeof input.chatConfigOverflowOpen === 'boolean'
@@ -253,13 +243,13 @@ export function workspaceUiReducer(
           drawerOpen: !!resolveNext(state.mobile.drawerOpen, action.next),
         },
       };
-    case 'mobile/setFloatingControlSlot':
+    case 'mobile/setFloatingControlYRatio':
       return {
         ...state,
         mobile: {
           ...state.mobile,
-          floatingControlSlot: sanitizeFloatingControlSlot(
-            resolveNext(state.mobile.floatingControlSlot, action.next),
+          floatingControlYRatio: sanitizeFloatingControlYRatio(
+            resolveNext(state.mobile.floatingControlYRatio, action.next),
           ),
         },
       };

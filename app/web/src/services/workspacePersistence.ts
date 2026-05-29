@@ -27,15 +27,14 @@ import {
   normalizeSpeechSettings,
   type SpeechSettings,
 } from '../features/speech/speechSettings';
+import {
+  FLOATING_CONTROL_DEFAULT_Y_RATIO,
+  floatingControlYRatioFromLegacySlot,
+  sanitizeFloatingControlYRatio,
+} from './mobileFloatingControls';
 
 export type PersistedTab = 'chat' | 'file' | 'git';
 export type PersistedThemeMode = 'dark' | 'light';
-export type PersistedFloatingControlSlot =
-  | 'upper'
-  | 'upper-middle'
-  | 'center'
-  | 'lower-middle'
-  | 'lower';
 export type PersistedFloatingControlSide = 'left' | 'right';
 
 export type DiffCacheEntry = {
@@ -89,7 +88,7 @@ export type PersistedGlobalState = {
   selectedProjectId: string;
   selectedChatProjectId: string;
   selectedChatSessionId: string;
-  floatingControlSlot: PersistedFloatingControlSlot;
+  floatingControlYRatio: number;
   floatingControlSide: PersistedFloatingControlSide;
   desktopSidebarWidth: number;
   collapsedProjectIds: string[];
@@ -165,6 +164,7 @@ const GLOBAL_KEYS = {
   selectedProjectId: 'selectedProjectId',
   selectedChatProjectId: 'selectedChatProjectId',
   selectedChatSessionId: 'selectedChatSessionId',
+  floatingControlYRatio: 'floatingControlYRatio',
   floatingControlSlot: 'floatingControlSlot',
   floatingControlSide: 'floatingControlSide',
   desktopSidebarWidth: 'desktopSidebarWidth',
@@ -200,7 +200,7 @@ function defaultGlobalState(): PersistedGlobalState {
     selectedProjectId: '',
     selectedChatProjectId: '',
     selectedChatSessionId: '',
-    floatingControlSlot: 'upper-middle',
+    floatingControlYRatio: FLOATING_CONTROL_DEFAULT_Y_RATIO,
     floatingControlSide: 'right',
     desktopSidebarWidth: 380,
     collapsedProjectIds: [],
@@ -367,7 +367,11 @@ function sanitizeProjectCommitsState(input: Partial<PersistedProjectCommitsState
   };
 }
 
-function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): PersistedGlobalState {
+type PersistedGlobalStateInput = Partial<PersistedGlobalState> & {
+  floatingControlSlot?: unknown;
+};
+
+function sanitizeGlobalState(input: PersistedGlobalStateInput | undefined): PersistedGlobalState {
   const base = defaultGlobalState();
   if (!input) return base;
   const collapsedProjectIds = Array.isArray(input.collapsedProjectIds)
@@ -378,14 +382,11 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
   const pinnedProjectIds = Array.isArray(input.pinnedProjectIds)
     ? Array.from(new Set(input.pinnedProjectIds.filter(item => typeof item === 'string' && item)))
     : base.pinnedProjectIds;
-  const floatingControlSlot =
-    input.floatingControlSlot === 'upper' ||
-    input.floatingControlSlot === 'upper-middle' ||
-    input.floatingControlSlot === 'center' ||
-    input.floatingControlSlot === 'lower-middle' ||
-    input.floatingControlSlot === 'lower'
-      ? input.floatingControlSlot
-      : 'upper-middle';
+  const legacyFloatingControlYRatio = floatingControlYRatioFromLegacySlot(input.floatingControlSlot);
+  const floatingControlYRatio = sanitizeFloatingControlYRatio(
+    input.floatingControlYRatio,
+    legacyFloatingControlYRatio ?? base.floatingControlYRatio,
+  );
   const sanitizeDesktopSidebarWidth = (value: unknown, fallback: number): number => {
     const numeric = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
     return Math.min(560, Math.max(320, Math.round(numeric)));
@@ -415,7 +416,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     selectedProjectId: typeof input.selectedProjectId === 'string' ? input.selectedProjectId : base.selectedProjectId,
     selectedChatProjectId: typeof input.selectedChatProjectId === 'string' ? input.selectedChatProjectId : base.selectedChatProjectId,
     selectedChatSessionId: typeof input.selectedChatSessionId === 'string' ? input.selectedChatSessionId : base.selectedChatSessionId,
-    floatingControlSlot,
+    floatingControlYRatio,
     floatingControlSide: sanitizeFloatingControlSide(input.floatingControlSide, base.floatingControlSide),
     desktopSidebarWidth: sanitizeDesktopSidebarWidth(input.desktopSidebarWidth, base.desktopSidebarWidth),
     collapsedProjectIds,
@@ -897,7 +898,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.selectedProjectId, v: serialize(this.state.global.selectedProjectId), updatedAt: now},
       {k: GLOBAL_KEYS.selectedChatProjectId, v: serialize(this.state.global.selectedChatProjectId), updatedAt: now},
       {k: GLOBAL_KEYS.selectedChatSessionId, v: serialize(this.state.global.selectedChatSessionId), updatedAt: now},
-      {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(this.state.global.floatingControlSlot), updatedAt: now},
+      {k: GLOBAL_KEYS.floatingControlYRatio, v: serialize(this.state.global.floatingControlYRatio), updatedAt: now},
       {k: GLOBAL_KEYS.floatingControlSide, v: serialize(this.state.global.floatingControlSide), updatedAt: now},
       {k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(this.state.global.desktopSidebarWidth), updatedAt: now},
       {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(this.state.global.collapsedProjectIds), updatedAt: now},
@@ -1247,7 +1248,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedProjectId, v: serialize(next.selectedProjectId), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedChatProjectId, v: serialize(next.selectedChatProjectId), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedChatSessionId, v: serialize(next.selectedChatSessionId), updatedAt: now});
-      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(next.floatingControlSlot), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.floatingControlYRatio, v: serialize(next.floatingControlYRatio), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.floatingControlSide, v: serialize(next.floatingControlSide), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(next.desktopSidebarWidth), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(next.collapsedProjectIds), updatedAt: now});

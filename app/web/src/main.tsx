@@ -128,7 +128,14 @@ import {
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
 import { triggerMobileHaptic } from './services/mobileHaptics';
-import { resolveFloatingControlDragSide } from './services/mobileFloatingControls';
+import {
+  FLOATING_CONTROL_DEFAULT_Y_RATIO,
+  floatingControlTopFromYRatio,
+  floatingControlYRatioFromLegacySlot,
+  floatingControlYRatioFromTop,
+  resolveFloatingControlDragSide,
+  sanitizeFloatingControlYRatio,
+} from './services/mobileFloatingControls';
 import {
   GESTURE_LONG_PRESS_MS,
   GESTURE_MOVE_LONG_PRESS_MS,
@@ -247,7 +254,6 @@ import {
 } from './services/workspaceUiState';
 import type {
   PersistedFloatingControlSide,
-  PersistedFloatingControlSlot,
 } from './services/workspacePersistence';
 import type {
   RegistryChatContentBlock,
@@ -618,8 +624,8 @@ const fileMemoryCacheKey = (activeProjectId: string, path: string) => `${activeP
 const PROJECT_PIN_LONG_PRESS_MS = 450;
 const PROJECT_SESSION_LONG_PRESS_MS = 450;
 const DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO = 0.45;
-const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle', 'lower'] as const;
 const FLOATING_CONTROL_IDLE_DELAY_MS = 3000;
+const PORT_RELAY_FLOATING_Y_RATIO_STORAGE_KEY = 'wheelmaker:portRelayFloatingYRatio';
 const PORT_RELAY_FLOATING_SLOT_STORAGE_KEY = 'wheelmaker:portRelayFloatingSlot';
 const PORT_RELAY_FLOATING_SIDE_STORAGE_KEY = 'wheelmaker:portRelayFloatingSide';
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
@@ -907,52 +913,26 @@ function formatWheelMakerDateTime(value: string): string {
   });
 }
 
-function floatingControlSlotRatio(slot: PersistedFloatingControlSlot): number {
-  switch (slot) {
-    case 'upper':
-      return 0;
-    case 'upper-middle':
-      return 0.25;
-    case 'center':
-      return 0.5;
-    case 'lower-middle':
-      return 0.75;
-    case 'lower':
-      return 1;
-    default:
-      return 0.25;
-  }
-}
-
 function clampFloatingTop(top: number, minTop: number, maxTop: number): number {
   return Math.min(maxTop, Math.max(minTop, top));
-}
-
-function nearestFloatingSlot(
-  top: number,
-  slotTops: Array<{ slot: PersistedFloatingControlSlot; top: number }>,
-): PersistedFloatingControlSlot {
-  return slotTops.reduce((best, entry) =>
-    Math.abs(entry.top - top) < Math.abs(best.top - top) ? entry : best,
-  ).slot;
-}
-
-function isFloatingControlSlot(value: unknown): value is PersistedFloatingControlSlot {
-  return value === 'upper' ||
-    value === 'upper-middle' ||
-    value === 'center' ||
-    value === 'lower-middle' ||
-    value === 'lower';
 }
 
 function isFloatingControlSide(value: unknown): value is PersistedFloatingControlSide {
   return value === 'left' || value === 'right';
 }
 
-function readPortRelayFloatingSlot(): PersistedFloatingControlSlot | null {
+function readPortRelayFloatingYRatio(): number | null {
+  try {
+    const value = window.localStorage.getItem(PORT_RELAY_FLOATING_Y_RATIO_STORAGE_KEY);
+    if (value !== null) {
+      return sanitizeFloatingControlYRatio(Number.parseFloat(value));
+    }
+  } catch {
+    return null;
+  }
   try {
     const value = window.localStorage.getItem(PORT_RELAY_FLOATING_SLOT_STORAGE_KEY);
-    return isFloatingControlSlot(value) ? value : null;
+    return floatingControlYRatioFromLegacySlot(value);
   } catch {
     return null;
   }
@@ -3005,12 +2985,12 @@ function App() {
         collapsedProjectIds: globalState.collapsedProjectIds ?? globalState.desktopCollapsedProjectIds ?? [],
         desktopSidebarWidth: globalState.desktopSidebarWidth,
         pinnedProjectIds: globalState.pinnedProjectIds ?? [],
-        floatingControlSlot: globalState.floatingControlSlot ?? readPortRelayFloatingSlot() ?? 'upper-middle',
+        floatingControlYRatio: globalState.floatingControlYRatio ?? readPortRelayFloatingYRatio() ?? FLOATING_CONTROL_DEFAULT_Y_RATIO,
         floatingControlSide: globalState.floatingControlSide ?? readPortRelayFloatingSide() ?? 'right',
       }),
   );
   const tab = workspaceUiState.shared.tab as Tab;
-  const floatingControlSlot = workspaceUiState.mobile.floatingControlSlot;
+  const floatingControlYRatio = workspaceUiState.mobile.floatingControlYRatio;
   const floatingControlSide = workspaceUiState.mobile.floatingControlSide;
   const floatingDragState = workspaceUiState.transient.floatingDragState as FloatingDragState | null;
   const floatingKeyboardOffset = workspaceUiState.transient.floatingKeyboardOffset;
@@ -3031,6 +3011,8 @@ function App() {
   const gestureLongPressTimerRef = useRef<number | null>(null);
   const gestureMoveLongPressTimerRef = useRef<number | null>(null);
   const [floatingControlStackHeight, setFloatingControlStackHeight] = useState(184);
+  const chatComposerRef = useRef<HTMLDivElement | null>(null);
+  const [chatComposerTop, setChatComposerTop] = useState<number | null>(null);
   const floatingLongPressTimerRef = useRef<number | null>(null);
   const floatingCooldownTimerRef = useRef<number | null>(null);
   const floatingClickCooldownUntilRef = useRef(0);
@@ -3056,9 +3038,9 @@ function App() {
   const setTab = useCallback((next: WorkspaceUiStateValue<Tab>) => {
     dispatchWorkspaceUi({ type: 'shared/setTab', next });
   }, []);
-  const setFloatingControlSlot = useCallback(
-    (next: WorkspaceUiStateValue<PersistedFloatingControlSlot>) => {
-      dispatchWorkspaceUi({ type: 'mobile/setFloatingControlSlot', next });
+  const setFloatingControlYRatio = useCallback(
+    (next: WorkspaceUiStateValue<number>) => {
+      dispatchWorkspaceUi({ type: 'mobile/setFloatingControlYRatio', next });
     },
     [],
   );
@@ -4919,10 +4901,41 @@ function App() {
     };
   }, [wideProjectActionMenu]);
 
+  const measureChatComposerTop = useCallback(() => {
+    const rect = chatComposerRef.current?.getBoundingClientRect();
+    setChatComposerTop(rect ? Math.round(rect.top) : null);
+  }, []);
 
   useLayoutEffect(() => {
     resizeChatComposerTextarea();
-  }, [resizeChatComposerTextarea, chatComposerText, tab, selectedChatId, currentChatDraftKey]);
+    measureChatComposerTop();
+  }, [resizeChatComposerTextarea, measureChatComposerTop, chatComposerText, tab, selectedChatId, currentChatDraftKey]);
+
+  useEffect(() => {
+    if (isWide || tab !== 'chat') {
+      setChatComposerTop(null);
+      return;
+    }
+    const measure = () => measureChatComposerTop();
+    measure();
+    window.addEventListener('resize', measure);
+    window.visualViewport?.addEventListener('resize', measure);
+    window.visualViewport?.addEventListener('scroll', measure);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.visualViewport?.removeEventListener('resize', measure);
+      window.visualViewport?.removeEventListener('scroll', measure);
+    };
+  }, [
+    isWide,
+    tab,
+    measureChatComposerTop,
+    chatComposerText,
+    chatAttachments.length,
+    voiceRecording,
+    chatKeyboardInset,
+    windowHeight,
+  ]);
 
   useEffect(() => {
     if (tab !== 'chat') {
@@ -5384,7 +5397,7 @@ function App() {
       gestureNavigation,
       tab,
       selectedProjectId: projectId,
-      floatingControlSlot,
+      floatingControlYRatio,
       desktopSidebarWidth,
       collapsedProjectIds,
       pinnedProjectIds,
@@ -5407,7 +5420,7 @@ function App() {
     gestureNavigation,
     tab,
     projectId,
-    floatingControlSlot,
+    floatingControlYRatio,
     desktopSidebarWidth,
     collapsedProjectIds,
     pinnedProjectIds,
@@ -5583,12 +5596,17 @@ function App() {
     }
     const minTop = Math.max(safeAreaTopInset + 6, 6);
     const bottomInset = Math.max(safeAreaBottomInset + 6, 6);
+    const viewportMaxTop = windowHeight - floatingKeyboardOffset - floatingControlStackHeight - bottomInset;
+    const composerMaxTop = chatComposerTop === null
+      ? viewportMaxTop
+      : chatComposerTop - floatingControlStackHeight - 6;
     const maxTop = Math.max(
       minTop,
-      windowHeight - floatingKeyboardOffset - floatingControlStackHeight - bottomInset,
+      Math.min(viewportMaxTop, composerMaxTop),
     );
     return { minTop, maxTop };
   }, [
+    chatComposerTop,
     isWide,
     safeAreaBottomInset,
     safeAreaTopInset,
@@ -5596,27 +5614,13 @@ function App() {
     floatingKeyboardOffset,
     floatingControlStackHeight,
   ]);
-  const floatingSlotTops = useMemo(
-    () =>
-      FLOATING_CONTROL_SLOT_ORDER.map(slot => ({
-        slot,
-        top: clampFloatingTop(
-          Math.round(
-            floatingBounds.minTop +
-              (floatingBounds.maxTop - floatingBounds.minTop) * floatingControlSlotRatio(slot),
-          ),
-          floatingBounds.minTop,
-          floatingBounds.maxTop,
-        ),
-      })),
-    [floatingBounds.maxTop, floatingBounds.minTop],
-  );
   const floatingRestTop = useMemo(
-    () =>
-      floatingSlotTops.find(entry => entry.slot === floatingControlSlot)?.top ??
-      floatingSlotTops[0]?.top ??
+    () => floatingControlTopFromYRatio(
+      floatingControlYRatio,
       floatingBounds.minTop,
-    [floatingBounds.minTop, floatingControlSlot, floatingSlotTops],
+      floatingBounds.maxTop,
+    ),
+    [floatingBounds.maxTop, floatingBounds.minTop, floatingControlYRatio],
   );
   const floatingControlTop = useMemo(() => {
     if (floatingDragState?.active) {
@@ -5959,15 +5963,19 @@ function App() {
         floatingBounds.minTop,
         floatingBounds.maxTop,
       );
-      const nextSlot = nearestFloatingSlot(snappedTop, floatingSlotTops);
+      const nextYRatio = floatingControlYRatioFromTop(
+        snappedTop,
+        floatingBounds.minTop,
+        floatingBounds.maxTop,
+      );
       const nextSide = floatingControlSideRef.current;
       const cooldownUntil = Date.now() + 120;
       floatingClickCooldownUntilRef.current = cooldownUntil;
-      setFloatingControlSlot(nextSlot);
+      setFloatingControlYRatio(nextYRatio);
       setFloatingControlSide(nextSide);
-      workspaceStore.rememberGlobalState({ floatingControlSlot: nextSlot, floatingControlSide: nextSide });
+      workspaceStore.rememberGlobalState({ floatingControlYRatio: nextYRatio, floatingControlSide: nextSide });
       try {
-        window.localStorage.setItem(PORT_RELAY_FLOATING_SLOT_STORAGE_KEY, nextSlot);
+        window.localStorage.setItem(PORT_RELAY_FLOATING_Y_RATIO_STORAGE_KEY, String(nextYRatio));
         window.localStorage.setItem(PORT_RELAY_FLOATING_SIDE_STORAGE_KEY, nextSide);
       } catch {
         // Ignore local storage failures in private or restricted contexts.
@@ -5986,10 +5994,8 @@ function App() {
       clearFloatingLongPressTimer,
       floatingBounds.maxTop,
       floatingBounds.minTop,
-      floatingSlotTops,
       setFloatingControlSide,
-      setFloatingControlSlot,
-      windowWidth,
+      setFloatingControlYRatio,
     ],
   );
   const cancelFloatingDrag = useCallback(
@@ -15439,7 +15445,7 @@ function App() {
               </span>
             </button>
           ) : null}
-          <div className="chat-composer">
+          <div ref={chatComposerRef} className="chat-composer">
             <input
               ref={chatFileInputRef}
               type="file"

@@ -269,7 +269,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('scrollChatToBottom(true);');
     expect(mainTsx).toContain('useLayoutEffect(() => {');
     expect(mainTsx).toContain('resizeChatComposerTextarea();');
-    expect(mainTsx).toContain('}, [resizeChatComposerTextarea, chatComposerText, tab, selectedChatId, currentChatDraftKey]);');
+    expect(mainTsx).toContain('}, [resizeChatComposerTextarea, measureChatComposerTop, chatComposerText, tab, selectedChatId, currentChatDraftKey]);');
     expect(mainTsx).not.toContain('const chatBottomFollowAction = resolveChatBottomFollowAction({');
     expect(mainTsx).not.toContain("if (chatBottomFollowAction === 'scrollToBottom') {");
     expect(mainTsx).toContain('}, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, resizeChatComposerTextarea]);');
@@ -420,13 +420,14 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('return mergeChatSession([projectSession], currentProjectSession)[0];');
     expect(mainTsx).toContain('const CHAT_CONFIG_PRIORITY_IDS = [');
     expect(mainTsx).toContain("const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought']");
-    expect(mainTsx).toContain("const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle', 'lower'] as const;");
-    expect(mainTsx).toContain("case 'upper':\n      return 0;");
-    expect(mainTsx).toContain("case 'upper-middle':\n      return 0.25;");
-    expect(mainTsx).toContain("case 'lower-middle':\n      return 0.75;");
-    expect(mainTsx).toContain("case 'lower':\n      return 1;");
+    expect(mainTsx).not.toContain('FLOATING_CONTROL_SLOT_ORDER');
+    expect(mainTsx).not.toContain('nearestFloatingSlot');
+    expect(mainTsx).toContain('floatingControlYRatio: globalState.floatingControlYRatio ?? readPortRelayFloatingYRatio() ?? FLOATING_CONTROL_DEFAULT_Y_RATIO');
+    expect(mainTsx).toContain('const floatingControlYRatio = workspaceUiState.mobile.floatingControlYRatio;');
+    expect(mainTsx).toContain('floatingControlTopFromYRatio(');
+    expect(mainTsx).toContain('floatingControlYRatioFromTop(');
     expect(mainTsx).toContain("import { triggerMobileHaptic } from './services/mobileHaptics';");
-    expect(mainTsx).toContain("import { resolveFloatingControlDragSide } from './services/mobileFloatingControls';");
+    expect(mainTsx).toContain("} from './services/mobileFloatingControls';");
     expect(mainTsx).not.toContain('navigator.vibrate?.(12)');
     expect(mainTsx).not.toContain('className="header-bubble"');
     expect(mainTsx).toContain('className="drawer-project-header"');
@@ -484,7 +485,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toMatch(
       /className="drawer-toggle-bubble"[\s\S]*?onPointerDown=\{handleFloatingControlButtonPointerDown\}[\s\S]*?onClick=\{handleFloatingDrawerToggle\}/,
     );
-    expect(mainTsx).toContain('const floatingControlSlot = workspaceUiState.mobile.floatingControlSlot;');
+    expect(mainTsx).toContain('const floatingControlYRatio = workspaceUiState.mobile.floatingControlYRatio;');
     expect(mainTsx).toContain('const floatingDragState = workspaceUiState.transient.floatingDragState as FloatingDragState | null;');
     expect(mainTsx).toContain('const floatingKeyboardOffset = workspaceUiState.transient.floatingKeyboardOffset;');
     const floatingLongPressStart = mainTsx.indexOf('floatingLongPressTimerRef.current = window.setTimeout(() => {');
@@ -1348,12 +1349,18 @@ describe('web chat integration', () => {
     const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
 
     expect(stylesCss).toContain('--wm-safe-area-bottom: env(safe-area-inset-bottom, 0px);');
+    expect(mainTsx).toContain('const chatComposerRef = useRef<HTMLDivElement | null>(null);');
+    expect(mainTsx).toContain('const [chatComposerTop, setChatComposerTop] = useState<number | null>(null);');
+    expect(mainTsx).toContain('const measureChatComposerTop = useCallback(() => {');
+    expect(mainTsx).toContain('ref={chatComposerRef}');
     expect(mainTsx).toContain('function readSafeAreaBottomInset(): number {');
     expect(mainTsx).toContain('const [safeAreaBottomInset, setSafeAreaBottomInset] = useState<number>(() => readSafeAreaBottomInset());');
     expect(mainTsx).toContain('setSafeAreaBottomInset(readSafeAreaBottomInset());');
     expect(mainTsx).toContain('const minTop = Math.max(safeAreaTopInset + 6, 6);');
     expect(mainTsx).toContain('const bottomInset = Math.max(safeAreaBottomInset + 6, 6);');
-    expect(mainTsx).toContain('windowHeight - floatingKeyboardOffset - floatingControlStackHeight - bottomInset');
+    expect(mainTsx).toContain('const viewportMaxTop = windowHeight - floatingKeyboardOffset - floatingControlStackHeight - bottomInset;');
+    expect(mainTsx).toContain('const composerMaxTop = chatComposerTop === null');
+    expect(mainTsx).toContain('Math.min(viewportMaxTop, composerMaxTop)');
   });
 
   test('mobile chat drawer uses a cross-project project session sheet', () => {

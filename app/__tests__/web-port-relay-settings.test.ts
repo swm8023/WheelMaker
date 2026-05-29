@@ -44,18 +44,19 @@ describe('port relay settings UI source structure', () => {
   });
 
   test('embeds relay pages through desktop main pane and mobile floating overlay', () => {
+    expect(mainTsx).toContain("const PORT_RELAY_FLOATING_Y_RATIO_STORAGE_KEY = 'wheelmaker:portRelayFloatingYRatio';");
     expect(mainTsx).toContain("const PORT_RELAY_FLOATING_SLOT_STORAGE_KEY = 'wheelmaker:portRelayFloatingSlot';");
     expect(mainTsx).toContain("const PORT_RELAY_FLOATING_SIDE_STORAGE_KEY = 'wheelmaker:portRelayFloatingSide';");
-    expect(mainTsx).toContain('readPortRelayFloatingSlot()');
+    expect(mainTsx).toContain('readPortRelayFloatingYRatio()');
     expect(mainTsx).toContain('readPortRelayFloatingSide()');
-    expect(mainTsx).toContain('window.localStorage.setItem(PORT_RELAY_FLOATING_SLOT_STORAGE_KEY, nextSlot);');
+    expect(mainTsx).toContain('window.localStorage.setItem(PORT_RELAY_FLOATING_Y_RATIO_STORAGE_KEY, String(nextYRatio));');
     expect(mainTsx).toContain('window.localStorage.setItem(PORT_RELAY_FLOATING_SIDE_STORAGE_KEY, nextSide);');
     expect(mainTsx).toContain('const floatingControlSide = workspaceUiState.mobile.floatingControlSide;');
     expect(mainTsx).toContain('data-side={floatingControlSide}');
     expect(mainTsx).toContain('originX: event.clientX,');
     expect(mainTsx).toContain('startSide: floatingControlSide,');
     expect(mainTsx).toContain('currentX: event.clientX,');
-    expect(mainTsx).toContain("import { resolveFloatingControlDragSide } from './services/mobileFloatingControls';");
+    expect(mainTsx).toContain("} from './services/mobileFloatingControls';");
     expect(mainTsx).toContain('resolveFloatingControlDragSide(');
     expect(mainTsx).toContain('floatingControlSideRef.current');
     expect(mainTsx).not.toContain("const nextSide = current.currentX < windowWidth / 2 ? 'left' : 'right';");

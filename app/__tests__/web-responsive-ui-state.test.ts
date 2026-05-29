@@ -20,6 +20,35 @@ describe('web responsive ui state', () => {
     expect(resolveFloatingControlDragSide('left', 425, 800)).toBe('right');
   });
 
+  test('stores mobile floating control height as a continuous clamped ratio', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const modulePath = path.join(projectRoot, 'web', 'src', 'services', 'mobileFloatingControls.ts');
+
+    expect(fs.existsSync(modulePath)).toBe(true);
+
+    const {
+      FLOATING_CONTROL_DEFAULT_Y_RATIO,
+      floatingControlTopFromYRatio,
+      floatingControlYRatioFromLegacySlot,
+      floatingControlYRatioFromTop,
+      sanitizeFloatingControlYRatio,
+    } = require(modulePath);
+
+    expect(FLOATING_CONTROL_DEFAULT_Y_RATIO).toBe(0.25);
+    expect(sanitizeFloatingControlYRatio(-0.4)).toBe(0);
+    expect(sanitizeFloatingControlYRatio(1.4)).toBe(1);
+    expect(sanitizeFloatingControlYRatio(Number.NaN)).toBe(0.25);
+    expect(floatingControlTopFromYRatio(0.4, 10, 210)).toBe(90);
+    expect(floatingControlYRatioFromTop(90, 10, 210)).toBe(0.4);
+    expect(floatingControlYRatioFromTop(999, 10, 210)).toBe(1);
+    expect(floatingControlYRatioFromLegacySlot('upper')).toBe(0);
+    expect(floatingControlYRatioFromLegacySlot('upper-middle')).toBe(0.25);
+    expect(floatingControlYRatioFromLegacySlot('center')).toBe(0.5);
+    expect(floatingControlYRatioFromLegacySlot('lower-middle')).toBe(0.75);
+    expect(floatingControlYRatioFromLegacySlot('lower')).toBe(1);
+    expect(floatingControlYRatioFromLegacySlot('invalid')).toBeNull();
+  });
+
   test('uses a best-effort mobile haptic helper around navigator vibration', () => {
     const projectRoot = path.join(__dirname, '..');
     const modulePath = path.join(projectRoot, 'web', 'src', 'services', 'mobileHaptics.ts');
@@ -106,7 +135,7 @@ describe('web responsive ui state', () => {
       drawerOpen: true,
       collapsedProjectIds: ['project-a', 'project-b', 'project-a'],
       pinnedProjectIds: ['project-c', 'project-a', 'project-c'],
-      floatingControlSlot: 'center',
+      floatingControlYRatio: 0.42,
       floatingControlSide: 'left',
       chatConfigOverflowOpen: true,
       chatKeyboardInset: 120,
@@ -136,12 +165,12 @@ describe('web responsive ui state', () => {
     expect(createWorkspaceUiState({ desktopSidebarWidth: 700 }).desktop.sidebarWidth).toBe(560);
     expect(state.mobile).toMatchObject({
       drawerOpen: true,
-      floatingControlSlot: 'center',
+      floatingControlYRatio: 0.42,
       floatingControlSide: 'left',
       chatConfigOverflowOpen: true,
     });
     expect(createWorkspaceUiState({ floatingControlSide: 'invalid' }).mobile.floatingControlSide).toBe('right');
-    expect(createWorkspaceUiState({ floatingControlSlot: 'lower' }).mobile.floatingControlSlot).toBe('lower');
+    expect(createWorkspaceUiState({ floatingControlYRatio: 3 }).mobile.floatingControlYRatio).toBe(1);
 
     state = workspaceUiReducer(state, {
       type: 'layout/modeChanged',
@@ -154,7 +183,7 @@ describe('web responsive ui state', () => {
     expect(state.shared.pinnedProjectIds).toEqual(['project-c', 'project-a']);
     expect(state.desktop.sidebarCollapsed).toBe(true);
     expect(state.desktop.sidebarWidth).toBe(420);
-    expect(state.mobile.floatingControlSlot).toBe('center');
+    expect(state.mobile.floatingControlYRatio).toBe(0.42);
     expect(state.mobile.floatingControlSide).toBe('left');
     expect(state.mobile.drawerOpen).toBe(false);
     expect(state.mobile.chatConfigOverflowOpen).toBe(false);
@@ -177,11 +206,11 @@ describe('web responsive ui state', () => {
     expect(state.mobile.floatingControlSide).toBe('right');
 
     state = workspaceUiReducer(state, {
-      type: 'mobile/setFloatingControlSlot',
-      next: 'lower',
+      type: 'mobile/setFloatingControlYRatio',
+      next: 0.83,
     });
 
-    expect(state.mobile.floatingControlSlot).toBe('lower');
+    expect(state.mobile.floatingControlYRatio).toBe(0.83);
 
     state = workspaceUiReducer(state, {
       type: 'desktop/setSidebarWidth',
@@ -249,17 +278,21 @@ describe('web responsive ui state', () => {
 
     expect(persistenceTs).toContain('desktopSidebarWidth: number;');
     expect(persistenceTs).toContain("export type PersistedFloatingControlSide = 'left' | 'right';");
-    expect(persistenceTs).toContain("| 'lower';");
+    expect(persistenceTs).toContain('floatingControlYRatio: number;');
     expect(persistenceTs).toContain('floatingControlSide: PersistedFloatingControlSide;');
     expect(persistenceTs).not.toContain('useLatestPromptTitle: boolean;');
     expect(persistenceTs).toContain("desktopSidebarWidth: 'desktopSidebarWidth',");
+    expect(persistenceTs).toContain("floatingControlYRatio: 'floatingControlYRatio',");
+    expect(persistenceTs).toContain("floatingControlSlot: 'floatingControlSlot',");
     expect(persistenceTs).toContain("floatingControlSide: 'floatingControlSide',");
     expect(persistenceTs).not.toContain("useLatestPromptTitle: 'useLatestPromptTitle',");
     expect(persistenceTs).toContain('desktopSidebarWidth: 380,');
+    expect(persistenceTs).toContain('floatingControlYRatio: FLOATING_CONTROL_DEFAULT_Y_RATIO,');
     expect(persistenceTs).toContain("floatingControlSide: 'right',");
     expect(persistenceTs).not.toContain('useLatestPromptTitle: false,');
     expect(persistenceTs).not.toContain('useLatestPromptTitle: typeof input.useLatestPromptTitle');
     expect(persistenceTs).toContain('desktopSidebarWidth: sanitizeDesktopSidebarWidth(input.desktopSidebarWidth, base.desktopSidebarWidth),');
+    expect(persistenceTs).toContain('floatingControlYRatio,');
     expect(persistenceTs).toContain('floatingControlSide: sanitizeFloatingControlSide(input.floatingControlSide, base.floatingControlSide),');
     expect(persistenceTs).toContain(
       '{k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(this.state.global.desktopSidebarWidth), updatedAt: now}',
@@ -267,6 +300,9 @@ describe('web responsive ui state', () => {
     expect(persistenceTs).not.toContain('GLOBAL_KEYS.useLatestPromptTitle');
     expect(persistenceTs).toContain(
       '{k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(next.desktopSidebarWidth), updatedAt: now}',
+    );
+    expect(persistenceTs).toContain(
+      '{k: GLOBAL_KEYS.floatingControlYRatio, v: serialize(next.floatingControlYRatio), updatedAt: now}',
     );
     expect(persistenceTs).toContain(
       '{k: GLOBAL_KEYS.floatingControlSide, v: serialize(next.floatingControlSide), updatedAt: now}',
