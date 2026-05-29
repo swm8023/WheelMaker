@@ -277,13 +277,17 @@ export async function startMicrophonePCMStream(
   const chunkBytes = options.chunkBytes ?? VOICE_AUDIO_CHUNK_BYTES;
   const bufferSize = options.bufferSize ?? 4096;
   const context = new AudioContextCtor();
-  let resumeError: unknown = null;
-  const initialResume =
-    context.state === 'suspended'
-      ? context.resume().catch(error => {
-          resumeError = error;
-        })
-      : Promise.resolve();
+  const resumeContext = () => {
+    if (context.state !== 'suspended') {
+      return;
+    }
+    try {
+      void context.resume().catch(() => undefined);
+    } catch {
+      // Resume is best-effort; capture startup should not hang on Safari.
+    }
+  };
+  resumeContext();
   let mediaStream: MediaStream | null = null;
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -294,13 +298,7 @@ export async function startMicrophonePCMStream(
         noiseSuppression: true,
       },
     });
-    await initialResume;
-    if (resumeError) {
-      throw resumeError;
-    }
-    if (context.state === 'suspended') {
-      await context.resume();
-    }
+    resumeContext();
   } catch (error) {
     mediaStream?.getTracks().forEach(track => track.stop());
     context.close().catch(() => undefined);

@@ -190,6 +190,69 @@ describe('speech audio helpers', () => {
     }
   });
 
+  test('does not block capture startup on a suspended audio context resume promise', async () => {
+    const originalAudioContext = window.AudioContext;
+    const originalMediaDevices = navigator.mediaDevices;
+    const resume = jest.fn(() => new Promise<void>(() => undefined));
+    const close = jest.fn(() => Promise.resolve());
+    const source = { connect: jest.fn(), disconnect: jest.fn() };
+    const processor = {
+      connect: jest.fn(),
+      disconnect: jest.fn(),
+      onaudioprocess: null,
+    };
+    const audioContext = {
+      state: 'suspended',
+      sampleRate: 48000,
+      resume,
+      close,
+      createMediaStreamSource: jest.fn(() => source),
+      createScriptProcessor: jest.fn(() => processor),
+      destination: {},
+    };
+    const track = { stop: jest.fn(), addEventListener: jest.fn() };
+
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: jest.fn(() => audioContext),
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: jest.fn(() =>
+          Promise.resolve({ getTracks: () => [track] }),
+        ),
+      },
+    });
+
+    try {
+      const capturePromise = startMicrophonePCMStream({ onChunk: jest.fn() });
+      let resolved = false;
+      capturePromise.then(() => {
+        resolved = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(resolved).toBe(true);
+      const capture = await capturePromise;
+
+      expect(resume).toHaveBeenCalled();
+      expect(source.connect).toHaveBeenCalledWith(processor);
+      expect(processor.connect).toHaveBeenCalledWith(audioContext.destination);
+      capture.stop();
+    } finally {
+      Object.defineProperty(window, 'AudioContext', {
+        configurable: true,
+        value: originalAudioContext,
+      });
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: originalMediaDevices,
+      });
+    }
+  });
+
   test('flushes a partial PCM chunk when microphone capture stops', async () => {
     const originalAudioContext = window.AudioContext;
     const originalMediaDevices = navigator.mediaDevices;
