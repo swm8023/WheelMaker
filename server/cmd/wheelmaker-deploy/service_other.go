@@ -9,7 +9,7 @@ import (
 
 type serviceManager struct{}
 
-func newServiceManager(deployConfig) serviceManager { return serviceManager{} }
+func newServiceManager(deployConfig, commandRunner) serviceManager { return serviceManager{} }
 
 func (serviceManager) CheckDeployPrerequisites(context.Context) error {
 	return errors.New("services are unsupported on this platform")

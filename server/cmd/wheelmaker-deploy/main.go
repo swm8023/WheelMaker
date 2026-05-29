@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"html"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -191,17 +192,32 @@ func runService(_ context.Context, cfg deployConfig) error {
 	if cfg.ServiceAction == "uninstall" {
 		return errors.New("service uninstall is not implemented in this transitional CLI")
 	}
-	return errors.New("service command is not implemented")
+	ctx := context.Background()
+	cfg = resolveDefaults(cfg)
+	deps := defaultDeps(cfg)
+	switch cfg.ServiceAction {
+	case "start":
+		return deps.Services.Start(ctx, true)
+	case "stop":
+		return deps.Services.Stop(ctx, true)
+	case "restart":
+		return deps.Services.Restart(ctx, true)
+	case "status":
+		return deps.Services.Status(ctx)
+	default:
+		return fmt.Errorf("unsupported service action: %s", cfg.ServiceAction)
+	}
 }
 
 func runDoctor(context.Context, deployConfig) error {
 	return errors.New("doctor is not implemented")
 }
 
-func defaultDeps(deployConfig) deployDeps {
+func defaultDeps(cfg deployConfig) deployDeps {
+	runner := execRunner{}
 	return deployDeps{
-		Runner:   execRunner{},
-		Services: noopServices{},
+		Runner:   runner,
+		Services: newServiceManager(cfg, runner),
 		Now:      func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -322,7 +338,7 @@ func resolveDeps(cfg deployConfig, deps deployDeps) deployDeps {
 		deps.Runner = execRunner{}
 	}
 	if deps.Services == nil {
-		deps.Services = noopServices{}
+		deps.Services = newServiceManager(cfg, deps.Runner)
 	}
 	if deps.Now == nil {
 		deps.Now = func() time.Time { return time.Now().UTC() }
@@ -562,6 +578,76 @@ func wrapperBAT(deployPath string, action string) string {
 
 func wrapperSH(deployPath string, action string) string {
 	return fmt.Sprintf("#!/usr/bin/env bash\nset -euo pipefail\n%q service %s \"$@\"\n", deployPath, action)
+}
+
+func linuxUnitContent(description string, workingDir string, envFile string, binary string, args string) string {
+	execStart := systemdQuote(binary)
+	if strings.TrimSpace(args) != "" {
+		execStart += " " + strings.TrimSpace(args)
+	}
+	return fmt.Sprintf(`[Unit]
+Description=%s
+
+[Service]
+Type=simple
+WorkingDirectory=%s
+EnvironmentFile=%s
+ExecStart=%s
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Install]
+WantedBy=default.target
+`, description, workingDir, envFile, execStart)
+}
+
+func launchAgentPlistContent(label string, workingDir string, binary string, args []string) string {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>`)
+	b.WriteString(xmlEscape(label))
+	b.WriteString(`</string>
+  <key>WorkingDirectory</key>
+  <string>`)
+	b.WriteString(xmlEscape(workingDir))
+	b.WriteString(`</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>`)
+	b.WriteString(xmlEscape(binary))
+	b.WriteString("</string>\n")
+	for _, arg := range args {
+		b.WriteString("    <string>")
+		b.WriteString(xmlEscape(arg))
+		b.WriteString("</string>\n")
+	}
+	b.WriteString(`  </array>
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+`)
+	return b.String()
+}
+
+func windowsUpdaterArgs(repo string, bin string, dailyTime string) string {
+	return fmt.Sprintf(`--repo "%s" --install-dir "%s" --time "%s"`, strings.ReplaceAll(repo, `"`, `\"`), strings.ReplaceAll(bin, `"`, `\"`), strings.ReplaceAll(dailyTime, `"`, `\"`))
+}
+
+func systemdQuote(value string) string {
+	return `"` + strings.ReplaceAll(strings.ReplaceAll(value, `\`, `\\`), `"`, `\"`) + `"`
+}
+
+func xmlEscape(value string) string {
+	return html.EscapeString(value)
 }
 
 func binaryName(name string) string {

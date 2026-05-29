@@ -252,6 +252,33 @@ func TestBootstrapBuildsTempDeployAndExecsUpdate(t *testing.T) {
 	)
 }
 
+func TestLinuxUnitContentRequiresRestartAlways(t *testing.T) {
+	unit := linuxUnitContent("WheelMaker Hub", "/repo", "/home/user/.wheelmaker/systemd.env", "/home/user/.wheelmaker/bin/wheelmaker", "-d")
+	for _, needle := range []string{"Restart=always", "EnvironmentFile=", "ExecStart=", "WantedBy=default.target"} {
+		if !strings.Contains(unit, needle) {
+			t.Fatalf("unit missing %s:\n%s", needle, unit)
+		}
+	}
+}
+
+func TestMacOSPlistContent(t *testing.T) {
+	plist := launchAgentPlistContent("com.wheelmaker.hub", "/repo", "/Users/me/.wheelmaker/bin/wheelmaker", []string{"-d"})
+	for _, needle := range []string{"com.wheelmaker.hub", "<key>ProgramArguments</key>", "<string>-d</string>", "<key>KeepAlive</key>"} {
+		if !strings.Contains(plist, needle) {
+			t.Fatalf("plist missing %s:\n%s", needle, plist)
+		}
+	}
+}
+
+func TestWindowsUpdaterServiceArgumentsUseDeployCLIPathFlags(t *testing.T) {
+	got := windowsUpdaterArgs(`C:\repo`, `C:\Users\me\.wheelmaker\bin`, "03:00")
+	for _, needle := range []string{`--repo "C:\repo"`, `--install-dir "C:\Users\me\.wheelmaker\bin"`, `--time "03:00"`} {
+		if !strings.Contains(got, needle) {
+			t.Fatalf("args=%s missing %s", got, needle)
+		}
+	}
+}
+
 func buildLabelFromOutput(out string) string {
 	base := filepath.Base(out)
 	base = strings.TrimSuffix(base, ".exe")
