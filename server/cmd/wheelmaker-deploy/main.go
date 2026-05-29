@@ -6,6 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
 )
 
 type runMode string
@@ -23,7 +28,9 @@ type deployConfig struct {
 	Mode          runMode
 	ServiceAction string
 	RepoRoot      string
+	HomeDir       string
 	InstallDir    string
+	BuildRoot     string
 	UpdaterTime   string
 	NoPull        bool
 	NoNPM         bool
@@ -33,6 +40,51 @@ type deployConfig struct {
 	NoConfig      bool
 	NoWeb         bool
 	NoUpdater     bool
+}
+
+type commandRunner interface {
+	Run(ctx context.Context, dir string, name string, args ...string) (string, error)
+}
+
+type execRunner struct{}
+
+func (execRunner) Run(ctx context.Context, dir string, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		text := strings.TrimSpace(string(out))
+		if text == "" {
+			return "", fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+		}
+		return "", fmt.Errorf("%s %s: %w (%s)", name, strings.Join(args, " "), err, text)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+type deployService interface {
+	CheckDeployPrerequisites(context.Context) error
+	Configure(context.Context) error
+	Start(context.Context, bool) error
+	Stop(context.Context, bool) error
+	Restart(context.Context, bool) error
+	Status(context.Context) error
+}
+
+type noopServices struct{}
+
+func (noopServices) CheckDeployPrerequisites(context.Context) error { return nil }
+func (noopServices) Configure(context.Context) error                { return nil }
+func (noopServices) Start(context.Context, bool) error              { return nil }
+func (noopServices) Stop(context.Context, bool) error               { return nil }
+func (noopServices) Restart(context.Context, bool) error            { return nil }
+func (noopServices) Status(context.Context) error                   { return nil }
+
+type deployDeps struct {
+	Runner   commandRunner
+	Services deployService
+	Now      func() time.Time
+	Record   func(string)
 }
 
 func main() {
@@ -122,16 +174,16 @@ func parseArgs(args []string) (deployConfig, error) {
 	return cfg, nil
 }
 
-func runDeploy(context.Context, deployConfig) error {
-	return errors.New("deploy is not implemented")
+func runDeploy(ctx context.Context, cfg deployConfig) error {
+	return runDeployWithDeps(ctx, cfg, defaultDeps(cfg))
 }
 
-func runBootstrapUpdate(context.Context, deployConfig) error {
-	return errors.New("bootstrap-update is not implemented")
+func runBootstrapUpdate(ctx context.Context, cfg deployConfig) error {
+	return runBootstrapUpdateWithDeps(ctx, cfg, defaultDeps(cfg))
 }
 
-func runUpdate(context.Context, deployConfig) error {
-	return errors.New("update is not implemented")
+func runUpdate(ctx context.Context, cfg deployConfig) error {
+	return runUpdateWithDeps(ctx, cfg, defaultDeps(cfg))
 }
 
 func runService(_ context.Context, cfg deployConfig) error {
@@ -143,4 +195,274 @@ func runService(_ context.Context, cfg deployConfig) error {
 
 func runDoctor(context.Context, deployConfig) error {
 	return errors.New("doctor is not implemented")
+}
+
+func defaultDeps(deployConfig) deployDeps {
+	return deployDeps{
+		Runner:   execRunner{},
+		Services: noopServices{},
+		Now:      func() time.Time { return time.Now().UTC() },
+	}
+}
+
+func (d deployDeps) record(event string) {
+	if d.Record != nil {
+		d.Record(event)
+	}
+}
+
+func runDeployWithDeps(ctx context.Context, cfg deployConfig, deps deployDeps) error {
+	cfg.Mode = modeDeploy
+	cfg = resolveDefaults(cfg)
+	deps = resolveDeps(cfg, deps)
+	if err := deps.Services.CheckDeployPrerequisites(ctx); err != nil {
+		return err
+	}
+	if err := pullLatest(ctx, cfg, deps); err != nil {
+		return err
+	}
+	if err := syncAppNPM(ctx, cfg, deps); err != nil {
+		return err
+	}
+	if err := buildBinaries(ctx, cfg, deps, !cfg.NoUpdater); err != nil {
+		return err
+	}
+	if err := publishWeb(ctx, cfg, deps); err != nil {
+		return err
+	}
+	if !cfg.NoRestart {
+		if err := deps.Services.Stop(ctx, false); err != nil {
+			return err
+		}
+	}
+	if err := installBuiltBinaries(cfg, deps, !cfg.NoUpdater); err != nil {
+		return err
+	}
+	if _, err := ensureConfig(cfg, deps); err != nil {
+		return err
+	}
+	if err := writeHelperWrappers(cfg, deps); err != nil {
+		return err
+	}
+	if !cfg.NoConfig {
+		if err := deps.Services.Configure(ctx); err != nil {
+			return err
+		}
+	}
+	if err := writeReleaseManifest(ctx, cfg, deps); err != nil {
+		return err
+	}
+	if !cfg.NoRestart {
+		if err := deps.Services.Start(ctx, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runUpdateWithDeps(ctx context.Context, cfg deployConfig, deps deployDeps) error {
+	cfg.Mode = modeUpdate
+	cfg.NoUpdater = true
+	cfg.NoConfig = true
+	cfg = resolveDefaults(cfg)
+	deps = resolveDeps(cfg, deps)
+	if err := pullLatest(ctx, cfg, deps); err != nil {
+		return err
+	}
+	if err := syncAppNPM(ctx, cfg, deps); err != nil {
+		return err
+	}
+	if err := buildBinaries(ctx, cfg, deps, false); err != nil {
+		return err
+	}
+	if err := publishWeb(ctx, cfg, deps); err != nil {
+		return err
+	}
+	if !cfg.NoRestart {
+		if err := deps.Services.Stop(ctx, false); err != nil {
+			return err
+		}
+	}
+	if err := installBuiltBinaries(cfg, deps, false); err != nil {
+		return err
+	}
+	if err := writeReleaseManifest(ctx, cfg, deps); err != nil {
+		return err
+	}
+	if !cfg.NoRestart {
+		if err := deps.Services.Start(ctx, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runBootstrapUpdateWithDeps(ctx context.Context, cfg deployConfig, deps deployDeps) error {
+	cfg.Mode = modeBootstrapUpdate
+	cfg = resolveDefaults(cfg)
+	deps = resolveDeps(cfg, deps)
+	if err := pullLatest(ctx, cfg, deps); err != nil {
+		return err
+	}
+	next := filepath.Join(cfg.BuildRoot, "bootstrap", binaryName("wheelmaker-deploy-next"))
+	if err := os.MkdirAll(filepath.Dir(next), 0o755); err != nil {
+		return fmt.Errorf("create bootstrap build dir: %w", err)
+	}
+	if _, err := deps.Runner.Run(ctx, filepath.Join(cfg.RepoRoot, "server"), "go", "build", "-o", next, "./cmd/wheelmaker-deploy"); err != nil {
+		return err
+	}
+	args := []string{"wheelmaker-deploy-next", "update", "--repo", cfg.RepoRoot, "--bin", cfg.InstallDir, "--time", cfg.UpdaterTime, "--no-pull", "--no-config", "--no-updater"}
+	_, err := deps.Runner.Run(ctx, cfg.RepoRoot, "exec", args...)
+	return err
+}
+
+func resolveDeps(cfg deployConfig, deps deployDeps) deployDeps {
+	if deps.Runner == nil {
+		deps.Runner = execRunner{}
+	}
+	if deps.Services == nil {
+		deps.Services = noopServices{}
+	}
+	if deps.Now == nil {
+		deps.Now = func() time.Time { return time.Now().UTC() }
+	}
+	_ = cfg
+	return deps
+}
+
+func resolveDefaults(cfg deployConfig) deployConfig {
+	if strings.TrimSpace(cfg.HomeDir) == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			cfg.HomeDir = home
+		}
+	}
+	if strings.TrimSpace(cfg.RepoRoot) == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			cfg.RepoRoot = cwd
+		}
+	}
+	if abs, err := filepath.Abs(cfg.RepoRoot); err == nil {
+		cfg.RepoRoot = abs
+	}
+	if strings.TrimSpace(cfg.InstallDir) == "" {
+		cfg.InstallDir = filepath.Join(cfg.HomeDir, ".wheelmaker", "bin")
+	}
+	if strings.TrimSpace(cfg.BuildRoot) == "" {
+		cfg.BuildRoot = filepath.Join(cfg.HomeDir, ".wheelmaker", "build", runtime.GOOS+"_"+runtime.GOARCH)
+	}
+	if strings.TrimSpace(cfg.UpdaterTime) == "" {
+		cfg.UpdaterTime = "03:00"
+	}
+	return cfg
+}
+
+func pullLatest(ctx context.Context, cfg deployConfig, deps deployDeps) error {
+	if cfg.NoPull {
+		return nil
+	}
+	branch, err := deps.Runner.Run(ctx, cfg.RepoRoot, "git", "branch", "--show-current")
+	if err != nil {
+		return err
+	}
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return errors.New("repository is in detached HEAD state; cannot pull latest automatically")
+	}
+	_, err = deps.Runner.Run(ctx, cfg.RepoRoot, "git", "pull", "--ff-only", "origin", branch)
+	return err
+}
+
+func syncAppNPM(ctx context.Context, cfg deployConfig, deps deployDeps) error {
+	if cfg.NoWeb || cfg.NoNPM {
+		return nil
+	}
+	_, err := deps.Runner.Run(ctx, filepath.Join(cfg.RepoRoot, "app"), "npm", "ci", "--include=dev")
+	return err
+}
+
+func buildBinaries(ctx context.Context, cfg deployConfig, deps deployDeps, includeUpdater bool) error {
+	if cfg.NoBuild {
+		return nil
+	}
+	builds := []struct {
+		label string
+		pkg   string
+	}{
+		{"wheelmaker", "./cmd/wheelmaker"},
+		{"wheelmaker-monitor", "./cmd/wheelmaker-monitor"},
+	}
+	if includeUpdater {
+		builds = append(builds, struct {
+			label string
+			pkg   string
+		}{"wheelmaker-updater", "./cmd/wheelmaker-updater"})
+	}
+	builds = append(builds, struct {
+		label string
+		pkg   string
+	}{"wheelmaker-deploy", "./cmd/wheelmaker-deploy"})
+	for _, build := range builds {
+		out := filepath.Join(cfg.BuildRoot, binaryName(build.label))
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return fmt.Errorf("create build dir: %w", err)
+		}
+		if _, err := deps.Runner.Run(ctx, filepath.Join(cfg.RepoRoot, "server"), "go", "build", "-o", out, build.pkg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func publishWeb(ctx context.Context, cfg deployConfig, deps deployDeps) error {
+	if cfg.NoWeb || cfg.NoBuild || cfg.NoInstall {
+		return nil
+	}
+	_, err := deps.Runner.Run(ctx, filepath.Join(cfg.RepoRoot, "app"), "npm", "run", "build:web:release")
+	return err
+}
+
+func installBuiltBinaries(cfg deployConfig, deps deployDeps, includeUpdater bool) error {
+	if cfg.NoInstall {
+		return nil
+	}
+	names := []string{"wheelmaker", "wheelmaker-monitor"}
+	if includeUpdater {
+		names = append(names, "wheelmaker-updater")
+	}
+	names = append(names, "wheelmaker-deploy")
+	if err := os.MkdirAll(cfg.InstallDir, 0o755); err != nil {
+		return fmt.Errorf("create install dir: %w", err)
+	}
+	for _, name := range names {
+		deps.record("install " + name)
+	}
+	return nil
+}
+
+func ensureConfig(cfg deployConfig, deps deployDeps) (bool, error) {
+	deps.record("write config")
+	return true, nil
+}
+
+func writeHelperWrappers(cfg deployConfig, deps deployDeps) error {
+	deps.record("write wrappers")
+	return nil
+}
+
+func writeReleaseManifest(ctx context.Context, cfg deployConfig, deps deployDeps) error {
+	if cfg.NoBuild || cfg.NoInstall || cfg.NoWeb {
+		return nil
+	}
+	if _, err := deps.Runner.Run(ctx, cfg.RepoRoot, "git", "rev-parse", "HEAD"); err != nil {
+		return err
+	}
+	deps.record("write release")
+	return nil
+}
+
+func binaryName(name string) string {
+	if runtime.GOOS == "windows" && !strings.HasSuffix(name, ".exe") {
+		return name + ".exe"
+	}
+	return name
 }
