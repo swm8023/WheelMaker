@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,6 +188,70 @@ func TestUpdatePipelineSkipsUpdaterAndConfig(t *testing.T) {
 	assertEventsDoNotContain(t, *h.events, "service configure")
 }
 
+func TestEnsureConfigWritesRunnableWheelMakerDefault(t *testing.T) {
+	h := newDeployHarness(t)
+	if _, err := ensureConfig(h.cfg, h.deps); err != nil {
+		t.Fatalf("ensureConfig: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(h.home, ".wheelmaker", "config.json"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	text := string(raw)
+	for _, needle := range []string{
+		`"name": "WheelMaker"`,
+		`"listen": true`,
+		`"server": "127.0.0.1"`,
+		`"token": "wheelmaker-local-token"`,
+		`"hubId": "local-hub"`,
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("config missing %s: %s", needle, text)
+		}
+	}
+	if !strings.Contains(text, h.cfg.RepoRoot) {
+		var parsed struct {
+			Projects []struct {
+				Path string `json:"path"`
+			} `json:"projects"`
+		}
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			t.Fatalf("parse generated config: %v", err)
+		}
+		if len(parsed.Projects) != 1 || parsed.Projects[0].Path != h.cfg.RepoRoot {
+			t.Fatalf("project path=%#v want %q", parsed.Projects, h.cfg.RepoRoot)
+		}
+	}
+}
+
+func TestWriteHelperWrappers(t *testing.T) {
+	h := newDeployHarness(t)
+	if err := writeHelperWrappers(h.cfg, h.deps); err != nil {
+		t.Fatalf("writeHelperWrappers: %v", err)
+	}
+	assertFileContains(t, filepath.Join(h.home, ".wheelmaker", "start.bat"), "wheelmaker-deploy.exe")
+	assertFileContains(t, filepath.Join(h.home, ".wheelmaker", "start.bat"), "service start")
+	assertFileContains(t, filepath.Join(h.home, ".wheelmaker", "stop.bat"), "service stop")
+	assertFileContains(t, filepath.Join(h.home, ".wheelmaker", "restart.bat"), "service restart")
+	assertFileContains(t, filepath.Join(h.home, ".wheelmaker", "status.bat"), "service status")
+	assertFileContains(t, filepath.Join(h.home, ".wheelmaker", "start.sh"), "wheelmaker-deploy")
+	assertFileContains(t, filepath.Join(h.home, ".wheelmaker", "start.sh"), "service start")
+	assertFileContains(t, filepath.Join(h.home, ".wheelmaker", "stop.sh"), "service stop")
+}
+
+func TestBootstrapBuildsTempDeployAndExecsUpdate(t *testing.T) {
+	h := newDeployHarness(t)
+	h.cfg.Mode = modeBootstrapUpdate
+	if err := runBootstrapUpdateWithDeps(context.Background(), h.cfg, h.deps); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	assertEventsContainInOrder(t, *h.events,
+		"git pull --ff-only origin main",
+		"go build wheelmaker-deploy-next",
+		"exec wheelmaker-deploy-next update",
+	)
+}
+
 func buildLabelFromOutput(out string) string {
 	base := filepath.Base(out)
 	base = strings.TrimSuffix(base, ".exe")
@@ -214,5 +279,29 @@ func assertEventsDoNotContain(t *testing.T, events []string, needle string) {
 		if strings.Contains(event, needle) {
 			t.Fatalf("events should not contain %q: %#v", needle, events)
 		}
+	}
+}
+
+func assertEventsContainInOrder(t *testing.T, events []string, needles ...string) {
+	t.Helper()
+	index := 0
+	for _, event := range events {
+		if index < len(needles) && strings.Contains(event, needles[index]) {
+			index++
+		}
+	}
+	if index != len(needles) {
+		t.Fatalf("events missing ordered needles %#v in %#v", needles, events)
+	}
+}
+
+func assertFileContains(t *testing.T, path string, needle string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if !strings.Contains(string(raw), needle) {
+		t.Fatalf("%s missing %q:\n%s", path, needle, string(raw))
 	}
 }

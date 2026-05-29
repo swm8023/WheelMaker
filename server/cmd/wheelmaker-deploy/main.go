@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -440,11 +441,78 @@ func installBuiltBinaries(cfg deployConfig, deps deployDeps, includeUpdater bool
 }
 
 func ensureConfig(cfg deployConfig, deps deployDeps) (bool, error) {
+	path := filepath.Join(wheelMakerHome(cfg), "config.json")
+	if _, err := os.Stat(path); err == nil {
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("stat config: %w", err)
+	}
+	config := map[string]any{
+		"projects": []map[string]string{
+			{
+				"name": "WheelMaker",
+				"path": cfg.RepoRoot,
+			},
+		},
+		"registry": map[string]any{
+			"listen": true,
+			"port":   9630,
+			"server": "127.0.0.1",
+			"token":  "wheelmaker-local-token",
+			"hubId":  "local-hub",
+		},
+		"monitor": map[string]any{
+			"port": 9631,
+		},
+		"log": map[string]string{
+			"level": "warn",
+		},
+	}
+	raw, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return false, fmt.Errorf("encode config: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, fmt.Errorf("create config dir: %w", err)
+	}
+	if err := os.WriteFile(path, append(raw, '\n'), 0o644); err != nil {
+		return false, fmt.Errorf("write config: %w", err)
+	}
 	deps.record("write config")
 	return true, nil
 }
 
 func writeHelperWrappers(cfg deployConfig, deps deployDeps) error {
+	home := wheelMakerHome(cfg)
+	binDir := filepath.Join(home, "bin")
+	windowsDeploy := filepath.Join(binDir, "wheelmaker-deploy.exe")
+	unixDeploy := filepath.Join(binDir, "wheelmaker-deploy")
+	windows := map[string]string{
+		"start.bat":   wrapperBAT(windowsDeploy, "start"),
+		"stop.bat":    wrapperBAT(windowsDeploy, "stop"),
+		"restart.bat": wrapperBAT(windowsDeploy, "restart"),
+		"status.bat":  wrapperBAT(windowsDeploy, "status"),
+	}
+	unix := map[string]string{
+		"start.sh":   wrapperSH(unixDeploy, "start"),
+		"stop.sh":    wrapperSH(unixDeploy, "stop"),
+		"restart.sh": wrapperSH(unixDeploy, "restart"),
+		"status.sh":  wrapperSH(unixDeploy, "status"),
+	}
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		return fmt.Errorf("create helper dir: %w", err)
+	}
+	for name, body := range windows {
+		if err := os.WriteFile(filepath.Join(home, name), []byte(body), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", name, err)
+		}
+	}
+	for name, body := range unix {
+		path := filepath.Join(home, name)
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			return fmt.Errorf("write %s: %w", name, err)
+		}
+	}
 	deps.record("write wrappers")
 	return nil
 }
@@ -453,11 +521,47 @@ func writeReleaseManifest(ctx context.Context, cfg deployConfig, deps deployDeps
 	if cfg.NoBuild || cfg.NoInstall || cfg.NoWeb {
 		return nil
 	}
-	if _, err := deps.Runner.Run(ctx, cfg.RepoRoot, "git", "rev-parse", "HEAD"); err != nil {
+	sha, err := deps.Runner.Run(ctx, cfg.RepoRoot, "git", "rev-parse", "HEAD")
+	if err != nil {
 		return err
+	}
+	branch, err := deps.Runner.Run(ctx, cfg.RepoRoot, "git", "branch", "--show-current")
+	if err != nil {
+		return err
+	}
+	manifest := map[string]any{
+		"schemaVersion": 1,
+		"repo":          cfg.RepoRoot,
+		"branch":        strings.TrimSpace(branch),
+		"remote":        "origin",
+		"sha":           strings.TrimSpace(sha),
+		"publishedAt":   deps.Now().UTC().Format(time.RFC3339),
+	}
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode release manifest: %w", err)
+	}
+	path := filepath.Join(wheelMakerHome(cfg), "release.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create release dir: %w", err)
+	}
+	if err := os.WriteFile(path, append(raw, '\n'), 0o644); err != nil {
+		return fmt.Errorf("write release manifest: %w", err)
 	}
 	deps.record("write release")
 	return nil
+}
+
+func wheelMakerHome(cfg deployConfig) string {
+	return filepath.Dir(cfg.InstallDir)
+}
+
+func wrapperBAT(deployPath string, action string) string {
+	return fmt.Sprintf("@echo off\r\nsetlocal\r\n\"%s\" service %s %%*\r\nexit /b %%errorlevel%%\r\n", deployPath, action)
+}
+
+func wrapperSH(deployPath string, action string) string {
+	return fmt.Sprintf("#!/usr/bin/env bash\nset -euo pipefail\n%q service %s \"$@\"\n", deployPath, action)
 }
 
 func binaryName(name string) string {

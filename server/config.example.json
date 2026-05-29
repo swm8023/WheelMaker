@@ -1,20 +1,16 @@
 {
   "projects": [
     {
-      "name": "local-dev",
-      "path": "/path/to/your/project"
-    },
-    {
-      "name": "app-dev",
-      "path": "/path/to/other/project"
+      "name": "WheelMaker",
+      "path": "/path/to/WheelMaker"
     }
   ],
   "registry": {
     "listen": true,
     "port": 9630,
     "server": "127.0.0.1",
-    "token": "replace-with-shared-token",
-    "hubId": "dev-hub"
+    "token": "wheelmaker-local-token",
+    "hubId": "local-hub"
   },
   "monitor": {
     "port": 9631
