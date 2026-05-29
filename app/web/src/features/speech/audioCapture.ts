@@ -352,13 +352,32 @@ export async function startMicrophonePCMStream(
       if (stopped) {
         return;
       }
-      if (stopOptions?.flush) {
-        flushPending();
-      }
       stopped = true;
-      processor.disconnect();
-      source.disconnect();
-      mediaStream.getTracks().forEach(track => track.stop());
+      if (stopOptions?.flush) {
+        try {
+          flushPending();
+        } catch {
+          // Stopping must still release the microphone even if a callback fails.
+        }
+      }
+      processor.onaudioprocess = null;
+      try {
+        processor.disconnect();
+      } catch {
+        // Safari can throw when a node is already disconnected or closing.
+      }
+      try {
+        source.disconnect();
+      } catch {
+        // Keep releasing tracks even when the audio graph is already torn down.
+      }
+      mediaStream.getTracks().forEach(track => {
+        try {
+          track.stop();
+        } catch {
+          // Best-effort cleanup across browser implementations.
+        }
+      });
       context.close().catch(() => undefined);
     },
   };

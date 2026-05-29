@@ -1,20 +1,22 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
-import {VoiceInputButton} from '../web/src/features/speech/VoiceInputButton';
+import { VoiceInputButton } from '../web/src/features/speech/VoiceInputButton';
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   const promise = new Promise<T>(next => {
     resolve = next;
   });
-  return {promise, resolve};
+  return { promise, resolve };
 }
 
-function pointerEvent(input: {
-  pointerId?: number;
-  clientY?: number;
-  timeStamp?: number;
-} = {}) {
+function pointerEvent(
+  input: {
+    pointerId?: number;
+    clientY?: number;
+    timeStamp?: number;
+  } = {},
+) {
   return {
     pointerId: input.pointerId ?? 1,
     clientY: input.clientY ?? 200,
@@ -24,6 +26,12 @@ function pointerEvent(input: {
       setPointerCapture: jest.fn(),
       releasePointerCapture: jest.fn(),
     },
+  };
+}
+
+function clickEvent() {
+  return {
+    preventDefault: jest.fn(),
   };
 }
 
@@ -61,8 +69,8 @@ describe('VoiceInputButton', () => {
 
     const button = renderer!.root.findByType('button');
     await ReactTestRenderer.act(() => {
-      button.props.onPointerDown(pointerEvent({timeStamp: 0}));
-      button.props.onPointerUp(pointerEvent({timeStamp: 80}));
+      button.props.onPointerDown(pointerEvent({ timeStamp: 0 }));
+      button.props.onPointerUp(pointerEvent({ timeStamp: 80 }));
     });
 
     expect(onSend).toHaveBeenCalledTimes(1);
@@ -93,7 +101,7 @@ describe('VoiceInputButton', () => {
 
     const button = renderer!.root.findByType('button');
     await ReactTestRenderer.act(async () => {
-      button.props.onPointerDown(pointerEvent({timeStamp: 0}));
+      button.props.onPointerDown(pointerEvent({ timeStamp: 0 }));
       jest.advanceTimersByTime(260);
       await Promise.resolve();
     });
@@ -102,7 +110,7 @@ describe('VoiceInputButton', () => {
     expect(onSend).not.toHaveBeenCalled();
 
     await ReactTestRenderer.act(() => {
-      button.props.onPointerUp(pointerEvent({timeStamp: 420}));
+      button.props.onPointerUp(pointerEvent({ timeStamp: 420 }));
     });
 
     expect(onFinish).toHaveBeenCalledTimes(1);
@@ -133,11 +141,13 @@ describe('VoiceInputButton', () => {
 
     const button = renderer!.root.findByType('button');
     await ReactTestRenderer.act(async () => {
-      button.props.onPointerDown(pointerEvent({clientY: 200, timeStamp: 0}));
+      button.props.onPointerDown(pointerEvent({ clientY: 200, timeStamp: 0 }));
       jest.advanceTimersByTime(260);
       await Promise.resolve();
-      button.props.onPointerMove(pointerEvent({clientY: 120, timeStamp: 300}));
-      button.props.onPointerUp(pointerEvent({clientY: 120, timeStamp: 360}));
+      button.props.onPointerMove(
+        pointerEvent({ clientY: 120, timeStamp: 300 }),
+      );
+      button.props.onPointerUp(pointerEvent({ clientY: 120, timeStamp: 360 }));
     });
 
     expect(onStart).toHaveBeenCalledWith('hold');
@@ -168,12 +178,71 @@ describe('VoiceInputButton', () => {
 
     const button = renderer!.root.findByType('button');
     await ReactTestRenderer.act(() => {
-      button.props.onPointerDown(pointerEvent({timeStamp: 0}));
-      button.props.onPointerUp(pointerEvent({timeStamp: 80}));
+      button.props.onPointerDown(pointerEvent({ timeStamp: 0 }));
+      button.props.onPointerUp(pointerEvent({ timeStamp: 80 }));
     });
 
     expect(onStart).toHaveBeenCalledWith('locked');
     expect(onFinish).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  test('starts locked recording from click fallback when pointer events are not delivered', async () => {
+    const onStart = jest.fn();
+    const onFinish = jest.fn();
+    const onCancel = jest.fn();
+    const onSend = jest.fn();
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(
+        <VoiceInputButton
+          recording={false}
+          hasSendableContent={false}
+          onSend={onSend}
+          onStart={onStart}
+          onFinish={onFinish}
+          onCancel={onCancel}
+        />,
+      );
+    });
+
+    const button = renderer!.root.findByType('button');
+    await ReactTestRenderer.act(() => {
+      button.props.onClick(clickEvent());
+    });
+
+    expect(onStart).toHaveBeenCalledWith('locked');
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onFinish).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  test('finishes recording from click fallback when pointer events are not delivered', async () => {
+    const onStart = jest.fn();
+    const onFinish = jest.fn();
+    const onCancel = jest.fn();
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(
+        <VoiceInputButton
+          recording={true}
+          recordingMode="locked"
+          onStart={onStart}
+          onFinish={onFinish}
+          onCancel={onCancel}
+        />,
+      );
+    });
+
+    const button = renderer!.root.findByType('button');
+    await ReactTestRenderer.act(() => {
+      button.props.onClick(clickEvent());
+    });
+
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    expect(onStart).not.toHaveBeenCalled();
     expect(onCancel).not.toHaveBeenCalled();
   });
 
@@ -199,10 +268,10 @@ describe('VoiceInputButton', () => {
 
     const button = renderer!.root.findByType('button');
     await ReactTestRenderer.act(async () => {
-      button.props.onPointerDown(pointerEvent({timeStamp: 0}));
+      button.props.onPointerDown(pointerEvent({ timeStamp: 0 }));
       jest.advanceTimersByTime(260);
       await Promise.resolve();
-      button.props.onPointerUp(pointerEvent({timeStamp: 520}));
+      button.props.onPointerUp(pointerEvent({ timeStamp: 520 }));
     });
 
     expect(onStart).toHaveBeenCalledWith('locked');
@@ -231,11 +300,67 @@ describe('VoiceInputButton', () => {
 
     const button = renderer!.root.findByType('button');
     await ReactTestRenderer.act(() => {
-      button.props.onPointerDown(pointerEvent({timeStamp: 300}));
+      button.props.onPointerDown(pointerEvent({ timeStamp: 300 }));
     });
 
     expect(onFinish).toHaveBeenCalledTimes(1);
     expect(onStart).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  test('finishes recording even if a prior start gesture never delivered pointer up', async () => {
+    const start = deferred();
+    const onStart = jest.fn(() => start.promise);
+    const onFinish = jest.fn();
+    const onCancel = jest.fn();
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(
+        <VoiceInputButton
+          recording={false}
+          hasSendableContent={false}
+          onStart={onStart}
+          onFinish={onFinish}
+          onCancel={onCancel}
+        />,
+      );
+    });
+
+    const button = renderer!.root.findByType('button');
+    await ReactTestRenderer.act(() => {
+      button.props.onPointerDown(pointerEvent({ timeStamp: 0 }));
+    });
+
+    await ReactTestRenderer.act(async () => {
+      start.resolve();
+      await start.promise;
+    });
+
+    await ReactTestRenderer.act(() => {
+      renderer!.update(
+        <VoiceInputButton
+          recording={true}
+          recordingMode="locked"
+          onStart={onStart}
+          onFinish={onFinish}
+          onCancel={onCancel}
+        />,
+      );
+    });
+
+    const recordingButton = renderer!.root.findByType('button');
+    await ReactTestRenderer.act(() => {
+      recordingButton.props.onPointerDown(
+        pointerEvent({
+          pointerId: 2,
+          timeStamp: 300,
+        }),
+      );
+    });
+
+    expect(onStart).toHaveBeenCalledWith('locked');
+    expect(onFinish).toHaveBeenCalledTimes(1);
     expect(onCancel).not.toHaveBeenCalled();
   });
 
@@ -262,9 +387,9 @@ describe('VoiceInputButton', () => {
 
     const button = renderer!.root.findByType('button');
     await ReactTestRenderer.act(() => {
-      button.props.onPointerDown(pointerEvent({clientY: 200, timeStamp: 0}));
+      button.props.onPointerDown(pointerEvent({ clientY: 200, timeStamp: 0 }));
       jest.advanceTimersByTime(260);
-      button.props.onPointerUp(pointerEvent({clientY: 200, timeStamp: 320}));
+      button.props.onPointerUp(pointerEvent({ clientY: 200, timeStamp: 320 }));
     });
 
     expect(onStart).toHaveBeenCalledWith('hold');
@@ -306,10 +431,12 @@ describe('VoiceInputButton', () => {
 
     const button = renderer!.root.findByType('button');
     await ReactTestRenderer.act(() => {
-      button.props.onPointerDown(pointerEvent({clientY: 200, timeStamp: 0}));
+      button.props.onPointerDown(pointerEvent({ clientY: 200, timeStamp: 0 }));
       jest.advanceTimersByTime(260);
-      button.props.onPointerMove(pointerEvent({clientY: 120, timeStamp: 300}));
-      button.props.onPointerUp(pointerEvent({clientY: 120, timeStamp: 320}));
+      button.props.onPointerMove(
+        pointerEvent({ clientY: 120, timeStamp: 300 }),
+      );
+      button.props.onPointerUp(pointerEvent({ clientY: 120, timeStamp: 320 }));
     });
 
     expect(onStart).toHaveBeenCalledWith('hold');
@@ -350,10 +477,10 @@ describe('VoiceInputButton', () => {
 
     const button = renderer!.root.findByType('button');
     await ReactTestRenderer.act(async () => {
-      button.props.onPointerDown(pointerEvent({timeStamp: 0}));
+      button.props.onPointerDown(pointerEvent({ timeStamp: 0 }));
       jest.advanceTimersByTime(260);
       await Promise.resolve();
-      button.props.onPointerCancel(pointerEvent({timeStamp: 320}));
+      button.props.onPointerCancel(pointerEvent({ timeStamp: 320 }));
     });
 
     expect(onStart).toHaveBeenCalledWith('hold');
@@ -386,8 +513,8 @@ describe('VoiceInputButton', () => {
 
     const button = renderer!.root.findByType('button');
     await ReactTestRenderer.act(() => {
-      button.props.onPointerDown(pointerEvent({timeStamp: 0}));
-      button.props.onPointerCancel(pointerEvent({timeStamp: 320}));
+      button.props.onPointerDown(pointerEvent({ timeStamp: 0 }));
+      button.props.onPointerCancel(pointerEvent({ timeStamp: 320 }));
     });
 
     expect(onStart).not.toHaveBeenCalled();

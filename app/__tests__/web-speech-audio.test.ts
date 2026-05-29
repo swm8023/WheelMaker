@@ -259,4 +259,65 @@ describe('speech audio helpers', () => {
       });
     }
   });
+
+  test('stops microphone tracks even when disconnecting audio nodes fails', async () => {
+    const originalAudioContext = window.AudioContext;
+    const originalMediaDevices = navigator.mediaDevices;
+    const close = jest.fn(() => Promise.resolve());
+    const source = {
+      connect: jest.fn(),
+      disconnect: jest.fn(() => {
+        throw new Error('source disconnect failed');
+      }),
+    };
+    const processor = {
+      connect: jest.fn(),
+      disconnect: jest.fn(() => {
+        throw new Error('processor disconnect failed');
+      }),
+      onaudioprocess: null,
+    };
+    const audioContext = {
+      state: 'running',
+      sampleRate: 16000,
+      resume: jest.fn(() => Promise.resolve()),
+      close,
+      createMediaStreamSource: jest.fn(() => source),
+      createScriptProcessor: jest.fn(() => processor),
+      destination: {},
+    };
+    const track = { stop: jest.fn(), addEventListener: jest.fn() };
+
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: jest.fn(() => audioContext),
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: jest.fn(() =>
+          Promise.resolve({ getTracks: () => [track] }),
+        ),
+      },
+    });
+
+    try {
+      const capture = await startMicrophonePCMStream({ onChunk: jest.fn() });
+
+      expect(() => capture.stop()).not.toThrow();
+      expect(processor.disconnect).toHaveBeenCalled();
+      expect(source.disconnect).toHaveBeenCalled();
+      expect(track.stop).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(window, 'AudioContext', {
+        configurable: true,
+        value: originalAudioContext,
+      });
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: originalMediaDevices,
+      });
+    }
+  });
 });
