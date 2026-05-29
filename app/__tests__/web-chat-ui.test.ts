@@ -420,7 +420,11 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('return mergeChatSession([projectSession], currentProjectSession)[0];');
     expect(mainTsx).toContain('const CHAT_CONFIG_PRIORITY_IDS = [');
     expect(mainTsx).toContain("const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought']");
-    expect(mainTsx).toContain("const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;");
+    expect(mainTsx).toContain("const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle', 'lower'] as const;");
+    expect(mainTsx).toContain("case 'upper':\n      return 0;");
+    expect(mainTsx).toContain("case 'upper-middle':\n      return 0.25;");
+    expect(mainTsx).toContain("case 'lower-middle':\n      return 0.75;");
+    expect(mainTsx).toContain("case 'lower':\n      return 1;");
     expect(mainTsx).toContain("import { triggerMobileHaptic } from './services/mobileHaptics';");
     expect(mainTsx).toContain("import { resolveFloatingControlDragSide } from './services/mobileFloatingControls';");
     expect(mainTsx).not.toContain('navigator.vibrate?.(12)');

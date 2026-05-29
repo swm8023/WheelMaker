@@ -34,7 +34,8 @@ export type PersistedFloatingControlSlot =
   | 'upper'
   | 'upper-middle'
   | 'center'
-  | 'lower-middle';
+  | 'lower-middle'
+  | 'lower';
 export type PersistedFloatingControlSide = 'left' | 'right';
 
 export type DiffCacheEntry = {
@@ -381,7 +382,8 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     input.floatingControlSlot === 'upper' ||
     input.floatingControlSlot === 'upper-middle' ||
     input.floatingControlSlot === 'center' ||
-    input.floatingControlSlot === 'lower-middle'
+    input.floatingControlSlot === 'lower-middle' ||
+    input.floatingControlSlot === 'lower'
       ? input.floatingControlSlot
       : 'upper-middle';
   const sanitizeDesktopSidebarWidth = (value: unknown, fallback: number): number => {

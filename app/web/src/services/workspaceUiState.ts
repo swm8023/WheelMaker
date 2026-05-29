@@ -110,7 +110,8 @@ function sanitizeFloatingControlSlot(value: unknown): PersistedFloatingControlSl
   return value === 'upper' ||
     value === 'upper-middle' ||
     value === 'center' ||
-    value === 'lower-middle'
+    value === 'lower-middle' ||
+    value === 'lower'
     ? value
     : 'upper-middle';
 }

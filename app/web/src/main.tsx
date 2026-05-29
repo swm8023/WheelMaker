@@ -618,7 +618,7 @@ const fileMemoryCacheKey = (activeProjectId: string, path: string) => `${activeP
 const PROJECT_PIN_LONG_PRESS_MS = 450;
 const PROJECT_SESSION_LONG_PRESS_MS = 450;
 const DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO = 0.45;
-const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;
+const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle', 'lower'] as const;
 const FLOATING_CONTROL_IDLE_DELAY_MS = 3000;
 const PORT_RELAY_FLOATING_SLOT_STORAGE_KEY = 'wheelmaker:portRelayFloatingSlot';
 const PORT_RELAY_FLOATING_SIDE_STORAGE_KEY = 'wheelmaker:portRelayFloatingSide';
@@ -910,13 +910,17 @@ function formatWheelMakerDateTime(value: string): string {
 function floatingControlSlotRatio(slot: PersistedFloatingControlSlot): number {
   switch (slot) {
     case 'upper':
-      return 0.26;
+      return 0;
+    case 'upper-middle':
+      return 0.25;
     case 'center':
       return 0.5;
     case 'lower-middle':
-      return 0.68;
+      return 0.75;
+    case 'lower':
+      return 1;
     default:
-      return 0.4;
+      return 0.25;
   }
 }
 
@@ -937,7 +941,8 @@ function isFloatingControlSlot(value: unknown): value is PersistedFloatingContro
   return value === 'upper' ||
     value === 'upper-middle' ||
     value === 'center' ||
-    value === 'lower-middle';
+    value === 'lower-middle' ||
+    value === 'lower';
 }
 
 function isFloatingControlSide(value: unknown): value is PersistedFloatingControlSide {

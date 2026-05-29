@@ -141,6 +141,7 @@ describe('web responsive ui state', () => {
       chatConfigOverflowOpen: true,
     });
     expect(createWorkspaceUiState({ floatingControlSide: 'invalid' }).mobile.floatingControlSide).toBe('right');
+    expect(createWorkspaceUiState({ floatingControlSlot: 'lower' }).mobile.floatingControlSlot).toBe('lower');
 
     state = workspaceUiReducer(state, {
       type: 'layout/modeChanged',
@@ -174,6 +175,13 @@ describe('web responsive ui state', () => {
     });
 
     expect(state.mobile.floatingControlSide).toBe('right');
+
+    state = workspaceUiReducer(state, {
+      type: 'mobile/setFloatingControlSlot',
+      next: 'lower',
+    });
+
+    expect(state.mobile.floatingControlSlot).toBe('lower');
 
     state = workspaceUiReducer(state, {
       type: 'desktop/setSidebarWidth',
@@ -241,6 +249,7 @@ describe('web responsive ui state', () => {
 
     expect(persistenceTs).toContain('desktopSidebarWidth: number;');
     expect(persistenceTs).toContain("export type PersistedFloatingControlSide = 'left' | 'right';");
+    expect(persistenceTs).toContain("| 'lower';");
     expect(persistenceTs).toContain('floatingControlSide: PersistedFloatingControlSide;');
     expect(persistenceTs).not.toContain('useLatestPromptTitle: boolean;');
     expect(persistenceTs).toContain("desktopSidebarWidth: 'desktopSidebarWidth',");
