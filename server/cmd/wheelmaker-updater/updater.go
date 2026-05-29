@@ -191,14 +191,14 @@ func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner
 }
 
 func runUpdateRoundWithOptions(ctx context.Context, cfg UpdaterConfig, runner commandRunner, opts updateRoundOptions) error {
-	logger.Info("[updater] run refresh script begin")
+	logger.Info("[updater] run deploy cli begin")
 
-	invocation, err := refreshInvocationForOS(cfg, opts, runtimeGOOS)
+	invocation, err := deployInvocationForOS(cfg, opts, runtimeGOOS)
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(invocation.scriptPath); err != nil {
-		return fmt.Errorf("refresh script missing: %w", err)
+	if _, err := os.Stat(invocation.command); err != nil {
+		return fmt.Errorf("wheelmaker-deploy missing: %w", err)
 	}
 
 	logger.Info("[updater] invoke %s %s", invocation.command, strings.Join(invocation.args, " "))
@@ -208,81 +208,37 @@ func runUpdateRoundWithOptions(ctx context.Context, cfg UpdaterConfig, runner co
 		return err
 	}
 
-	logger.Info("[updater] run refresh script complete")
+	logger.Info("[updater] run deploy cli complete")
 	return nil
 }
 
-type refreshInvocation struct {
-	scriptPath string
-	command    string
-	args       []string
+type deployInvocation struct {
+	command string
+	args    []string
 }
 
-func refreshInvocationForOS(cfg UpdaterConfig, opts updateRoundOptions, goos string) (refreshInvocation, error) {
+func deployInvocationForOS(cfg UpdaterConfig, opts updateRoundOptions, goos string) (deployInvocation, error) {
+	binaryName := "wheelmaker-deploy"
 	switch goos {
 	case "windows":
-		refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server.ps1")
-		args := []string{
-			"-NoProfile",
-			"-ExecutionPolicy", "Bypass",
-			"-File", refreshScript,
-			"-InstallDir", cfg.InstallDir,
-			"-SkipUpdaterInstall",
-			"-SkipServiceConfig",
-		}
-		if opts.skipUpdate {
-			args = append(args, "-SkipUpdate")
-		}
-		if opts.skipWebPublish {
-			args = append(args, "-SkipWebPublish")
-		}
-		return refreshInvocation{
-			scriptPath: refreshScript,
-			command:    "powershell",
-			args:       args,
-		}, nil
-	case "darwin":
-		refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server.sh")
-		args := []string{
-			refreshScript,
-			"--repo-root", cfg.RepoDir,
-			"--install-dir", cfg.InstallDir,
-			"--skip-updater-install",
-			"--skip-service-config",
-		}
-		if opts.skipUpdate {
-			args = append(args, "--skip-update")
-		}
-		if opts.skipWebPublish {
-			args = append(args, "--skip-web-publish")
-		}
-		return refreshInvocation{
-			scriptPath: refreshScript,
-			command:    "bash",
-			args:       args,
-		}, nil
-	case "linux":
-		refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server_linux.sh")
-		args := []string{
-			refreshScript,
-			"--repo-root", cfg.RepoDir,
-			"--install-dir", cfg.InstallDir,
-			"--skip-updater-install",
-			"--skip-service-config",
-		}
-		if opts.skipUpdate {
-			args = append(args, "--skip-update", "--skip-web-publish")
-		} else if opts.skipWebPublish {
-			args = append(args, "--skip-web-publish")
-		}
-		return refreshInvocation{
-			scriptPath: refreshScript,
-			command:    "bash",
-			args:       args,
-		}, nil
+		binaryName += ".exe"
+	case "darwin", "linux":
 	default:
-		return refreshInvocation{}, fmt.Errorf("unsupported updater platform: %s", goos)
+		return deployInvocation{}, fmt.Errorf("unsupported updater platform: %s", goos)
 	}
+	args := []string{
+		"bootstrap-update",
+		"--repo", cfg.RepoDir,
+		"--bin", cfg.InstallDir,
+		"--time", cfg.DailyTime,
+	}
+	if opts.skipWebPublish {
+		args = append(args, "--no-web")
+	}
+	return deployInvocation{
+		command: filepath.Join(cfg.InstallDir, binaryName),
+		args:    args,
+	}, nil
 }
 
 func validateConfig(cfg UpdaterConfig) error {
@@ -316,12 +272,8 @@ func validateCommands() error {
 
 func requiredCommandsForOS(goos string) []string {
 	switch goos {
-	case "windows":
-		return []string{"powershell"}
-	case "darwin":
-		return []string{"bash", "git", "go", "node", "npm", "launchctl"}
-	case "linux":
-		return []string{"bash", "git", "go", "node", "npm", "systemctl"}
+	case "windows", "darwin", "linux":
+		return []string{}
 	default:
 		return nil
 	}

@@ -61,18 +61,16 @@ func TestNextRunAfterNow(t *testing.T) {
 	}
 }
 
-func TestRunUpdateRound_RunsRefreshScript(t *testing.T) {
-	repoDir := t.TempDir()
-	scriptsDir := filepath.Join(repoDir, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatalf("mkdir scripts: %v", err)
-	}
-	refreshPath := filepath.Join(scriptsDir, "refresh_server.ps1")
-	if err := os.WriteFile(refreshPath, []byte(""), 0o644); err != nil {
-		t.Fatalf("write refresh script: %v", err)
-	}
+func TestRunUpdateRound_RunsDeployCLI(t *testing.T) {
+	old := runtimeGOOS
+	runtimeGOOS = "windows"
+	defer func() { runtimeGOOS = old }()
 
-	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: `C:/Users/test/.wheelmaker/bin`}
+	repoDir := t.TempDir()
+	installDir := filepath.Join(t.TempDir(), "bin")
+	deployPath := createDeployCLI(t, installDir, "windows")
+
+	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: installDir, DailyTime: "03:00"}
 	f := &fakeRunner{results: map[string]fakeResult{}}
 
 	if err := runUpdateRound(context.Background(), cfg, f, false); err != nil {
@@ -84,29 +82,23 @@ func TestRunUpdateRound_RunsRefreshScript(t *testing.T) {
 		got = append(got, c.dir+"|"+c.name+" "+strings.Join(c.args, " "))
 	}
 	want := []string{
-		repoDir + "|powershell -NoProfile -ExecutionPolicy Bypass -File " + refreshPath + " -InstallDir C:/Users/test/.wheelmaker/bin -SkipUpdaterInstall -SkipServiceConfig",
+		repoDir + "|" + deployPath + " bootstrap-update --repo " + repoDir + " --bin " + installDir + " --time 03:00",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands mismatch\n got: %#v\nwant: %#v", got, want)
 	}
 }
 
-func TestRunUpdateRound_DarwinRunsRefreshShell(t *testing.T) {
+func TestRunUpdateRound_DarwinRunsDeployCLI(t *testing.T) {
 	old := runtimeGOOS
 	runtimeGOOS = "darwin"
 	defer func() { runtimeGOOS = old }()
 
 	repoDir := t.TempDir()
-	scriptsDir := filepath.Join(repoDir, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatalf("mkdir scripts: %v", err)
-	}
-	refreshPath := filepath.Join(scriptsDir, "refresh_server.sh")
-	if err := os.WriteFile(refreshPath, []byte(""), 0o755); err != nil {
-		t.Fatalf("write refresh script: %v", err)
-	}
+	installDir := filepath.Join(t.TempDir(), "bin")
+	deployPath := createDeployCLI(t, installDir, "darwin")
 
-	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: "/Users/test/.wheelmaker/bin"}
+	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: installDir, DailyTime: "04:00"}
 	f := &fakeRunner{results: map[string]fakeResult{}}
 
 	if err := runUpdateRound(context.Background(), cfg, f, false); err != nil {
@@ -114,68 +106,53 @@ func TestRunUpdateRound_DarwinRunsRefreshShell(t *testing.T) {
 	}
 
 	if len(f.calls) != 1 {
-		t.Fatalf("expected one darwin refresh call, got %d", len(f.calls))
+		t.Fatalf("expected one darwin deploy call, got %d", len(f.calls))
 	}
 	call := f.calls[0]
-	if call.name != "bash" {
-		t.Fatalf("command=%q want bash", call.name)
+	if call.name != deployPath {
+		t.Fatalf("command=%q want %q", call.name, deployPath)
 	}
 	args := strings.Join(call.args, " ")
-	if !strings.Contains(args, refreshPath) || !strings.Contains(args, "--install-dir /Users/test/.wheelmaker/bin") {
+	if !strings.Contains(args, "bootstrap-update") || !strings.Contains(args, "--bin "+installDir) || !strings.Contains(args, "--time 04:00") {
 		t.Fatalf("unexpected args: %s", args)
 	}
-	if strings.Contains(args, "--skip-web-publish") {
-		t.Fatalf("full update should publish web through refresh_server.sh: %s", args)
+	if strings.Contains(args, "--no-web") {
+		t.Fatalf("full update should publish web through deploy cli: %s", args)
 	}
 }
 
-func TestRunUpdateRound_DarwinManualSignalSkipsUpdateAndPublishesWeb(t *testing.T) {
+func TestRunUpdateRound_DarwinManualSkipWebSignalDisablesWeb(t *testing.T) {
 	old := runtimeGOOS
 	runtimeGOOS = "darwin"
 	defer func() { runtimeGOOS = old }()
 
 	repoDir := t.TempDir()
-	scriptsDir := filepath.Join(repoDir, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatalf("mkdir scripts: %v", err)
-	}
-	refreshPath := filepath.Join(scriptsDir, "refresh_server.sh")
-	if err := os.WriteFile(refreshPath, []byte(""), 0o755); err != nil {
-		t.Fatalf("write refresh script: %v", err)
-	}
+	installDir := filepath.Join(t.TempDir(), "bin")
+	createDeployCLI(t, installDir, "darwin")
 
-	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: "/Users/test/.wheelmaker/bin"}
+	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: installDir, DailyTime: "03:00"}
 	f := &fakeRunner{results: map[string]fakeResult{}}
 
-	if err := runUpdateRound(context.Background(), cfg, f, true); err != nil {
+	if err := runUpdateRoundWithOptions(context.Background(), cfg, f, updateRoundOptions{skipWebPublish: true}); err != nil {
 		t.Fatalf("runUpdateRound: %v", err)
 	}
 
 	args := strings.Join(f.calls[0].args, " ")
-	if !strings.Contains(args, "--skip-update") {
-		t.Fatalf("manual signal should skip update, got: %s", args)
-	}
-	if strings.Contains(args, "--skip-web-publish") {
-		t.Fatalf("manual signal should still publish web through refresh_server.sh, got: %s", args)
+	if !strings.Contains(args, "--no-web") {
+		t.Fatalf("skip-web-publish signal should pass --no-web, got: %s", args)
 	}
 }
 
-func TestRunUpdateRound_LinuxRunsRefreshShell(t *testing.T) {
+func TestRunUpdateRound_LinuxRunsDeployCLI(t *testing.T) {
 	old := runtimeGOOS
 	runtimeGOOS = "linux"
 	defer func() { runtimeGOOS = old }()
 
 	repoDir := t.TempDir()
-	scriptsDir := filepath.Join(repoDir, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatalf("mkdir scripts: %v", err)
-	}
-	refreshPath := filepath.Join(scriptsDir, "refresh_server_linux.sh")
-	if err := os.WriteFile(refreshPath, []byte(""), 0o755); err != nil {
-		t.Fatalf("write refresh script: %v", err)
-	}
+	installDir := filepath.Join(t.TempDir(), "bin")
+	deployPath := createDeployCLI(t, installDir, "linux")
 
-	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: "/home/test/.wheelmaker/bin"}
+	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: installDir, DailyTime: "03:00"}
 	f := &fakeRunner{results: map[string]fakeResult{}}
 
 	if err := runUpdateRound(context.Background(), cfg, f, false); err != nil {
@@ -183,143 +160,73 @@ func TestRunUpdateRound_LinuxRunsRefreshShell(t *testing.T) {
 	}
 
 	if len(f.calls) != 1 {
-		t.Fatalf("expected one linux refresh call, got %d", len(f.calls))
+		t.Fatalf("expected one linux deploy call, got %d", len(f.calls))
 	}
 	call := f.calls[0]
-	if call.name != "bash" {
-		t.Fatalf("command=%q want bash", call.name)
+	if call.name != deployPath {
+		t.Fatalf("command=%q want %q", call.name, deployPath)
 	}
 	args := strings.Join(call.args, " ")
-	if !strings.Contains(args, refreshPath) || !strings.Contains(args, "--install-dir /home/test/.wheelmaker/bin") {
+	if !strings.Contains(args, "bootstrap-update") || !strings.Contains(args, "--bin "+installDir) {
 		t.Fatalf("unexpected args: %s", args)
 	}
-	if !strings.Contains(args, "--skip-updater-install") || !strings.Contains(args, "--skip-service-config") {
-		t.Fatalf("linux updater should skip self-install and service config, got: %s", args)
-	}
-	if strings.Contains(args, "--skip-web-publish") {
-		t.Fatalf("full update should publish web through refresh_server_linux.sh: %s", args)
+	if strings.Contains(args, "--no-web") {
+		t.Fatalf("full update should publish web through deploy cli: %s", args)
 	}
 }
 
-func TestRunUpdateRound_LinuxManualSignalSkipsUpdateAndWebPublish(t *testing.T) {
+func TestRunUpdateRound_LinuxManualSignalSkipsWebPublish(t *testing.T) {
 	old := runtimeGOOS
 	runtimeGOOS = "linux"
 	defer func() { runtimeGOOS = old }()
 
 	repoDir := t.TempDir()
-	scriptsDir := filepath.Join(repoDir, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatalf("mkdir scripts: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(scriptsDir, "refresh_server_linux.sh"), []byte(""), 0o755); err != nil {
-		t.Fatalf("write refresh script: %v", err)
-	}
+	installDir := filepath.Join(t.TempDir(), "bin")
+	createDeployCLI(t, installDir, "linux")
 
-	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: "/home/test/.wheelmaker/bin"}
+	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: installDir, DailyTime: "03:00"}
 	f := &fakeRunner{results: map[string]fakeResult{}}
 
-	if err := runUpdateRound(context.Background(), cfg, f, true); err != nil {
+	if err := runUpdateRoundWithOptions(context.Background(), cfg, f, updateRoundOptions{skipWebPublish: true}); err != nil {
 		t.Fatalf("runUpdateRound: %v", err)
 	}
 
 	args := strings.Join(f.calls[0].args, " ")
-	if !strings.Contains(args, "--skip-update") || !strings.Contains(args, "--skip-web-publish") {
-		t.Fatalf("manual signal should skip update and web publish, got: %s", args)
+	if !strings.Contains(args, "--no-web") {
+		t.Fatalf("manual signal should skip web publish, got: %s", args)
 	}
 }
 
 func TestRequiredCommandsForOS(t *testing.T) {
-	if got := requiredCommandsForOS("windows"); !reflect.DeepEqual(got, []string{"powershell"}) {
+	if got := requiredCommandsForOS("windows"); !reflect.DeepEqual(got, []string{}) {
 		t.Fatalf("windows commands=%#v", got)
 	}
-	darwin := requiredCommandsForOS("darwin")
-	for _, want := range []string{"bash", "git", "go", "node", "npm", "launchctl"} {
-		found := false
-		for _, got := range darwin {
-			if got == want {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("darwin commands missing %s: %#v", want, darwin)
-		}
+	if got := requiredCommandsForOS("darwin"); !reflect.DeepEqual(got, []string{}) {
+		t.Fatalf("darwin commands=%#v", got)
 	}
-	for _, got := range darwin {
-		if got == "npx" {
-			t.Fatalf("darwin commands should not require npx: %#v", darwin)
-		}
-	}
-	linux := requiredCommandsForOS("linux")
-	for _, want := range []string{"bash", "git", "go", "node", "npm", "systemctl"} {
-		found := false
-		for _, got := range linux {
-			if got == want {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("linux commands missing %s: %#v", want, linux)
-		}
-	}
-	for _, got := range linux {
-		if got == "npx" {
-			t.Fatalf("linux commands should not require npx: %#v", linux)
-		}
+	if got := requiredCommandsForOS("linux"); !reflect.DeepEqual(got, []string{}) {
+		t.Fatalf("linux commands=%#v", got)
 	}
 }
 
-func TestRunUpdateRound_RefreshScriptMissing(t *testing.T) {
+func TestRunUpdateRound_DeployCLIMissing(t *testing.T) {
 	cfg := UpdaterConfig{RepoDir: t.TempDir(), InstallDir: `C:/Users/test/.wheelmaker/bin`}
 	f := &fakeRunner{results: map[string]fakeResult{}}
 	err := runUpdateRound(context.Background(), cfg, f, false)
-	if err == nil || !strings.Contains(err.Error(), "refresh script missing") {
+	if err == nil || !strings.Contains(err.Error(), "wheelmaker-deploy") {
 		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestRunUpdateRound_ManualSignalSkipsUpdate(t *testing.T) {
-	repoDir := t.TempDir()
-	scriptsDir := filepath.Join(repoDir, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatalf("mkdir scripts: %v", err)
-	}
-	refreshPath := filepath.Join(scriptsDir, "refresh_server.ps1")
-	if err := os.WriteFile(refreshPath, []byte(""), 0o644); err != nil {
-		t.Fatalf("write refresh script: %v", err)
-	}
-
-	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: `C:/Users/test/.wheelmaker/bin`}
-	f := &fakeRunner{results: map[string]fakeResult{}}
-
-	if err := runUpdateRound(context.Background(), cfg, f, true); err != nil {
-		t.Fatalf("runUpdateRound: %v", err)
-	}
-	if len(f.calls) != 1 {
-		t.Fatalf("expected one command call, got %d", len(f.calls))
-	}
-	call := f.calls[0]
-	argsLine := strings.Join(call.args, " ")
-	if !strings.Contains(argsLine, "-SkipUpdate") {
-		t.Fatalf("expected -SkipUpdate in args, got: %s", argsLine)
 	}
 }
 
 func TestRunUpdateRound_ManualSignalCanSkipWebPublish(t *testing.T) {
 	repoDir := t.TempDir()
-	scriptsDir := filepath.Join(repoDir, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		t.Fatalf("mkdir scripts: %v", err)
-	}
-	refreshPath := filepath.Join(scriptsDir, "refresh_server.ps1")
-	if err := os.WriteFile(refreshPath, []byte(""), 0o644); err != nil {
-		t.Fatalf("write refresh script: %v", err)
-	}
+	installDir := filepath.Join(t.TempDir(), "bin")
+	createDeployCLI(t, installDir, runtimeGOOS)
 
-	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: `C:/Users/test/.wheelmaker/bin`}
+	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: installDir, DailyTime: "03:00"}
 	f := &fakeRunner{results: map[string]fakeResult{}}
 
 	err := runUpdateRoundWithOptions(context.Background(), cfg, f, updateRoundOptions{
-		skipUpdate:     true,
 		skipWebPublish: true,
 	})
 	if err != nil {
@@ -329,8 +236,8 @@ func TestRunUpdateRound_ManualSignalCanSkipWebPublish(t *testing.T) {
 		t.Fatalf("expected one command call, got %d", len(f.calls))
 	}
 	argsLine := strings.Join(f.calls[0].args, " ")
-	if !strings.Contains(argsLine, "-SkipUpdate") || !strings.Contains(argsLine, "-SkipWebPublish") {
-		t.Fatalf("expected -SkipUpdate and -SkipWebPublish in args, got: %s", argsLine)
+	if !strings.Contains(argsLine, "--no-web") {
+		t.Fatalf("expected --no-web in args, got: %s", argsLine)
 	}
 }
 
@@ -442,4 +349,20 @@ func TestUpdaterLogFilePath(t *testing.T) {
 	if got != want {
 		t.Fatalf("updaterLogFilePath=%q want=%q", got, want)
 	}
+}
+
+func createDeployCLI(t *testing.T, installDir string, goos string) string {
+	t.Helper()
+	if err := os.MkdirAll(installDir, 0o755); err != nil {
+		t.Fatalf("mkdir install dir: %v", err)
+	}
+	name := "wheelmaker-deploy"
+	if goos == "windows" {
+		name += ".exe"
+	}
+	path := filepath.Join(installDir, name)
+	if err := os.WriteFile(path, []byte("deploy cli"), 0o755); err != nil {
+		t.Fatalf("write deploy cli: %v", err)
+	}
+	return path
 }
