@@ -34,6 +34,7 @@ describe('web responsive ui state', () => {
       floatingControlYRatioFromTop,
       resolveFloatingControlAvoidanceBounds,
       resolveFloatingControlDefaultBounds,
+      resolveFloatingControlYRatioForBoundsChange,
       resolveFloatingControlYRatioForStableTop,
       sanitizeFloatingControlYRatio,
     } = require(modulePath);
@@ -59,6 +60,22 @@ describe('web responsive ui state', () => {
       maxTop: 310,
       fallbackRatio: 0.4,
     })).toBe(1);
+    expect(resolveFloatingControlYRatioForBoundsChange({
+      previousTop: 260,
+      previousHadDefaultComposerTop: false,
+      nextHasDefaultComposerTop: true,
+      minTop: 10,
+      maxTop: 310,
+      fallbackRatio: 0.4,
+    })).toBe(0.4);
+    expect(resolveFloatingControlYRatioForBoundsChange({
+      previousTop: 90,
+      previousHadDefaultComposerTop: true,
+      nextHasDefaultComposerTop: true,
+      minTop: 10,
+      maxTop: 310,
+      fallbackRatio: 0.4,
+    })).toBeCloseTo(0.2667, 4);
     const defaultBounds = resolveFloatingControlDefaultBounds({
       viewportHeight: 800,
       stackHeight: 184,
@@ -343,6 +360,7 @@ describe('web responsive ui state', () => {
     expect(mainTsx).toContain('desktopSidebarWidth: globalState.desktopSidebarWidth');
     expect(mainTsx).toContain('pinnedProjectIds: globalState.pinnedProjectIds ?? []');
     expect(mainTsx).toContain('floatingControlSide: globalState.floatingControlSide ?? readPortRelayFloatingSide() ?? \'right\'');
+    expect(mainTsx).toContain('floatingControlYRatio,\n      floatingControlSide,\n      desktopSidebarWidth,');
     expect(mainTsx).toContain('const desktopSidebarWidth = workspaceUiState.desktop.sidebarWidth;');
     expect(mainTsx).toContain('const collapsedProjectIds = workspaceUiState.shared.collapsedProjectIds;');
     expect(mainTsx).toContain('const pinnedProjectIds = workspaceUiState.shared.pinnedProjectIds;');

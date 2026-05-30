@@ -136,7 +136,7 @@ import {
   floatingControlYRatioFromTop,
   resolveFloatingControlAvoidanceBounds,
   resolveFloatingControlDefaultBounds,
-  resolveFloatingControlYRatioForStableTop,
+  resolveFloatingControlYRatioForBoundsChange,
   resolveFloatingControlDragSide,
   sanitizeFloatingControlYRatio,
 } from './services/mobileFloatingControls';
@@ -3025,7 +3025,7 @@ function App() {
   const floatingClickCooldownUntilRef = useRef(0);
   const floatingIgnoreLostCaptureRef = useRef(false);
   const floatingControlStackRef = useRef<HTMLDivElement | null>(null);
-  const floatingPositionSnapshotRef = useRef<{minTop: number; maxTop: number; top: number} | null>(null);
+  const floatingPositionSnapshotRef = useRef<{minTop: number; maxTop: number; top: number; hasDefaultComposerTop: boolean} | null>(null);
   const [floatingBackdropTone, setFloatingBackdropTone] = useState<FloatingBackdropTone>('dark');
   const [floatingSidePulse, setFloatingSidePulse] = useState<PersistedFloatingControlSide | ''>('');
   const [floatingControlsIdle, setFloatingControlsIdle] = useState(false);
@@ -5425,6 +5425,7 @@ function App() {
       tab,
       selectedProjectId: projectId,
       floatingControlYRatio,
+      floatingControlSide,
       desktopSidebarWidth,
       collapsedProjectIds,
       pinnedProjectIds,
@@ -5448,6 +5449,7 @@ function App() {
     tab,
     projectId,
     floatingControlYRatio,
+    floatingControlSide,
     desktopSidebarWidth,
     collapsedProjectIds,
     pinnedProjectIds,
@@ -5706,8 +5708,11 @@ function App() {
       (previousFloatingPosition.minTop !== floatingBaseBounds.minTop ||
         previousFloatingPosition.maxTop !== floatingBaseBounds.maxTop);
     if (boundsChanged && previousFloatingPosition) {
-      const nextYRatio = resolveFloatingControlYRatioForStableTop({
+      const nextHasDefaultComposerTop = floatingDefaultComposerTop !== null;
+      const nextYRatio = resolveFloatingControlYRatioForBoundsChange({
         previousTop: previousFloatingPosition.top,
+        previousHadDefaultComposerTop: previousFloatingPosition.hasDefaultComposerTop,
+        nextHasDefaultComposerTop,
         minTop: floatingBaseBounds.minTop,
         maxTop: floatingBaseBounds.maxTop,
         fallbackRatio: floatingControlYRatio,
@@ -5721,6 +5726,7 @@ function App() {
         minTop: floatingBaseBounds.minTop,
         maxTop: floatingBaseBounds.maxTop,
         top: nextTop,
+        hasDefaultComposerTop: nextHasDefaultComposerTop,
       };
       if (Math.abs(nextYRatio - floatingControlYRatio) > 0.001) {
         setFloatingControlYRatio(nextYRatio);
@@ -5731,10 +5737,12 @@ function App() {
       minTop: floatingBaseBounds.minTop,
       maxTop: floatingBaseBounds.maxTop,
       top: floatingRestTop,
+      hasDefaultComposerTop: floatingDefaultComposerTop !== null,
     };
   }, [
     floatingBaseBounds.maxTop,
     floatingBaseBounds.minTop,
+    floatingDefaultComposerTop,
     floatingRestTop,
     floatingControlYRatio,
     floatingDragState?.active,

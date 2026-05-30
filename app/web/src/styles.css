@@ -5208,14 +5208,14 @@ textarea,
   position: relative;
   z-index: 20;
   flex: 0 0 auto;
-  height: calc(var(--wm-safe-area-top) + 58px);
-  min-height: calc(var(--wm-safe-area-top) + 58px);
-  max-height: calc(var(--wm-safe-area-top) + 58px);
+  height: calc(var(--wm-safe-area-top) + 50px);
+  min-height: calc(var(--wm-safe-area-top) + 50px);
+  max-height: calc(var(--wm-safe-area-top) + 50px);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;
+  gap: 7px;
+  padding: calc(var(--wm-safe-area-top) + 6px) 7px 6px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
   background: color-mix(in srgb, var(--panel) 92%, transparent);
   backdrop-filter: blur(12px);
@@ -5224,10 +5224,10 @@ textarea,
 .mobile-chat-drawer-header.search-open {
   align-items: center;
   justify-content: space-between;
-  height: calc(var(--wm-safe-area-top) + 58px);
-  min-height: calc(var(--wm-safe-area-top) + 58px);
-  max-height: calc(var(--wm-safe-area-top) + 58px);
-  padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;
+  height: calc(var(--wm-safe-area-top) + 50px);
+  min-height: calc(var(--wm-safe-area-top) + 50px);
+  max-height: calc(var(--wm-safe-area-top) + 50px);
+  padding: calc(var(--wm-safe-area-top) + 6px) 7px 6px;
 }
 
 .mobile-chat-toolbar {
@@ -5248,7 +5248,7 @@ textarea,
 
 .mobile-chat-drawer-header .chat-hub-summary {
   flex: 0 0 auto;
-  max-width: min(148px, 42vw);
+  max-width: min(136px, 40vw);
   margin-left: 0;
 }
 
@@ -5262,11 +5262,11 @@ textarea,
 
 .mobile-chat-drawer-header .session-search-control.compact,
 .mobile-chat-drawer-header .chat-header-search-control.compact {
-  flex: 0 0 40px;
-  width: 40px;
-  min-width: 40px;
-  max-width: 40px;
-  height: 40px;
+  flex: 0 0 36px;
+  width: 36px;
+  min-width: 36px;
+  max-width: 36px;
+  height: 36px;
 }
 
 .mobile-chat-drawer-header .chat-header-search-control.compact {
@@ -5275,19 +5275,19 @@ textarea,
 
 .mobile-chat-drawer-header .session-search-control.compact .session-search-icon-btn,
 .mobile-chat-drawer-header .chat-header-search-control.compact .session-search-icon-btn {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--panel-2) 92%, transparent);
   color: var(--text);
-  font-size: 15px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+  font-size: 14px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
 }
 
 .mobile-chat-drawer-header .session-search-control.compact .session-search-icon-btn .codicon,
 .mobile-chat-drawer-header .chat-header-search-control.compact .session-search-icon-btn .codicon {
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .chat-header-search-wrap.mobile {
@@ -5295,7 +5295,7 @@ textarea,
   width: auto;
   min-width: 0;
   position: relative;
-  height: 40px;
+  height: 38px;
   display: block;
 }
 
@@ -5307,6 +5307,7 @@ textarea,
 .mobile-chat-drawer-header.search-open .chat-header-search-control.open {
   max-width: none;
   width: 100%;
+  height: 28px;
   position: absolute;
   top: 0;
   left: 0;
@@ -5317,7 +5318,7 @@ textarea,
   position: absolute;
   left: 22px;
   right: 3px;
-  bottom: -3px;
+  bottom: -2px;
   display: flex;
   justify-content: flex-end;
   height: 9px;
@@ -5333,18 +5334,26 @@ textarea,
 }
 
 .mobile-chat-drawer-header .chat-hub-summary-button {
-  height: 40px;
+  height: 36px;
   align-items: center;
   border-radius: 12px;
-  padding: 0 8px 0 10px;
-  font-size: 11px;
+  padding: 0 7px 0 9px;
+  font-size: 10px;
   font-weight: 700;
-  gap: 6px;
+  gap: 5px;
   white-space: nowrap;
 }
 
 .mobile-chat-drawer-header .chat-hub-summary-button .codicon {
-  font-size: 12px;
+  font-size: 11px;
+}
+
+.mobile-chat-drawer-header .chat-hub-summary-copy {
+  line-height: 1;
+}
+
+.mobile-chat-drawer-header .chat-hub-summary-project-label {
+  font-size: 9px;
 }
 
 .mobile-project-session-nav {
