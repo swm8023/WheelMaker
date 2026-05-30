@@ -8,6 +8,8 @@
 
 **Tech Stack:** React 19 / TypeScript / Jest, Kotlin, Android Gradle Plugin 8.13.2, AndroidX WebKit 1.15.0, Android WebView, PowerShell publish script, Gradle CLI from PATH.
 
+**Execution status (2026-05-30):** Implemented through the local APK build slice. Focused Web and publish-script verification passed; Android Gradle unit tests and full APK build require `gradle` in PATH on the build machine.
+
 ---
 
 ## Scope
