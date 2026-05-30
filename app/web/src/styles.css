@@ -593,10 +593,13 @@ textarea,
 
 .drawer-project-header {
   flex: 0 0 auto;
+  height: calc(var(--wm-safe-area-top) + 50px);
+  min-height: calc(var(--wm-safe-area-top) + 50px);
+  max-height: calc(var(--wm-safe-area-top) + 50px);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;
+  gap: 7px;
+  padding: calc(var(--wm-safe-area-top) + 6px) 7px 6px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
   background: color-mix(in srgb, var(--panel) 92%, transparent);
   backdrop-filter: blur(12px);
@@ -606,21 +609,22 @@ textarea,
 .drawer-project-pill {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 40px;
+  height: 36px;
+  min-height: 36px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 6px;
+  gap: 6px;
+  padding: 2px 5px;
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--panel-2) 88%, transparent);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
 }
 
 .drawer-settings-icon-btn {
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--panel-2) 92%, transparent);
@@ -629,9 +633,9 @@ textarea,
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 15px;
+  font-size: 14px;
   -webkit-tap-highlight-color: transparent;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
 }
 
 .drawer-settings-icon-btn:hover {
@@ -657,6 +661,9 @@ textarea,
 
 .drawer-project-refresh {
   flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
 }
 
 .mobile-settings-screen {

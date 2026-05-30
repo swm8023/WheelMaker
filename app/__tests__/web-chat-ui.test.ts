@@ -618,7 +618,8 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.header \.project-name \{[\s\S]*overflow: visible;[\s\S]*text-overflow: clip;[\s\S]*\}/,
     );
-    expect(stylesCss).toContain('padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;');
+    expect(stylesCss).not.toContain('padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;');
+    expect(stylesCss).toContain('padding: calc(var(--wm-safe-area-top) + 6px) 7px 6px;');
     expect(stylesCss).toContain('.floating-control-stack {');
     expect(stylesCss).toContain('.floating-control-drag-backdrop {');
     expect(stylesCss).toContain('.floating-control-dock-rail {');
@@ -841,6 +842,30 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toContain('.chat-hub-row-name {');
     expect(stylesCss).toContain('.chat-hub-empty {');
+  });
+
+  test('mobile file and git drawer project header matches the chat drawer height', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = readSourceText(path.join(projectRoot, 'web', 'src', 'main.tsx'));
+    const stylesCss = readSourceText(path.join(projectRoot, 'web', 'src', 'styles.css'));
+
+    expect(mainTsx).toContain("{!isWide && tab !== 'chat' ? (");
+    expect(mainTsx).toContain('className="drawer-project-header"');
+
+    const drawerProjectHeaderBlock = cssRuleBlock(stylesCss, '.drawer-project-header');
+    expect(drawerProjectHeaderBlock).toContain('height: calc(var(--wm-safe-area-top) + 50px);');
+    expect(drawerProjectHeaderBlock).toContain('min-height: calc(var(--wm-safe-area-top) + 50px);');
+    expect(drawerProjectHeaderBlock).toContain('max-height: calc(var(--wm-safe-area-top) + 50px);');
+    expect(drawerProjectHeaderBlock).toContain('padding: calc(var(--wm-safe-area-top) + 6px) 7px 6px;');
+    expect(drawerProjectHeaderBlock).not.toContain('+ 58px');
+
+    const drawerProjectPillBlock = cssRuleBlock(stylesCss, '.drawer-project-pill');
+    expect(drawerProjectPillBlock).toContain('height: 36px;');
+    expect(drawerProjectPillBlock).toContain('min-height: 36px;');
+
+    const drawerSettingsButtonBlock = cssRuleBlock(stylesCss, '.drawer-settings-icon-btn');
+    expect(drawerSettingsButtonBlock).toContain('width: 36px;');
+    expect(drawerSettingsButtonBlock).toContain('height: 36px;');
   });
 
   test('chat composer is a unified command frame with compact custom config pills', () => {
