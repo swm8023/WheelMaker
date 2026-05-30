@@ -5208,6 +5208,7 @@ textarea,
   position: relative;
   z-index: 20;
   flex: 0 0 auto;
+  min-height: calc(var(--wm-safe-area-top) + 58px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -5219,10 +5220,10 @@ textarea,
 }
 
 .mobile-chat-drawer-header.search-open {
-  align-items: stretch;
-  justify-content: center;
-  min-height: calc(var(--wm-safe-area-top) + 66px);
-  padding: calc(var(--wm-safe-area-top) + 8px) 8px 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: calc(var(--wm-safe-area-top) + 58px);
+  padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;
 }
 
 .mobile-chat-toolbar {
@@ -5233,6 +5234,11 @@ textarea,
   gap: 4px;
   flex: 0 1 auto;
   background: transparent;
+}
+
+.mobile-chat-hub-slot {
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .mobile-chat-drawer-header .chat-hub-summary {
@@ -5276,14 +5282,26 @@ textarea,
   font-size: 15px;
 }
 
+.chat-header-search-wrap.mobile {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
 .mobile-chat-drawer-header.search-open .chat-header-search-wrap,
 .mobile-chat-drawer-header.search-open .chat-header-search-control.open {
   max-width: none;
   width: 100%;
 }
 
+.mobile-chat-drawer-header.search-open .chat-header-search-control.open {
+  height: 40px;
+}
+
 .mobile-chat-drawer-header.search-open .chat-header-search-status {
-  padding-left: 23px;
+  display: none;
 }
 
 .mobile-chat-drawer-header .chat-hub-summary-button {

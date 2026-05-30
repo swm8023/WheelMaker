@@ -739,7 +739,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('renderChatHubSummary(true)');
     expect(mainTsx).toContain('renderChatHubSummary()');
     const mobileToolbarStart = mainTsx.indexOf('<div className="mobile-chat-toolbar"');
-    const mobileToolbarEnd = mainTsx.indexOf('{renderChatHubSummary(true)}', mobileToolbarStart);
+    const mobileToolbarEnd = mainTsx.indexOf('{renderChatHeaderSearchControls(true)}', mobileToolbarStart);
     const mobileToolbar = mainTsx.slice(mobileToolbarStart, mobileToolbarEnd);
     expect(mobileToolbar).toContain('title="Open settings"');
     expect(mobileToolbar).not.toContain('title="Update"');
@@ -749,7 +749,7 @@ describe('web chat integration', () => {
     expect(mobileToolbar).not.toContain('refreshMobileChatProjectSessions()');
     expect(mobileToolbar).not.toContain('title={reconnecting ? \'Reconnecting...\' : \'Refresh chats\'}');
     expect(mainTsx).toMatch(
-      /<div className="mobile-chat-toolbar" aria-label="Chat tools">[\s\S]*?title="Open settings"[\s\S]*?<\/div>[\s\S]*?\{renderChatHeaderSearchControls\(true\)\}[\s\S]*?\{renderChatHubSummary\(true\)\}/,
+      /<div className="mobile-chat-toolbar" aria-label="Chat tools">[\s\S]*?title="Open settings"[\s\S]*?<\/div>[\s\S]*?\{renderChatHubSummary\(true\)\}[\s\S]*?\{renderChatHeaderSearchControls\(true\)\}/,
     );
     expect(mainTsx).toMatch(
       /<div className=\{`sidebar-title-row\$\{chatSidebarTitleSearchOpen \? ' search-open' : ''\}`\}>[\s\S]*?<span className="sidebar-title-text">\{wideSidebarTitle\}<\/span>[\s\S]*?\{renderChatHubSummary\(\)\}[\s\S]*?\{renderChatHeaderSearchControls\(false\)\}/,
@@ -765,6 +765,11 @@ describe('web chat integration', () => {
     const mobileChatHeaderBlock = stylesCss.match(/\.mobile-chat-drawer-header \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileChatHeaderBlock).toContain('display: flex;');
     expect(mobileChatHeaderBlock).toContain('justify-content: space-between;');
+    expect(mobileChatHeaderBlock).toContain('min-height: calc(var(--wm-safe-area-top) + 58px);');
+    const mobileChatHeaderSearchOpenBlock = stylesCss.match(/\.mobile-chat-drawer-header\.search-open \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileChatHeaderSearchOpenBlock).toContain('min-height: calc(var(--wm-safe-area-top) + 58px);');
+    expect(mobileChatHeaderSearchOpenBlock).toContain('padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;');
+    expect(stylesCss).not.toContain('min-height: calc(var(--wm-safe-area-top) + 66px);');
     expect(stylesCss).toContain('.mobile-chat-toolbar {');
     const mobileChatToolbarBlock = stylesCss.match(/\.mobile-chat-toolbar \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileChatToolbarBlock).toContain('display: inline-flex;');
@@ -776,6 +781,10 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-hub-summary {');
     expect(stylesCss).toContain('.chat-hub-summary-button {');
     expect(stylesCss).toContain('.mobile-chat-drawer-header .chat-header-search-control.compact .session-search-icon-btn {');
+    expect(stylesCss).toContain('.chat-header-search-wrap.mobile {');
+    expect(stylesCss).toContain('.mobile-chat-drawer-header.search-open .chat-header-search-status {');
+    const mobileSearchStatusBlock = stylesCss.match(/\.mobile-chat-drawer-header\.search-open \.chat-header-search-status \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileSearchStatusBlock).toContain('display: none;');
     const mobileSearchButtonBlock = stylesCss.match(/\.mobile-chat-drawer-header \.chat-header-search-control\.compact \.session-search-icon-btn \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileSearchButtonBlock).toContain('width: 40px;');
     expect(mobileSearchButtonBlock).toContain('height: 40px;');

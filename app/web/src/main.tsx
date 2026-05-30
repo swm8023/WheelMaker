@@ -14044,27 +14044,25 @@ function App() {
     return (
       <>
         <div className={`mobile-chat-drawer-header${sessionSearchHeaderExpanded ? ' search-open' : ''}`}>
-          {sessionSearchHeaderExpanded ? renderChatHeaderSearchControls(true) : (
-            <>
-              <div className="mobile-chat-toolbar" aria-label="Chat tools">
-                <button
-                  type="button"
-                  className="drawer-settings-icon-btn"
-                  onClick={() => {
-                    setProjectMenuOpen(false);
-                    setSettingsDetailView(null);
-                    setSidebarSettingsOpen(true);
-                  }}
-                  title="Open settings"
-                  aria-label="Open settings"
-                >
-                  <span className="codicon codicon-settings-gear" />
-                </button>
-              </div>
-              {renderChatHeaderSearchControls(true)}
-              {renderChatHubSummary(true)}
-            </>
-          )}
+          <div className="mobile-chat-toolbar" aria-label="Chat tools">
+            <button
+              type="button"
+              className="drawer-settings-icon-btn"
+              onClick={() => {
+                setProjectMenuOpen(false);
+                setSettingsDetailView(null);
+                setSidebarSettingsOpen(true);
+              }}
+              title="Open settings"
+              aria-label="Open settings"
+            >
+              <span className="codicon codicon-settings-gear" />
+            </button>
+          </div>
+          <div className="mobile-chat-hub-slot" hidden={sessionSearchHeaderExpanded}>
+            {renderChatHubSummary(true)}
+          </div>
+          {renderChatHeaderSearchControls(true)}
         </div>
         {sessionSearchActive ? renderSessionSearchResults(true) : (
         <div className="mobile-project-session-nav">

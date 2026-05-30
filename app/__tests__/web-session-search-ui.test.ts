@@ -76,13 +76,14 @@ describe('web session search UI wiring', () => {
     const mobileHeader = main.slice(mobileHeaderStart, mobileHeaderEnd);
     expect(mobileHeader).toContain('renderChatHeaderSearchControls(true)');
     expect(mobileHeader).toContain('renderChatHubSummary(true)');
-    expect(mobileHeader.indexOf('renderChatHeaderSearchControls(true)')).toBeLessThan(mobileHeader.indexOf('renderChatHubSummary(true)'));
+    expect(mobileHeader.indexOf('renderChatHubSummary(true)')).toBeLessThan(mobileHeader.indexOf('renderChatHeaderSearchControls(true)'));
 
     expect(styles).toContain('.chat-header-search-control');
     expect(styles).toContain('.chat-header-search-control.open');
     expect(styles).toContain('.chat-header-search-status');
     expect(styles).toContain('.sidebar-title-row.search-open');
     expect(styles).toContain('.mobile-chat-drawer-header.search-open');
+    expect(styles).not.toContain('min-height: calc(var(--wm-safe-area-top) + 66px);');
   });
 
   test('renders full Hub labels and aggregate header search status text', () => {
