@@ -31,10 +31,10 @@ describe('web app package setup', () => {
     expect(forbiddenPackageNames).toEqual([]);
   });
 
-  test('does not keep native shell project files', () => {
+  test('does not keep React Native shell project files in the web app workspace', () => {
     const nativePaths = [
-      'android',
-      'ios',
+      path.join('android'),
+      path.join('ios'),
       'App.tsx',
       'App.native.tsx',
       'index.js',

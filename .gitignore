@@ -17,7 +17,10 @@ app/node_modules/
 .gocache/
 .gomodcache/
 app/dist/
-app/android/app/src/main/assets/wheelmaker-web/
+mobile/android/.gradle/
+mobile/android/**/build/
+mobile/android/local.properties
+mobile/android/app/src/main/assets/
 server/cmd/wheelmaker-desktop/webroot/*
 !server/cmd/wheelmaker-desktop/webroot/.gitkeep
 server/cmd/wheelmaker-desktop/desktop_windows.syso
