@@ -33,6 +33,7 @@ class MainActivity : Activity() {
     private lateinit var rootView: FrameLayout
     private lateinit var webView: WebView
     private lateinit var webSourceRuntime: WebSourceRuntime
+    private lateinit var androidSpeechRuntime: AndroidSpeechRuntime
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var pendingAudioPermissionRequest: PermissionRequest? = null
 
@@ -44,6 +45,7 @@ class MainActivity : Activity() {
         rootView = FrameLayout(this)
         rootView.setBackgroundColor(APP_BACKGROUND_COLOR)
         webView = WebView(this)
+        androidSpeechRuntime = AndroidSpeechRuntime(this, webView, NATIVE_SPEECH_PERMISSION_REQUEST_CODE)
         webView.setBackgroundColor(APP_BACKGROUND_COLOR)
         configureWindowInsets(rootView)
         configureWebView(webView)
@@ -53,6 +55,20 @@ class MainActivity : Activity() {
         )
         setContentView(rootView)
         webView.loadUrl(ANDROID_APP_ORIGIN)
+    }
+
+    override fun onPause() {
+        if (::androidSpeechRuntime.isInitialized) {
+            androidSpeechRuntime.stopForAppBackground()
+        }
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        if (::androidSpeechRuntime.isInitialized) {
+            androidSpeechRuntime.stopForAppBackground()
+        }
+        super.onDestroy()
     }
 
     override fun onBackPressed() {
@@ -75,6 +91,9 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (::androidSpeechRuntime.isInitialized && androidSpeechRuntime.onRequestPermissionsResult(requestCode, grantResults)) {
+            return
+        }
         if (requestCode != AUDIO_PERMISSION_REQUEST_CODE) return
         val request = pendingAudioPermissionRequest ?: return
         pendingAudioPermissionRequest = null
@@ -122,7 +141,7 @@ class MainActivity : Activity() {
         target.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             enqueueDownload(url, userAgent, contentDisposition, mimeType)
         }
-        target.addJavascriptInterface(WheelMakerBridge(webSourceRuntime), "WheelMakerAndroidNative")
+        target.addJavascriptInterface(WheelMakerBridge(webSourceRuntime, androidSpeechRuntime), "WheelMakerAndroidNative")
     }
 
     private fun configureWindowInsets(target: FrameLayout) {
@@ -181,6 +200,7 @@ class MainActivity : Activity() {
     companion object {
         private const val AUDIO_PERMISSION_REQUEST_CODE = 1001
         private const val FILE_CHOOSER_REQUEST_CODE = 1002
+        private const val NATIVE_SPEECH_PERMISSION_REQUEST_CODE = 1003
         private val APP_BACKGROUND_COLOR = Color.rgb(11, 18, 32)
     }
 }

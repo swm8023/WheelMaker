@@ -3,7 +3,10 @@ package com.wheelmaker.android
 import android.webkit.JavascriptInterface
 import org.json.JSONObject
 
-class WheelMakerBridge(private val webSourceRuntime: WebSourceRuntime) {
+class WheelMakerBridge(
+    private val webSourceRuntime: WebSourceRuntime,
+    private val androidSpeechRuntime: AndroidSpeechRuntime
+) {
     @JavascriptInterface
     fun getWebSourceState(): String = webSourceStateToJson(webSourceRuntime.state())
 
@@ -22,4 +25,13 @@ class WheelMakerBridge(private val webSourceRuntime: WebSourceRuntime) {
         )
         return webSourceStateToJson(webSourceRuntime.setRemoteCandidate(candidate))
     }
+
+    @JavascriptInterface
+    fun startSpeech(rawJson: String): String = androidSpeechRuntime.start(rawJson)
+
+    @JavascriptInterface
+    fun finishSpeech(streamId: String): String = androidSpeechRuntime.finish(streamId)
+
+    @JavascriptInterface
+    fun cancelSpeech(streamId: String, reason: String): String = androidSpeechRuntime.cancel(streamId, reason)
 }

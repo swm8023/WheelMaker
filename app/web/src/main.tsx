@@ -222,6 +222,12 @@ import {
   type VoiceInputSendQueue,
 } from './features/speech/voiceInputRuntime';
 import {
+  createAndroidNativeSpeechRuntime,
+  isAndroidNativeSpeechHost,
+  type AndroidNativeSpeechEvent,
+  type AndroidNativeSpeechRuntime,
+} from './features/speech/androidNativeSpeechRuntime';
+import {
   isVoiceGenerationActive as isVoiceGenerationActiveSnapshot,
   isVoiceInputActive as isVoiceInputSnapshotActive,
   isVoiceInputContextCurrent as isVoiceInputSnapshotContextCurrent,
@@ -289,6 +295,7 @@ import type {
   RegistrySkillSourceCandidate,
   RegistryTokenScanResult,
   RegistryWheelMakerUpdateResponse,
+  RegistrySpeechTranscriptEvent,
 } from './types/registry';
 import './styles.css';
 
@@ -296,6 +303,7 @@ type Tab = 'chat' | 'file' | 'git';
 type ThemeMode = 'dark' | 'light';
 type DirEntries = Record<string, RegistryFsEntry[]>;
 type GitDiffSource = 'commit' | 'worktree';
+type VoiceTransportMode = 'registry' | 'android-native';
 type ChatAttachment = {
   id: string;
   name: string;
@@ -3471,6 +3479,8 @@ function App() {
   const voiceActiveApiKeyRef = useRef('');
   const voiceRuntimeKeyRef = useRef('');
   const voiceStartedAtRef = useRef(0);
+  const voiceTransportModeRef = useRef<VoiceTransportMode>('registry');
+  const androidSpeechRuntimeRef = useRef<AndroidNativeSpeechRuntime | null>(null);
   const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);
   const [chatFileMentionMenuOpen, setChatFileMentionMenuOpen] = useState(false);
   const [chatAttachmentTrayOpen, setChatAttachmentTrayOpen] = useState(false);
@@ -8718,6 +8728,7 @@ function App() {
     voiceActiveSettingsRef.current = null;
     voiceActiveApiKeyRef.current = '';
     voiceRuntimeKeyRef.current = '';
+    voiceTransportModeRef.current = 'registry';
     resetVoiceRecordingUi();
     voiceStreamIdRef.current = '';
     voiceSeqRef.current = 0;
@@ -8733,6 +8744,7 @@ function App() {
       connected,
       recording: voiceRecordingRef.current,
       hasStream: !!voiceStreamIdRef.current,
+      transportMode: voiceTransportModeRef.current,
       seq: voiceSeqRef.current,
       ...details,
     });
@@ -8782,6 +8794,8 @@ function App() {
   ) => {
     const streamId = voiceStreamIdRef.current;
     const session = voiceSessionRef.current;
+    const transportMode = voiceTransportModeRef.current;
+    const androidSpeechRuntime = androidSpeechRuntimeRef.current;
     logVoiceInputState('debug', 'cancel_requested', {
       reason,
       hasSession: !!session,
@@ -8801,7 +8815,11 @@ function App() {
       return;
     }
     try {
-      await service.cancelSpeech({streamId, reason});
+      if (transportMode === 'android-native') {
+        await androidSpeechRuntime?.cancel(streamId, reason);
+      } else {
+        await service.cancelSpeech({streamId, reason});
+      }
       logVoiceInputState('debug', 'cancel_completed', {reason});
     } catch (err) {
       logVoiceInputState('error', 'cancel_failed', {
@@ -8834,16 +8852,22 @@ function App() {
     options: {cancelStream?: boolean} = {},
   ) => {
     const streamId = voiceStreamIdRef.current;
+    const transportMode = voiceTransportModeRef.current;
+    const androidSpeechRuntime = androidSpeechRuntimeRef.current;
     stopVoiceCapture();
     commitVoiceInputTranscript();
     clearVoiceInputState();
     if (message) {
       setError(message);
     }
-    if (streamId && options.cancelStream !== false && connectedRef.current) {
-      service.cancelSpeech({streamId, reason: 'error'}).catch(err => {
+    if (streamId && options.cancelStream !== false && (transportMode === 'android-native' || connectedRef.current)) {
+      const cancelPromise = transportMode === 'android-native'
+        ? androidSpeechRuntime?.cancel(streamId, 'error')
+        : service.cancelSpeech({streamId, reason: 'error'});
+      cancelPromise?.catch(err => {
         logVoiceInputDiagnostic('error', 'preserve_cancel_failed', {
           connected: connectedRef.current,
+          transportMode,
           streamId,
           error: formatVoiceInputDiagnosticError(err),
         });
@@ -8882,6 +8906,9 @@ function App() {
   );
 
   const handleVoiceRegistryClosedDuringInput = (source: 'close' | 'chunk' | 'speech_error', err?: unknown) => {
+    if (voiceTransportModeRef.current !== 'registry') {
+      return false;
+    }
     if (!isVoiceInputActive()) {
       return false;
     }
@@ -9146,6 +9173,46 @@ function App() {
     const generation = voiceStartGenerationRef.current;
     const streamId = voiceStreamIdRef.current;
     logVoiceInputState('debug', 'finish_requested', {streamIdPresent: !!streamId});
+    if (voiceTransportModeRef.current === 'android-native') {
+      voicePendingFinishRef.current = true;
+      setVoiceRecordingStatus('finishing');
+      if (!streamId) {
+        logVoiceInputState('warn', 'finish_without_native_stream');
+        await cancelVoiceInput('error', {
+          message: 'Android native speech did not return a stream.',
+        });
+        return;
+      }
+      try {
+        const androidSpeechRuntime = androidSpeechRuntimeRef.current;
+        if (!androidSpeechRuntime) {
+          throw new Error('Android native speech is unavailable.');
+        }
+        await androidSpeechRuntime.finish(streamId);
+        if (!isVoiceGenerationActive(generation)) {
+          return;
+        }
+        voiceAwaitingFinalRef.current = true;
+        voiceRecordingRef.current = false;
+        voiceInteractionModeRef.current = null;
+        setVoiceInteractionMode(null);
+        setVoiceRecording(true);
+        setVoiceRecordingStatus('recognizing');
+        setVoiceCancelIntent(false);
+        setVoiceLevel(0);
+        scheduleVoiceFinalTimeout(generation);
+        logVoiceInputState('debug', 'native_finish_completed');
+      } catch (err) {
+        if (!isVoiceGenerationActive(generation)) {
+          return;
+        }
+        logVoiceInputState('error', 'native_finish_failed', {
+          error: formatVoiceInputDiagnosticError(err),
+        });
+        finishVoiceInputPreservingTranscript(err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
     stopVoiceCapture({flush: true});
     voicePendingFinishRef.current = true;
     setVoiceRecordingStatus('finishing');
@@ -9190,6 +9257,25 @@ function App() {
     }
   };
 
+  const handleVoiceSpeechTranscriptEvent = (payload: RegistrySpeechTranscriptEvent) => {
+    if (!payload || payload.streamId !== voiceStreamIdRef.current || !voiceSessionRef.current) {
+      return;
+    }
+    if (!isVoiceInputContextCurrent()) {
+      void cancelVoiceInput('gesture', {restoreComposer: false});
+      return;
+    }
+    if (payload.text !== '') {
+      const nextText = voiceSessionRef.current.applyTranscript(payload.text);
+      updateChatComposerText(nextText);
+      window.setTimeout(() => resizeChatComposerTextarea({scrollToEnd: true}), 0);
+    }
+    if (payload.final) {
+      stopVoiceCapture();
+      completeVoiceInputFinalizing(voiceStartGenerationRef.current);
+    }
+  };
+
   const handleVoiceSpeechErrorEvent = (payload: RegistrySpeechErrorEvent) => {
     logVoiceInputDiagnostic('error', 'speech_error_event', {
       connected: connectedRef.current,
@@ -9200,11 +9286,63 @@ function App() {
       recording: voiceRecordingRef.current,
       pendingFinish: voicePendingFinishRef.current,
     });
-    if (payload.retryable && voiceRecordingRef.current && !voicePendingFinishRef.current) {
+    if (
+      voiceTransportModeRef.current === 'registry' &&
+      payload.retryable &&
+      voiceRecordingRef.current &&
+      !voicePendingFinishRef.current
+    ) {
       handleVoiceRegistryClosedDuringInput('speech_error', new Error(payload.message));
       return;
     }
     finishVoiceInputPreservingTranscript(payload.message, {cancelStream: false});
+  };
+
+  const handleAndroidNativeSpeechEvent = (event: AndroidNativeSpeechEvent) => {
+    if (event.type === 'transcript') {
+      handleVoiceSpeechTranscriptEvent({
+        streamId: event.streamId,
+        text: event.text,
+        final: event.final,
+      });
+      return;
+    }
+    if (event.type === 'error') {
+      if (event.streamId && event.streamId !== voiceStreamIdRef.current) {
+        return;
+      }
+      handleVoiceSpeechErrorEvent({
+        streamId: event.streamId,
+        code: event.code,
+        message: event.message,
+        retryable: event.retryable,
+      });
+      return;
+    }
+    if (event.streamId !== voiceStreamIdRef.current) {
+      return;
+    }
+    if (event.type === 'level') {
+      setVoiceLevel(event.level);
+      return;
+    }
+    if (event.type === 'status') {
+      if (event.status === 'permission') {
+        setVoiceRecordingStatus('permission');
+      } else if (event.status === 'connecting') {
+        setVoiceRecordingStatus('buffering');
+      } else if (
+        event.status === 'recording' ||
+        event.status === 'finishing' ||
+        event.status === 'recognizing'
+      ) {
+        setVoiceRecordingStatus(event.status);
+      }
+      return;
+    }
+    if (event.type === 'closed' && event.reason === 'app_background') {
+      finishVoiceInputPreservingTranscript(undefined, {cancelStream: false});
+    }
   };
 
   const startVoiceInput = async (interactionMode: VoiceInputInteractionMode = 'locked') => {
@@ -9218,7 +9356,17 @@ function App() {
       logVoiceInputState('warn', 'start_ignored_disabled');
       return;
     }
-    if (!connected && !voiceInputReconnectAvailable()) {
+    const nativeSpeechHost = isAndroidNativeSpeechHost();
+    const androidSpeechRuntime = nativeSpeechHost ? createAndroidNativeSpeechRuntime() : null;
+    if (nativeSpeechHost) {
+      androidSpeechRuntimeRef.current = androidSpeechRuntime;
+      if (!androidSpeechRuntime) {
+        logVoiceInputState('warn', 'start_ignored_native_unavailable');
+        setError('Android native speech is unavailable.');
+        return;
+      }
+    }
+    if (!nativeSpeechHost && !connected && !voiceInputReconnectAvailable()) {
       logVoiceInputState('warn', 'start_ignored_disconnected');
       setError('Connect Registry before using voice input.');
       return;
@@ -9239,8 +9387,9 @@ function App() {
       insertStart,
       insertEnd,
       interactionMode,
+      transportMode: nativeSpeechHost ? 'android-native' : 'registry',
     });
-    if (!connected) {
+    if (!nativeSpeechHost && !connected) {
       logVoiceInputState('warn', 'start_buffering_disconnected', {
         reconnectAvailable: voiceInputReconnectAvailable(),
       });
@@ -9248,7 +9397,7 @@ function App() {
     const generation = voiceStartGenerationRef.current + 1;
     voiceStartGenerationRef.current = generation;
     voiceSessionRef.current = createVoiceInputSession(baseText, insertStart, insertEnd);
-    voiceInputBufferRef.current = createDefaultVoiceInputBuffer();
+    voiceInputBufferRef.current = nativeSpeechHost ? null : createDefaultVoiceInputBuffer();
     voiceSendQueueRef.current = null;
     voicePendingFinishRef.current = false;
     voiceAwaitingFinalRef.current = false;
@@ -9257,9 +9406,10 @@ function App() {
     voiceActiveSettingsRef.current = settings;
     voiceActiveApiKeyRef.current = apiKey;
     voiceRuntimeKeyRef.current = currentVoiceInputRuntimeKey();
+    voiceTransportModeRef.current = nativeSpeechHost ? 'android-native' : 'registry';
     voiceStartedAtRef.current = Date.now();
     voiceSeqRef.current = 0;
-    voiceCaptureGenerationRef.current = generation;
+    voiceCaptureGenerationRef.current = nativeSpeechHost ? 0 : generation;
     voiceInteractionModeRef.current = interactionMode;
     voiceRecordingRef.current = true;
     setVoiceInteractionMode(interactionMode);
@@ -9276,6 +9426,33 @@ function App() {
     setChatConfigOverflowOpen(false);
 
     try {
+      if (nativeSpeechHost) {
+        if (!androidSpeechRuntime) {
+          throw new Error('Android native speech is unavailable.');
+        }
+        logVoiceInputState('debug', 'native_start_requested');
+        const response = await androidSpeechRuntime.start({
+          provider: 'volcengine',
+          model: settings.model,
+          apiKey,
+          audio: {
+            format: 'pcm',
+            codec: 'raw',
+            rate: 16000,
+            bits: 16,
+            channel: 1,
+          },
+        });
+        if (!isVoiceGenerationActive(generation)) {
+          await androidSpeechRuntime.cancel(response.streamId, 'gesture');
+          return;
+        }
+        voiceStreamIdRef.current = response.streamId;
+        voiceRemoteStartRequestedRef.current = true;
+        setVoiceRecordingStatus('buffering');
+        logVoiceInputState('debug', 'native_started', {streamIdPresent: true});
+        return;
+      }
       logVoiceInputState('debug', 'microphone_start_requested');
       const capture = await startVoiceCaptureForGeneration(generation);
       logVoiceInputState('debug', 'microphone_started');
@@ -9300,6 +9477,15 @@ function App() {
       setError(err instanceof Error ? err.message : String(err));
     }
   };
+
+  useEffect(() => {
+    const runtime = createAndroidNativeSpeechRuntime();
+    androidSpeechRuntimeRef.current = runtime;
+    if (!runtime) {
+      return undefined;
+    }
+    return runtime.onEvent(handleAndroidNativeSpeechEvent);
+  }, []);
 
   useEffect(() => {
     if (!voiceRecordingRef.current && !voiceStreamIdRef.current) {
@@ -11907,21 +12093,8 @@ function App() {
     const unsubscribeEvent = service.onEvent(event => {
       if (isSpeechTranscriptEvent(event)) {
         const payload = event.payload;
-        if (!payload || payload.streamId !== voiceStreamIdRef.current || !voiceSessionRef.current) {
-          return;
-        }
-        if (!isVoiceInputContextCurrent()) {
-          void cancelVoiceInput('gesture', {restoreComposer: false});
-          return;
-        }
-        if (payload.text !== '') {
-          const nextText = voiceSessionRef.current.applyTranscript(payload.text);
-          updateChatComposerText(nextText);
-          window.setTimeout(() => resizeChatComposerTextarea({scrollToEnd: true}), 0);
-        }
-        if (payload.final) {
-          stopVoiceCapture();
-          completeVoiceInputFinalizing(voiceStartGenerationRef.current);
+        if (payload) {
+          handleVoiceSpeechTranscriptEvent(payload);
         }
         return;
       }
