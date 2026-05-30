@@ -6,20 +6,31 @@ import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.PermissionRequest
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.core.graphics.Insets
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : Activity() {
+    private lateinit var rootView: FrameLayout
     private lateinit var webView: WebView
     private lateinit var webSourceRuntime: WebSourceRuntime
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
@@ -30,9 +41,17 @@ class MainActivity : Activity() {
         webSourceRuntime = WebSourceRuntime(SharedPreferencesWebSourceStore(this))
         webSourceRuntime.refreshActualSource()
 
+        rootView = FrameLayout(this)
+        rootView.setBackgroundColor(APP_BACKGROUND_COLOR)
         webView = WebView(this)
+        webView.setBackgroundColor(APP_BACKGROUND_COLOR)
+        configureWindowInsets(rootView)
         configureWebView(webView)
-        setContentView(webView)
+        rootView.addView(
+            webView,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
+        setContentView(rootView)
         webView.loadUrl(ANDROID_APP_ORIGIN)
     }
 
@@ -106,6 +125,31 @@ class MainActivity : Activity() {
         target.addJavascriptInterface(WheelMakerBridge(webSourceRuntime), "WheelMakerAndroidNative")
     }
 
+    private fun configureWindowInsets(target: FrameLayout) {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val attributes = window.attributes
+            attributes.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            window.attributes = attributes
+        }
+        WindowInsetsControllerCompat(window, target).isAppearanceLightStatusBars = false
+        WindowInsetsControllerCompat(window, target).isAppearanceLightNavigationBars = false
+        ViewCompat.setOnApplyWindowInsetsListener(target) { view, insets ->
+            val safeArea = mergedSafeAreaInsets(
+                systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars()).toEdgeInsets(),
+                displayCutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout()).toEdgeInsets()
+            )
+            view.setPadding(safeArea.left, safeArea.top, safeArea.right, safeArea.bottom)
+            WindowInsetsCompat.Builder(insets)
+                .setInsets(WindowInsetsCompat.Type.systemBars(), Insets.NONE)
+                .setInsets(WindowInsetsCompat.Type.displayCutout(), Insets.NONE)
+                .build()
+        }
+        ViewCompat.requestApplyInsets(target)
+    }
+
     private fun handleAudioPermissionRequest(request: PermissionRequest) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
@@ -137,5 +181,6 @@ class MainActivity : Activity() {
     companion object {
         private const val AUDIO_PERMISSION_REQUEST_CODE = 1001
         private const val FILE_CHOOSER_REQUEST_CODE = 1002
+        private val APP_BACKGROUND_COLOR = Color.rgb(11, 18, 32)
     }
 }
