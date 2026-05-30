@@ -1,5 +1,11 @@
 export const FLOATING_CONTROL_SIDE_HYSTERESIS_PX = 24;
 export const FLOATING_CONTROL_DEFAULT_Y_RATIO = 0.25;
+export const FLOATING_CONTROL_COMPOSER_GAP_PX = 12;
+
+export type FloatingControlVerticalBounds = {
+  minTop: number;
+  maxTop: number;
+};
 
 export type LegacyFloatingControlSlot =
   | 'upper'
@@ -84,4 +90,62 @@ export function resolveFloatingControlYRatioForStableTop({
   }
   const clampedTop = Math.min(maxTop, Math.max(minTop, previousTop));
   return floatingControlYRatioFromTop(clampedTop, minTop, maxTop);
+}
+
+export function resolveFloatingControlDefaultBounds({
+  viewportHeight,
+  stackHeight,
+  safeAreaTopInset,
+  safeAreaBottomInset,
+  defaultComposerTop,
+  composerGap = FLOATING_CONTROL_COMPOSER_GAP_PX,
+}: {
+  viewportHeight: number;
+  stackHeight: number;
+  safeAreaTopInset: number;
+  safeAreaBottomInset: number;
+  defaultComposerTop: number | null;
+  composerGap?: number;
+}): FloatingControlVerticalBounds {
+  const minTop = Math.max(safeAreaTopInset + 6, 6);
+  const bottomInset = Math.max(safeAreaBottomInset + 6, 6);
+  const viewportMaxTop = viewportHeight - stackHeight - bottomInset;
+  const composerMaxTop = defaultComposerTop === null
+    ? viewportMaxTop
+    : defaultComposerTop - stackHeight - composerGap;
+  return {
+    minTop,
+    maxTop: Math.max(minTop, Math.min(viewportMaxTop, composerMaxTop)),
+  };
+}
+
+export function resolveFloatingControlAvoidanceBounds({
+  defaultBounds,
+  viewportHeight,
+  keyboardOffset,
+  stackHeight,
+  safeAreaBottomInset,
+  composerTop,
+  composerGap = FLOATING_CONTROL_COMPOSER_GAP_PX,
+}: {
+  defaultBounds: FloatingControlVerticalBounds;
+  viewportHeight: number;
+  keyboardOffset: number;
+  stackHeight: number;
+  safeAreaBottomInset: number;
+  composerTop: number | null;
+  composerGap?: number;
+}): FloatingControlVerticalBounds {
+  const bottomInset = Math.max(safeAreaBottomInset + 6, 6);
+  const viewportMaxTop = viewportHeight - keyboardOffset - stackHeight - bottomInset;
+  const composerMaxTop = composerTop === null
+    ? viewportMaxTop
+    : composerTop - stackHeight - composerGap;
+  return {
+    minTop: defaultBounds.minTop,
+    maxTop: Math.max(
+      defaultBounds.minTop,
+      Math.min(defaultBounds.maxTop, viewportMaxTop, composerMaxTop),
+    ),
+  };
 }

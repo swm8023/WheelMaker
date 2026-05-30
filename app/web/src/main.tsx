@@ -133,6 +133,8 @@ import {
   floatingControlTopFromYRatio,
   floatingControlYRatioFromLegacySlot,
   floatingControlYRatioFromTop,
+  resolveFloatingControlAvoidanceBounds,
+  resolveFloatingControlDefaultBounds,
   resolveFloatingControlYRatioForStableTop,
   resolveFloatingControlDragSide,
   sanitizeFloatingControlYRatio,
@@ -3015,6 +3017,7 @@ function App() {
   const [floatingControlStackHeight, setFloatingControlStackHeight] = useState(184);
   const chatComposerRef = useRef<HTMLDivElement | null>(null);
   const [chatComposerTop, setChatComposerTop] = useState<number | null>(null);
+  const [floatingDefaultComposerTop, setFloatingDefaultComposerTop] = useState<number | null>(null);
   const floatingLongPressTimerRef = useRef<number | null>(null);
   const floatingCooldownTimerRef = useRef<number | null>(null);
   const floatingClickCooldownUntilRef = useRef(0);
@@ -5126,6 +5129,17 @@ function App() {
     };
   }, [isWide, tab]);
 
+  useLayoutEffect(() => {
+    if (isWide || tab !== 'chat' || floatingKeyboardOffset > 0 || chatComposerTop === null) {
+      return;
+    }
+    setFloatingDefaultComposerTop(current =>
+      current === null || chatComposerTop > current
+        ? chatComposerTop
+        : current,
+    );
+  }, [chatComposerTop, floatingKeyboardOffset, isWide, tab]);
+
   useEffect(() => {
     if (!isWide) {
       return;
@@ -5594,37 +5608,55 @@ function App() {
       </div>
     );
   }, [chatHubMenuOpen, localHubReadStatuses, registryHubs, setChatConfigOverflowOpen]);
-  const floatingBounds = useMemo(() => {
+  const floatingBaseBounds = useMemo(() => {
     if (isWide) {
       return { minTop: 0, maxTop: 0 };
     }
-    const minTop = Math.max(safeAreaTopInset + 6, 6);
-    const bottomInset = Math.max(safeAreaBottomInset + 6, 6);
-    const viewportMaxTop = windowHeight - floatingKeyboardOffset - floatingControlStackHeight - bottomInset;
-    const composerMaxTop = chatComposerTop === null
-      ? viewportMaxTop
-      : chatComposerTop - floatingControlStackHeight - 6;
-    const maxTop = Math.max(
-      minTop,
-      Math.min(viewportMaxTop, composerMaxTop),
-    );
-    return { minTop, maxTop };
+    return resolveFloatingControlDefaultBounds({
+      viewportHeight: windowHeight,
+      stackHeight: floatingControlStackHeight,
+      safeAreaTopInset,
+      safeAreaBottomInset,
+      defaultComposerTop: floatingDefaultComposerTop,
+    });
   }, [
-    chatComposerTop,
+    floatingControlStackHeight,
+    floatingDefaultComposerTop,
     isWide,
     safeAreaBottomInset,
     safeAreaTopInset,
     windowHeight,
-    floatingKeyboardOffset,
-    floatingControlStackHeight,
   ]);
+  const floatingAvoidanceBounds = useMemo(() => {
+    if (isWide) {
+      return { minTop: 0, maxTop: 0 };
+    }
+    return resolveFloatingControlAvoidanceBounds({
+      defaultBounds: floatingBaseBounds,
+      viewportHeight: windowHeight,
+      keyboardOffset: floatingKeyboardOffset,
+      stackHeight: floatingControlStackHeight,
+      safeAreaBottomInset,
+      composerTop: chatComposerTop,
+    });
+  }, [
+    chatComposerTop,
+    floatingBaseBounds.maxTop,
+    floatingBaseBounds.minTop,
+    floatingControlStackHeight,
+    floatingKeyboardOffset,
+    isWide,
+    safeAreaBottomInset,
+    windowHeight,
+  ]);
+  const floatingBounds = floatingAvoidanceBounds;
   const floatingRestTop = useMemo(
     () => floatingControlTopFromYRatio(
       floatingControlYRatio,
-      floatingBounds.minTop,
-      floatingBounds.maxTop,
+      floatingBaseBounds.minTop,
+      floatingBaseBounds.maxTop,
     ),
-    [floatingBounds.maxTop, floatingBounds.minTop, floatingControlYRatio],
+    [floatingBaseBounds.maxTop, floatingBaseBounds.minTop, floatingControlYRatio],
   );
   const floatingControlTop = useMemo(() => {
     if (floatingDragState?.active) {
@@ -5634,12 +5666,8 @@ function App() {
         floatingBounds.maxTop,
       );
     }
-    const keyboardShift = Math.min(
-      floatingKeyboardOffset,
-      Math.max(0, floatingRestTop - floatingBounds.minTop),
-    );
     return clampFloatingTop(
-      floatingRestTop - keyboardShift,
+      floatingRestTop,
       floatingBounds.minTop,
       floatingBounds.maxTop,
     );
@@ -5647,7 +5675,6 @@ function App() {
     floatingBounds.maxTop,
     floatingBounds.minTop,
     floatingDragState,
-    floatingKeyboardOffset,
     floatingRestTop,
   ]);
   useLayoutEffect(() => {
@@ -5658,23 +5685,23 @@ function App() {
     const previousFloatingPosition = floatingPositionSnapshotRef.current;
     const boundsChanged =
       previousFloatingPosition !== null &&
-      (previousFloatingPosition.minTop !== floatingBounds.minTop ||
-        previousFloatingPosition.maxTop !== floatingBounds.maxTop);
+      (previousFloatingPosition.minTop !== floatingBaseBounds.minTop ||
+        previousFloatingPosition.maxTop !== floatingBaseBounds.maxTop);
     if (boundsChanged && previousFloatingPosition) {
       const nextYRatio = resolveFloatingControlYRatioForStableTop({
         previousTop: previousFloatingPosition.top,
-        minTop: floatingBounds.minTop,
-        maxTop: floatingBounds.maxTop,
+        minTop: floatingBaseBounds.minTop,
+        maxTop: floatingBaseBounds.maxTop,
         fallbackRatio: floatingControlYRatio,
       });
       const nextTop = floatingControlTopFromYRatio(
         nextYRatio,
-        floatingBounds.minTop,
-        floatingBounds.maxTop,
+        floatingBaseBounds.minTop,
+        floatingBaseBounds.maxTop,
       );
       floatingPositionSnapshotRef.current = {
-        minTop: floatingBounds.minTop,
-        maxTop: floatingBounds.maxTop,
+        minTop: floatingBaseBounds.minTop,
+        maxTop: floatingBaseBounds.maxTop,
         top: nextTop,
       };
       if (Math.abs(nextYRatio - floatingControlYRatio) > 0.001) {
@@ -5683,14 +5710,14 @@ function App() {
       }
     }
     floatingPositionSnapshotRef.current = {
-      minTop: floatingBounds.minTop,
-      maxTop: floatingBounds.maxTop,
-      top: floatingControlTop,
+      minTop: floatingBaseBounds.minTop,
+      maxTop: floatingBaseBounds.maxTop,
+      top: floatingRestTop,
     };
   }, [
-    floatingBounds.maxTop,
-    floatingBounds.minTop,
-    floatingControlTop,
+    floatingBaseBounds.maxTop,
+    floatingBaseBounds.minTop,
+    floatingRestTop,
     floatingControlYRatio,
     floatingDragState?.active,
     isWide,
@@ -6015,8 +6042,8 @@ function App() {
       );
       const nextYRatio = floatingControlYRatioFromTop(
         snappedTop,
-        floatingBounds.minTop,
-        floatingBounds.maxTop,
+        floatingBaseBounds.minTop,
+        floatingBaseBounds.maxTop,
       );
       const nextSide = floatingControlSideRef.current;
       const cooldownUntil = Date.now() + 120;
@@ -6044,6 +6071,8 @@ function App() {
       clearFloatingLongPressTimer,
       floatingBounds.maxTop,
       floatingBounds.minTop,
+      floatingBaseBounds.maxTop,
+      floatingBaseBounds.minTop,
       setFloatingControlSide,
       setFloatingControlYRatio,
     ],

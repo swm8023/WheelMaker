@@ -1341,6 +1341,13 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const floatingPositionSnapshotRef = useRef');
     expect(mainTsx).toContain('resolveFloatingControlYRatioForStableTop({');
     expect(mainTsx).toContain('previousTop: previousFloatingPosition.top');
+    expect(mainTsx).toContain('const [floatingDefaultComposerTop, setFloatingDefaultComposerTop] = useState<number | null>(null);');
+    expect(mainTsx).toContain('resolveFloatingControlDefaultBounds({');
+    expect(mainTsx).toContain('resolveFloatingControlAvoidanceBounds({');
+    expect(mainTsx).toContain('const floatingBounds = floatingAvoidanceBounds;');
+    expect(mainTsx).toContain('floatingBaseBounds.minTop');
+    expect(mainTsx).toContain('floatingBaseBounds.maxTop');
+    expect(mainTsx).not.toContain('const keyboardShift = Math.min(');
     expect(stylesCss).toMatch(
       /\.floating-nav-group,\s*\.drawer-toggle-bubble \{[\s\S]*background: color-mix\(in srgb, var\(--panel\) 34%, transparent\);[\s\S]*backdrop-filter: blur\(1px\);[\s\S]*\}/,
     );
@@ -1374,11 +1381,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('function readSafeAreaBottomInset(): number {');
     expect(mainTsx).toContain('const [safeAreaBottomInset, setSafeAreaBottomInset] = useState<number>(() => readSafeAreaBottomInset());');
     expect(mainTsx).toContain('setSafeAreaBottomInset(readSafeAreaBottomInset());');
-    expect(mainTsx).toContain('const minTop = Math.max(safeAreaTopInset + 6, 6);');
-    expect(mainTsx).toContain('const bottomInset = Math.max(safeAreaBottomInset + 6, 6);');
-    expect(mainTsx).toContain('const viewportMaxTop = windowHeight - floatingKeyboardOffset - floatingControlStackHeight - bottomInset;');
-    expect(mainTsx).toContain('const composerMaxTop = chatComposerTop === null');
-    expect(mainTsx).toContain('Math.min(viewportMaxTop, composerMaxTop)');
+    expect(mainTsx).toContain('defaultComposerTop: floatingDefaultComposerTop');
+    expect(mainTsx).toContain('keyboardOffset: floatingKeyboardOffset');
+    expect(mainTsx).toContain('composerTop: chatComposerTop');
   });
 
   test('mobile chat drawer uses a cross-project project session sheet', () => {

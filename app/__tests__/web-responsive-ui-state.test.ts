@@ -28,14 +28,18 @@ describe('web responsive ui state', () => {
 
     const {
       FLOATING_CONTROL_DEFAULT_Y_RATIO,
+      FLOATING_CONTROL_COMPOSER_GAP_PX,
       floatingControlTopFromYRatio,
       floatingControlYRatioFromLegacySlot,
       floatingControlYRatioFromTop,
+      resolveFloatingControlAvoidanceBounds,
+      resolveFloatingControlDefaultBounds,
       resolveFloatingControlYRatioForStableTop,
       sanitizeFloatingControlYRatio,
     } = require(modulePath);
 
     expect(FLOATING_CONTROL_DEFAULT_Y_RATIO).toBe(0.25);
+    expect(FLOATING_CONTROL_COMPOSER_GAP_PX).toBe(12);
     expect(sanitizeFloatingControlYRatio(-0.4)).toBe(0);
     expect(sanitizeFloatingControlYRatio(1.4)).toBe(1);
     expect(sanitizeFloatingControlYRatio(Number.NaN)).toBe(0.25);
@@ -55,6 +59,38 @@ describe('web responsive ui state', () => {
       maxTop: 310,
       fallbackRatio: 0.4,
     })).toBe(1);
+    const defaultBounds = resolveFloatingControlDefaultBounds({
+      viewportHeight: 800,
+      stackHeight: 184,
+      safeAreaTopInset: 0,
+      safeAreaBottomInset: 0,
+      defaultComposerTop: 620,
+    });
+    expect(defaultBounds).toEqual({minTop: 6, maxTop: 424});
+    expect(resolveFloatingControlAvoidanceBounds({
+      defaultBounds,
+      viewportHeight: 800,
+      keyboardOffset: 240,
+      stackHeight: 184,
+      safeAreaBottomInset: 0,
+      composerTop: null,
+    })).toEqual({minTop: 6, maxTop: 370});
+    expect(resolveFloatingControlAvoidanceBounds({
+      defaultBounds,
+      viewportHeight: 800,
+      keyboardOffset: 0,
+      stackHeight: 184,
+      safeAreaBottomInset: 0,
+      composerTop: 560,
+    })).toEqual({minTop: 6, maxTop: 364});
+    expect(resolveFloatingControlAvoidanceBounds({
+      defaultBounds,
+      viewportHeight: 800,
+      keyboardOffset: 0,
+      stackHeight: 184,
+      safeAreaBottomInset: 0,
+      composerTop: null,
+    })).toEqual(defaultBounds);
     expect(floatingControlYRatioFromLegacySlot('upper')).toBe(0);
     expect(floatingControlYRatioFromLegacySlot('upper-middle')).toBe(0.25);
     expect(floatingControlYRatioFromLegacySlot('center')).toBe(0.5);
