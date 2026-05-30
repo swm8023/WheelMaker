@@ -1,0 +1,39 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+val webAssetsDir = providers.gradleProperty("wheelmakerWebAssetsDir")
+    .orElse(System.getenv("WHEELMAKER_ANDROID_WEB_ASSETS") ?: "")
+    .get()
+
+android {
+    namespace = "com.wheelmaker.android"
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId = "com.wheelmaker.android"
+        minSdk = 23
+        targetSdk = 36
+        versionCode = 1
+        versionName = "0.0.1"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    sourceSets {
+        getByName("main") {
+            if (webAssetsDir.isNotBlank()) {
+                assets.srcDir(webAssetsDir)
+            }
+        }
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+}
+
+dependencies {
+    implementation("androidx.webkit:webkit:1.15.0")
+    testImplementation("junit:junit:4.13.2")
+}
