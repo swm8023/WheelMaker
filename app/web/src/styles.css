@@ -5208,7 +5208,9 @@ textarea,
   position: relative;
   z-index: 20;
   flex: 0 0 auto;
-  min-height: calc(var(--wm-safe-area-top) + 58px);
+  height: calc(var(--wm-safe-area-top) + 62px);
+  min-height: calc(var(--wm-safe-area-top) + 62px);
+  max-height: calc(var(--wm-safe-area-top) + 62px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -5222,7 +5224,9 @@ textarea,
 .mobile-chat-drawer-header.search-open {
   align-items: center;
   justify-content: space-between;
-  min-height: calc(var(--wm-safe-area-top) + 58px);
+  height: calc(var(--wm-safe-area-top) + 62px);
+  min-height: calc(var(--wm-safe-area-top) + 62px);
+  max-height: calc(var(--wm-safe-area-top) + 62px);
   padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;
 }
 

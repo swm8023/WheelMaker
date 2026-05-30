@@ -765,9 +765,13 @@ describe('web chat integration', () => {
     const mobileChatHeaderBlock = stylesCss.match(/\.mobile-chat-drawer-header \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileChatHeaderBlock).toContain('display: flex;');
     expect(mobileChatHeaderBlock).toContain('justify-content: space-between;');
-    expect(mobileChatHeaderBlock).toContain('min-height: calc(var(--wm-safe-area-top) + 58px);');
+    expect(mobileChatHeaderBlock).toContain('height: calc(var(--wm-safe-area-top) + 62px);');
+    expect(mobileChatHeaderBlock).toContain('min-height: calc(var(--wm-safe-area-top) + 62px);');
+    expect(mobileChatHeaderBlock).toContain('max-height: calc(var(--wm-safe-area-top) + 62px);');
     const mobileChatHeaderSearchOpenBlock = stylesCss.match(/\.mobile-chat-drawer-header\.search-open \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(mobileChatHeaderSearchOpenBlock).toContain('min-height: calc(var(--wm-safe-area-top) + 58px);');
+    expect(mobileChatHeaderSearchOpenBlock).toContain('height: calc(var(--wm-safe-area-top) + 62px);');
+    expect(mobileChatHeaderSearchOpenBlock).toContain('min-height: calc(var(--wm-safe-area-top) + 62px);');
+    expect(mobileChatHeaderSearchOpenBlock).toContain('max-height: calc(var(--wm-safe-area-top) + 62px);');
     expect(mobileChatHeaderSearchOpenBlock).toContain('padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;');
     expect(stylesCss).not.toContain('min-height: calc(var(--wm-safe-area-top) + 66px);');
     expect(stylesCss).toContain('.mobile-chat-toolbar {');
