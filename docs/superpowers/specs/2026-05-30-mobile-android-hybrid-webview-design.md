@@ -1,7 +1,7 @@
 # Mobile Android Hybrid WebView Design
 
 Date: 2026-05-30
-Status: Draft
+Status: Approved
 
 ## Goal
 
@@ -27,6 +27,8 @@ The Android app is a native Kotlin WebView shell. It opens the existing Workspac
 6. If Remote Web is unavailable, Android falls back to Embedded Web.
 7. Repo-local generated files are not allowed. Web build output, Gradle build output, Gradle cache, APK/AAB files, release manifests, and temporary assets all live outside the git worktree.
 8. The Go services remain external runtime dependencies. The APK does not start, supervise, or package Hub, Registry, Monitor, or Updater.
+9. Android always navigates WebView to a stable app-owned origin; the native request handler chooses Remote Web or Embedded Web per resource.
+10. The first implementation only builds a local APK. It does not expose APK downloads through Update, Monitor, Nginx, or the Web publish root.
 
 ## Non-Goals
 
@@ -37,6 +39,9 @@ The Android app is a native Kotlin WebView shell. It opens the existing Workspac
 - Do not bypass TLS errors in release builds.
 - Do not publish to Play Store in the first slice.
 - Do not add service discovery or QR pairing in the first slice.
+- Do not add an APK download card to the Update screen in the first slice.
+- Do not copy Android APK artifacts into `~/.wheelmaker/web`.
+- Do not change Nginx or Monitor routes for Android artifact download in the first slice.
 
 ## Repository Layout
 
@@ -86,6 +91,8 @@ Use `~/.wheelmaker` for Android publish output and build workspace:
 
 `~/.wheelmaker/web` remains the normal browser/PWA Remote Web publish directory. Android publish builds a separate Embedded Web snapshot and does not overwrite `~/.wheelmaker/web`.
 
+The first Android slice stops at local build output. `android-release.json` records what was built, but no service exposes it for download.
+
 ## Android Publish Flow
 
 Add a root entrypoint:
@@ -124,17 +131,29 @@ Gradle configuration must set root and subproject build directories under `wheel
 
 Do not generate `mobile/android/local.properties`; SDK discovery should use `ANDROID_HOME` or `ANDROID_SDK_ROOT`.
 
-## Embedded Web Origin
+## Stable WebView Origin
 
-Android should serve Embedded Web from a stable HTTPS-like app origin, for example:
+Android should always navigate the WebView to a stable HTTPS-like app origin, for example:
 
 ```text
 https://appassets.androidplatform.net/
 ```
 
-The embedded asset origin must serve the Web build at root paths because the current Web output uses absolute paths such as `/bundle.<hash>.js`, `/runtime-config.js`, `/service-worker.js`, and `/web-build.json`.
+This mirrors Desktop's stable `127.0.0.1:9632` storage-origin goal without opening a TCP listener on Android.
+
+The stable origin must serve the Web build at root paths because the current Web output uses absolute paths such as `/bundle.<hash>.js`, `/runtime-config.js`, `/service-worker.js`, and `/web-build.json`.
 
 The WebView should prefer AndroidX WebKit `WebViewAssetLoader` where practical. A focused `WebViewClient.shouldInterceptRequest` fallback is acceptable if it gives better control over root-path mapping, content types, and cache headers.
+
+Remote Web is selected by the native resource handler, not by navigating the WebView to the remote URL. In auto mode:
+
+```text
+https://appassets.androidplatform.net/index.html
+  -> remote resource when Remote Web is configured and healthy
+  -> embedded APK asset otherwise
+```
+
+This keeps IndexedDB, localStorage, Cache Storage, and Service Worker state attached to one Android app origin across Remote Web and Embedded Web fallback.
 
 ## Web Source Runtime
 
@@ -148,12 +167,15 @@ Android mirrors the Desktop Web source model, but implemented in Kotlin:
 Startup behavior:
 
 1. Load persisted source config.
-2. If preference is `embedded` or no valid remote URL exists, open Embedded Web.
-3. If preference is `auto` and a remote URL exists, probe Remote Web.
-4. If the probe succeeds, open Remote Web.
-5. If the probe fails, open Embedded Web.
+2. Navigate WebView to the stable Android app origin.
+3. If preference is `embedded` or no valid remote URL exists, serve Embedded Web resources.
+4. If preference is `auto` and a remote URL exists, probe Remote Web.
+5. If the probe succeeds, serve root-path resources by proxying Remote Web through the stable origin.
+6. If the probe fails, serve Embedded Web resources through the same stable origin.
 
 Remote probing should request the remote root or `index.html` with a short timeout. A 2xx response is healthy. Network errors, TLS errors, invalid URL, and unsupported scheme all fall back to Embedded Web.
+
+The Android Web source runtime should keep the current source decision in native memory and expose it to Web through the bridge. It should not make the Web app responsible for loading remote assets directly.
 
 ## Native Bridge
 
@@ -192,6 +214,20 @@ The initial flow remains:
 6. Next Android app launch can prefer Remote Web.
 
 Loopback Registry addresses should not become Remote Web candidates, matching Desktop behavior.
+
+## Local Storage Model
+
+The first Android version continues using the existing Web persistence stack:
+
+- IndexedDB for Workspace data, settings, Registry address/token, UI state, session and file caches, and speech settings.
+- localStorage/sessionStorage only where the existing Web app already uses them.
+- Android SharedPreferences or DataStore only for native shell state: Web source preference, Remote Web URL, Registry-origin metadata for the remote candidate, and lightweight shell flags.
+
+Do not migrate Workspace business state into Android SQLite, Room, DataStore, or files in the first slice.
+
+Clearing Chrome or Edge browser cache does not affect the APK WebView data directory. Clearing WheelMaker Android app storage or uninstalling the APK removes WebView IndexedDB, WebStorage, Cache Storage, and native shell preferences. Clearing only the app cache should not be treated as a supported Workspace reset path.
+
+If a future in-app reset is added, it should explicitly delete WebView storage and native shell preferences under a clear user action.
 
 ## Platform Responsibilities
 
@@ -288,6 +324,7 @@ Web tests:
 - Embedded Android origin does not become the default Registry WebSocket address.
 - Remote Web candidate inference rejects loopback addresses and accepts valid public `ws`, `wss`, `http`, and `https` Registry addresses.
 - Existing `cli-setup` tests are updated to allow `mobile/android/` while still rejecting React Native scaffolding.
+- Android-specific Web source state is kept outside Workspace IndexedDB; Workspace data remains in existing Web persistence.
 
 Android unit/instrumentation tests:
 
@@ -295,6 +332,7 @@ Android unit/instrumentation tests:
 - Auto mode prefers Remote Web when probe succeeds.
 - Auto mode falls back to Embedded Web when probe fails.
 - Embedded asset handler serves root-path Web files with expected content types.
+- Remote assets are proxied through the stable app origin instead of navigating to the remote origin.
 - JS bridge returns and mutates source state.
 - Back handling delegates to Web history before closing the Activity.
 
@@ -304,13 +342,14 @@ Script tests:
 - Web assets are built under `~/.wheelmaker/build/mobile/android/webroot`.
 - Gradle build/cache/home paths are outside the repo.
 - APK and `android-release.json` are written under `~/.wheelmaker/mobile/android`.
+- Android publish does not copy APK artifacts into `~/.wheelmaker/web`.
 
 Manual verification:
 
 - Fresh install opens Embedded Web.
 - Entering a public Registry address connects and submits a Remote Web candidate.
-- Restart prefers Remote Web.
-- Blocking Remote Web falls back to Embedded Web.
+- Restart serves Remote Web through the stable app origin.
+- Blocking Remote Web falls back to Embedded Web while preserving existing IndexedDB settings.
 - Microphone prompt, voice input, file upload, image upload, Android back, keyboard resize, and foreground/background reconnect work on a real Android device.
 
 ## Rollout
@@ -321,13 +360,15 @@ Manual verification:
 4. Add Android Web source runtime and JS bridge.
 5. Extract shared native Web source helper in Web UI and wire Android candidate submission.
 6. Add platform permission handling for microphone and file chooser.
-7. Add focused tests and README instructions.
-8. Defer native Android speech provider to a separate design after the shell is stable.
+7. Add focused tests and README instructions for local APK build output.
+8. Defer Update-screen APK download, artifact hosting, and native Android speech provider to separate designs after the shell is stable.
 
 ## Self-Review
 
 - No placeholders or unresolved TBDs.
 - The design keeps Go out of the APK and avoids Go service changes for the first Android shell.
 - The build model keeps generated files outside the repo.
+- The first slice stops at local APK build output and does not require Nginx or Monitor route changes.
+- The stable Android app origin preserves IndexedDB across Remote Web and Embedded Web fallback.
 - The future speech path limits duplication to provider adapters and keeps product state in Web.
 - The Remote Web / Embedded Web source model matches the existing Desktop direction while using Android-native APIs.
