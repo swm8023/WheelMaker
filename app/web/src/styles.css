@@ -5208,9 +5208,9 @@ textarea,
   position: relative;
   z-index: 20;
   flex: 0 0 auto;
-  height: calc(var(--wm-safe-area-top) + 62px);
-  min-height: calc(var(--wm-safe-area-top) + 62px);
-  max-height: calc(var(--wm-safe-area-top) + 62px);
+  height: calc(var(--wm-safe-area-top) + 58px);
+  min-height: calc(var(--wm-safe-area-top) + 58px);
+  max-height: calc(var(--wm-safe-area-top) + 58px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -5224,9 +5224,9 @@ textarea,
 .mobile-chat-drawer-header.search-open {
   align-items: center;
   justify-content: space-between;
-  height: calc(var(--wm-safe-area-top) + 62px);
-  min-height: calc(var(--wm-safe-area-top) + 62px);
-  max-height: calc(var(--wm-safe-area-top) + 62px);
+  height: calc(var(--wm-safe-area-top) + 58px);
+  min-height: calc(var(--wm-safe-area-top) + 58px);
+  max-height: calc(var(--wm-safe-area-top) + 58px);
   padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;
 }
 
@@ -5294,25 +5294,42 @@ textarea,
   flex: 1 1 auto;
   width: auto;
   min-width: 0;
-  display: grid;
-  align-content: center;
-  gap: 3px;
+  position: relative;
+  height: 40px;
+  display: block;
 }
 
-.mobile-chat-drawer-header.search-open .chat-header-search-wrap,
-.mobile-chat-drawer-header.search-open .chat-header-search-control.open {
+.mobile-chat-drawer-header.search-open .chat-header-search-wrap {
   max-width: none;
   width: 100%;
 }
 
+.mobile-chat-drawer-header.search-open .chat-header-search-control.open {
+  max-width: none;
+  width: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
 .mobile-chat-drawer-header.search-open .chat-header-search-status {
+  position: absolute;
+  left: 22px;
+  right: 3px;
+  bottom: -3px;
   display: flex;
   justify-content: flex-end;
-  min-height: 11px;
-  padding: 0 3px 0 22px;
+  height: 9px;
+  min-height: 0;
+  padding: 0;
   font-size: 9px;
-  line-height: 1;
+  line-height: 9px;
   text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
 }
 
 .mobile-chat-drawer-header .chat-hub-summary-button {
