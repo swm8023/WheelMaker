@@ -134,6 +134,7 @@ import {
   floatingControlYRatioFromLegacySlot,
   floatingControlYRatioFromTop,
   resolveFloatingControlYRatioForStableTop,
+  resolveFloatingControlVerticalBounds,
   resolveFloatingControlDragSide,
   sanitizeFloatingControlYRatio,
 } from './services/mobileFloatingControls';
@@ -5598,17 +5599,14 @@ function App() {
     if (isWide) {
       return { minTop: 0, maxTop: 0 };
     }
-    const minTop = Math.max(safeAreaTopInset + 6, 6);
-    const bottomInset = Math.max(safeAreaBottomInset + 6, 6);
-    const viewportMaxTop = windowHeight - floatingKeyboardOffset - floatingControlStackHeight - bottomInset;
-    const composerMaxTop = chatComposerTop === null
-      ? viewportMaxTop
-      : chatComposerTop - floatingControlStackHeight - 6;
-    const maxTop = Math.max(
-      minTop,
-      Math.min(viewportMaxTop, composerMaxTop),
-    );
-    return { minTop, maxTop };
+    return resolveFloatingControlVerticalBounds({
+      viewportHeight: windowHeight,
+      keyboardOffset: floatingKeyboardOffset,
+      stackHeight: floatingControlStackHeight,
+      safeAreaTopInset,
+      safeAreaBottomInset,
+      composerTop: chatComposerTop,
+    });
   }, [
     chatComposerTop,
     isWide,
@@ -5634,12 +5632,8 @@ function App() {
         floatingBounds.maxTop,
       );
     }
-    const keyboardShift = Math.min(
-      floatingKeyboardOffset,
-      Math.max(0, floatingRestTop - floatingBounds.minTop),
-    );
     return clampFloatingTop(
-      floatingRestTop - keyboardShift,
+      floatingRestTop,
       floatingBounds.minTop,
       floatingBounds.maxTop,
     );
@@ -5647,7 +5641,6 @@ function App() {
     floatingBounds.maxTop,
     floatingBounds.minTop,
     floatingDragState,
-    floatingKeyboardOffset,
     floatingRestTop,
   ]);
   useLayoutEffect(() => {

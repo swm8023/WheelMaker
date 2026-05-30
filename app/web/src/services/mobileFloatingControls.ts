@@ -1,5 +1,6 @@
 export const FLOATING_CONTROL_SIDE_HYSTERESIS_PX = 24;
 export const FLOATING_CONTROL_DEFAULT_Y_RATIO = 0.25;
+export const FLOATING_CONTROL_COMPOSER_GAP_PX = 12;
 
 export type LegacyFloatingControlSlot =
   | 'upper'
@@ -84,4 +85,34 @@ export function resolveFloatingControlYRatioForStableTop({
   }
   const clampedTop = Math.min(maxTop, Math.max(minTop, previousTop));
   return floatingControlYRatioFromTop(clampedTop, minTop, maxTop);
+}
+
+export function resolveFloatingControlVerticalBounds({
+  viewportHeight,
+  keyboardOffset,
+  stackHeight,
+  safeAreaTopInset,
+  safeAreaBottomInset,
+  composerTop,
+  composerGap = FLOATING_CONTROL_COMPOSER_GAP_PX,
+}: {
+  viewportHeight: number;
+  keyboardOffset: number;
+  stackHeight: number;
+  safeAreaTopInset: number;
+  safeAreaBottomInset: number;
+  composerTop: number | null;
+  composerGap?: number;
+}): {minTop: number; maxTop: number} {
+  const minTop = Math.max(safeAreaTopInset + 6, 6);
+  const bottomInset = Math.max(safeAreaBottomInset + 6, 6);
+  const viewportMaxTop = viewportHeight - keyboardOffset - stackHeight - bottomInset;
+  const composerMaxTop = composerTop === null
+    ? viewportMaxTop
+    : composerTop - stackHeight - composerGap;
+  const maxTop = Math.max(
+    minTop,
+    Math.min(viewportMaxTop, composerMaxTop),
+  );
+  return {minTop, maxTop};
 }

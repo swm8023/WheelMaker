@@ -28,14 +28,17 @@ describe('web responsive ui state', () => {
 
     const {
       FLOATING_CONTROL_DEFAULT_Y_RATIO,
+      FLOATING_CONTROL_COMPOSER_GAP_PX,
       floatingControlTopFromYRatio,
       floatingControlYRatioFromLegacySlot,
       floatingControlYRatioFromTop,
       resolveFloatingControlYRatioForStableTop,
+      resolveFloatingControlVerticalBounds,
       sanitizeFloatingControlYRatio,
     } = require(modulePath);
 
     expect(FLOATING_CONTROL_DEFAULT_Y_RATIO).toBe(0.25);
+    expect(FLOATING_CONTROL_COMPOSER_GAP_PX).toBe(12);
     expect(sanitizeFloatingControlYRatio(-0.4)).toBe(0);
     expect(sanitizeFloatingControlYRatio(1.4)).toBe(1);
     expect(sanitizeFloatingControlYRatio(Number.NaN)).toBe(0.25);
@@ -55,6 +58,22 @@ describe('web responsive ui state', () => {
       maxTop: 310,
       fallbackRatio: 0.4,
     })).toBe(1);
+    expect(resolveFloatingControlVerticalBounds({
+      viewportHeight: 800,
+      keyboardOffset: 0,
+      stackHeight: 184,
+      safeAreaTopInset: 0,
+      safeAreaBottomInset: 0,
+      composerTop: 620,
+    })).toEqual({minTop: 6, maxTop: 424});
+    expect(resolveFloatingControlVerticalBounds({
+      viewportHeight: 800,
+      keyboardOffset: 240,
+      stackHeight: 184,
+      safeAreaTopInset: 0,
+      safeAreaBottomInset: 0,
+      composerTop: null,
+    })).toEqual({minTop: 6, maxTop: 370});
     expect(floatingControlYRatioFromLegacySlot('upper')).toBe(0);
     expect(floatingControlYRatioFromLegacySlot('upper-middle')).toBe(0.25);
     expect(floatingControlYRatioFromLegacySlot('center')).toBe(0.5);
