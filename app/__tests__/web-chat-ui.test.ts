@@ -787,12 +787,16 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-header-search-wrap.mobile {');
     const mobileSearchWrapBlock = stylesCss.match(/\.chat-header-search-wrap\.mobile \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileSearchWrapBlock).toContain('display: grid;');
-    expect(mobileSearchWrapBlock).toContain('gap: 1px;');
+    expect(mobileSearchWrapBlock).toContain('align-content: center;');
+    expect(mobileSearchWrapBlock).toContain('gap: 3px;');
     expect(stylesCss).toContain('.mobile-chat-drawer-header.search-open .chat-header-search-status {');
     const mobileSearchStatusBlock = stylesCss.match(/\.mobile-chat-drawer-header\.search-open \.chat-header-search-status \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileSearchStatusBlock).toContain('display: flex;');
     expect(mobileSearchStatusBlock).toContain('font-size: 9px;');
-    expect(mobileSearchStatusBlock).toContain('min-height: 9px;');
+    expect(mobileSearchStatusBlock).toContain('min-height: 11px;');
+    expect(mobileSearchStatusBlock).toContain('justify-content: flex-end;');
+    expect(mobileSearchStatusBlock).toContain('text-align: right;');
+    expect(mobileSearchStatusBlock).toContain('padding: 0 3px 0 22px;');
     const mobileCompactSearchControlBlock = stylesCss.match(/\.mobile-chat-drawer-header \.chat-header-search-control\.compact \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileCompactSearchControlBlock).not.toContain('margin-left: auto;');
     expect(stylesCss).not.toContain('.mobile-chat-drawer-header.search-open .chat-header-search-control.open {\n  height: 40px;');

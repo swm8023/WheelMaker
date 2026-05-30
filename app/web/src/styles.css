@@ -5292,7 +5292,7 @@ textarea,
   min-width: 0;
   display: grid;
   align-content: center;
-  gap: 1px;
+  gap: 3px;
 }
 
 .mobile-chat-drawer-header.search-open .chat-header-search-wrap,
@@ -5303,10 +5303,12 @@ textarea,
 
 .mobile-chat-drawer-header.search-open .chat-header-search-status {
   display: flex;
-  min-height: 9px;
-  padding: 0 7px 0 22px;
+  justify-content: flex-end;
+  min-height: 11px;
+  padding: 0 3px 0 22px;
   font-size: 9px;
   line-height: 1;
+  text-align: right;
 }
 
 .mobile-chat-drawer-header .chat-hub-summary-button {
