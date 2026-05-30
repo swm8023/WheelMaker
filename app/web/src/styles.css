@@ -5239,6 +5239,7 @@ textarea,
 .mobile-chat-hub-slot {
   flex: 0 0 auto;
   min-width: 0;
+  margin-left: auto;
 }
 
 .mobile-chat-drawer-header .chat-hub-summary {
@@ -5262,7 +5263,10 @@ textarea,
   min-width: 40px;
   max-width: 40px;
   height: 40px;
-  margin-left: auto;
+}
+
+.mobile-chat-drawer-header .chat-header-search-control.compact {
+  margin-left: 0;
 }
 
 .mobile-chat-drawer-header .session-search-control.compact .session-search-icon-btn,
@@ -5286,8 +5290,9 @@ textarea,
   flex: 1 1 auto;
   width: auto;
   min-width: 0;
-  display: flex;
-  align-items: center;
+  display: grid;
+  align-content: center;
+  gap: 1px;
 }
 
 .mobile-chat-drawer-header.search-open .chat-header-search-wrap,
@@ -5296,12 +5301,12 @@ textarea,
   width: 100%;
 }
 
-.mobile-chat-drawer-header.search-open .chat-header-search-control.open {
-  height: 40px;
-}
-
 .mobile-chat-drawer-header.search-open .chat-header-search-status {
-  display: none;
+  display: flex;
+  min-height: 9px;
+  padding: 0 7px 0 22px;
+  font-size: 9px;
+  line-height: 1;
 }
 
 .mobile-chat-drawer-header .chat-hub-summary-button {
