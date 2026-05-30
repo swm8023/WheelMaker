@@ -1,45 +1,19 @@
 import {
-  getDesktopWindowBridge,
-  type DesktopRemoteWebCandidate,
-  type DesktopWebSourceState,
-} from '../desktopRuntime';
+  getNativeWebSourceBridge,
+  inferNativeRemoteWebCandidate,
+  type NativeRemoteWebCandidate,
+  type NativeWebSourceState,
+} from '../native/webSource';
 
-function isLoopbackHost(hostname: string): boolean {
-  const value = hostname.toLowerCase();
-  return value === 'localhost' || value === '127.0.0.1' || value === '::1' || value === '[::1]';
-}
+export type DesktopRemoteWebCandidate = NativeRemoteWebCandidate;
+export type DesktopWebSourceState = NativeWebSourceState;
 
 export function inferDesktopRemoteWebCandidate(registryAddress: string): DesktopRemoteWebCandidate | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(registryAddress.trim());
-  } catch {
-    return null;
-  }
-  if (
-    parsed.protocol !== 'ws:' &&
-    parsed.protocol !== 'wss:' &&
-    parsed.protocol !== 'http:' &&
-    parsed.protocol !== 'https:'
-  ) {
-    return null;
-  }
-  if (!parsed.host) {
-    return null;
-  }
-  if (isLoopbackHost(parsed.hostname)) {
-    return null;
-  }
-  const remoteProtocol = parsed.protocol === 'ws:' || parsed.protocol === 'http:' ? 'http:' : 'https:';
-  return {
-    source: 'registry',
-    registryAddress: registryAddress.trim(),
-    remoteWebUrl: `${remoteProtocol}//${parsed.host}/`,
-  };
+  return inferNativeRemoteWebCandidate(registryAddress);
 }
 
 export function readDesktopWebSourceState(): Promise<DesktopWebSourceState | null> {
-  const bridge = getDesktopWindowBridge();
+  const bridge = getNativeWebSourceBridge();
   const read = bridge?.getWebSourceState;
   if (!read) {
     return Promise.resolve(null);
@@ -48,7 +22,7 @@ export function readDesktopWebSourceState(): Promise<DesktopWebSourceState | nul
 }
 
 export async function setDesktopWebSourcePreference(preference: 'auto' | 'embedded'): Promise<DesktopWebSourceState | null> {
-  const bridge = getDesktopWindowBridge();
+  const bridge = getNativeWebSourceBridge();
   const setPreference = bridge?.setWebSourcePreference;
   if (!setPreference) {
     return null;
@@ -57,7 +31,7 @@ export async function setDesktopWebSourcePreference(preference: 'auto' | 'embedd
 }
 
 export function submitDesktopRemoteWebCandidate(registryAddress: string): void {
-  const bridge = getDesktopWindowBridge();
+  const bridge = getNativeWebSourceBridge();
   const submit = bridge?.setRemoteWebCandidate;
   if (!submit) {
     return;
