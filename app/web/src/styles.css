@@ -5525,6 +5525,19 @@ textarea,
   font-size: 14px;
   border-radius: 8px;
   padding: 0 12px;
+  overflow: hidden;
+}
+
+.mobile-project-sheet-item .codicon {
+  flex: 0 0 auto;
+}
+
+.mobile-project-sheet-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.25;
 }
 
 .mobile-project-sheet-back {

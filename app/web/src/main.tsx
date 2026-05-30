@@ -14593,7 +14593,7 @@ function App() {
                           }}
                         >
                           <span className="codicon codicon-sparkle" />
-                          <span>{agentType}</span>
+                          <span className="mobile-project-sheet-item-label">{agentType}</span>
                         </button>
                       ))}
                       {sheetAgents.length === 0 ? (
@@ -14619,7 +14619,7 @@ function App() {
                         }}
                       >
                         <span className="codicon codicon-arrow-left" />
-                        <span>{sheetMenu.agentType}</span>
+                        <span className="mobile-project-sheet-item-label">{sheetMenu.agentType}</span>
                       </button>
                       {resumeLoading ? (
                         <div className="wide-project-action-empty">
@@ -14642,7 +14642,9 @@ function App() {
                               }}
                             >
                               <span className="codicon codicon-history" />
-                              <span>{resolveSessionDisplayTitle(session) || session.sessionId}</span>
+                              <span className="mobile-project-sheet-item-label">
+                                {resolveSessionDisplayTitle(session) || session.sessionId}
+                              </span>
                             </button>
                           ))
                         : null}

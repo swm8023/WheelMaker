@@ -72,4 +72,26 @@ describe('web resume session ui', () => {
     expect(styles).toContain('.wide-project-action-popover {');
     expect(styles).toContain('.mobile-project-sheet {');
   });
+
+  test('clamps long mobile resume session titles inside sheet rows', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'main.tsx'),
+      'utf8',
+    );
+    const styles = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'styles.css'),
+      'utf8',
+    );
+
+    expect(mainTsx).toContain('className="mobile-project-sheet-item-label"');
+    expect(mainTsx).toContain('{resolveSessionDisplayTitle(session) || session.sessionId}');
+
+    expect(styles).toMatch(
+      /\.mobile-project-sheet-item-label \{[\s\S]*min-width: 0;[\s\S]*overflow: hidden;[\s\S]*text-overflow: ellipsis;[\s\S]*white-space: nowrap;[\s\S]*\}/,
+    );
+    expect(styles).toMatch(
+      /\.mobile-project-sheet-item \.codicon \{[\s\S]*flex: 0 0 auto;[\s\S]*\}/,
+    );
+  });
 });
