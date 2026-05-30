@@ -257,6 +257,54 @@ describe('native Web source helpers', () => {
     expect(getNativeWebSourceBridge()).toBe(bridge);
   });
 
+  test('wraps Android native bridge when JavaScript facade is absent', async () => {
+    const native = {
+      getWebSourceState: jest.fn(() => JSON.stringify({
+        preference: 'auto',
+        actualSource: 'embedded',
+        displayTitle: 'WheelMaker - Embedded',
+        displaySource: 'Embedded',
+        remoteUrl: '',
+        remoteHost: '',
+      })),
+      setWebSourcePreference: jest.fn((preference: string) => JSON.stringify({
+        preference,
+        actualSource: 'embedded',
+        displayTitle: 'WheelMaker - Embedded',
+        displaySource: 'Embedded',
+        remoteUrl: '',
+        remoteHost: '',
+      })),
+      setRemoteWebCandidate: jest.fn(() => JSON.stringify({
+        preference: 'auto',
+        actualSource: 'remote',
+        displayTitle: 'WheelMaker - workspace.example.com',
+        displaySource: 'workspace.example.com',
+        remoteUrl: 'https://workspace.example.com/',
+        remoteHost: 'workspace.example.com',
+      })),
+    };
+    (globalThis as {window?: unknown}).window = {
+      WheelMakerAndroidNative: native,
+    };
+
+    const bridge = getNativeWebSourceBridge();
+    expect(await bridge?.getWebSourceState?.()).toMatchObject({actualSource: 'embedded'});
+    await bridge?.setWebSourcePreference?.('embedded');
+    await bridge?.setRemoteWebCandidate?.({
+      source: 'registry',
+      registryAddress: 'wss://workspace.example.com/ws',
+      remoteWebUrl: 'https://workspace.example.com/',
+    });
+
+    expect(native.setWebSourcePreference).toHaveBeenCalledWith('embedded');
+    expect(native.setRemoteWebCandidate).toHaveBeenCalledWith(JSON.stringify({
+      source: 'registry',
+      registryAddress: 'wss://workspace.example.com/ws',
+      remoteWebUrl: 'https://workspace.example.com/',
+    }));
+  });
+
   test('falls back to Desktop bridge when Android bridge is absent', () => {
     const bridge = {
       enabled: true,
@@ -332,6 +380,11 @@ export type NativeWebSourceBridge = {
 type NativeWindow = Window & {
   WheelMakerAndroid?: NativeWebSourceBridge;
   WheelMakerDesktop?: NativeWebSourceBridge;
+  WheelMakerAndroidNative?: {
+    getWebSourceState?: () => string;
+    setWebSourcePreference?: (preference: NativeWebSourcePreference) => string;
+    setRemoteWebCandidate?: (candidateJson: string) => string;
+  };
 };
 
 function isLoopbackHost(hostname: string): boolean {
@@ -370,7 +423,25 @@ export function getNativeWebSourceBridge(): NativeWebSourceBridge | null {
     return null;
   }
   const nativeWindow = window as NativeWindow;
-  return nativeWindow.WheelMakerAndroid ?? nativeWindow.WheelMakerDesktop ?? null;
+  if (nativeWindow.WheelMakerAndroid) {
+    return nativeWindow.WheelMakerAndroid;
+  }
+  if (nativeWindow.WheelMakerAndroidNative) {
+    const native = nativeWindow.WheelMakerAndroidNative;
+    return {
+      enabled: true,
+      getWebSourceState: native.getWebSourceState
+        ? () => Promise.resolve(JSON.parse(native.getWebSourceState?.() ?? '{}') as NativeWebSourceState)
+        : undefined,
+      setWebSourcePreference: native.setWebSourcePreference
+        ? preference => Promise.resolve(JSON.parse(native.setWebSourcePreference?.(preference) ?? '{}') as NativeWebSourceState)
+        : undefined,
+      setRemoteWebCandidate: native.setRemoteWebCandidate
+        ? candidate => Promise.resolve(JSON.parse(native.setRemoteWebCandidate?.(JSON.stringify(candidate)) ?? '{}') as NativeWebSourceState)
+        : undefined,
+    };
+  }
+  return nativeWindow.WheelMakerDesktop ?? null;
 }
 
 export function submitNativeRemoteWebCandidate(registryAddress: string): void {
@@ -1449,22 +1520,6 @@ class MainActivity : Activity() {
             }
         }
         target.addJavascriptInterface(WheelMakerBridge(webSourceRuntime), "WheelMakerAndroidNative")
-        target.evaluateJavascript(androidBridgeBootstrapScript(), null)
-    }
-
-    private fun androidBridgeBootstrapScript(): String {
-        return """
-            (() => {
-              if (window.WheelMakerAndroid) return;
-              const native = window.WheelMakerAndroidNative;
-              window.WheelMakerAndroid = Object.freeze({
-                enabled: true,
-                getWebSourceState: () => Promise.resolve(JSON.parse(native.getWebSourceState())),
-                setWebSourcePreference: preference => Promise.resolve(JSON.parse(native.setWebSourcePreference(preference))),
-                setRemoteWebCandidate: candidate => Promise.resolve(JSON.parse(native.setRemoteWebCandidate(JSON.stringify(candidate)))),
-              });
-            })();
-        """.trimIndent()
     }
 }
 ```
