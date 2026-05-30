@@ -50,6 +50,24 @@ describe('web reconnect fallback behavior', () => {
     expect(connectBlock).not.toContain('await refreshChatIndex();');
   });
 
+  test('forced post-connect project refresh also forces per-project session refresh', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'main.tsx'),
+      'utf8',
+    );
+
+    expect(mainTsx).toContain(
+      'const refreshChatProjectSessions = async (targetProjectId: string, options?: {force?: boolean}) => {',
+    );
+    expect(mainTsx).toContain(
+      "if ((!options?.force && !connected && !connectInFlightRef.current) || !targetProjectId) return;",
+    );
+    expect(mainTsx).toContain(
+      'refreshChatProjectSessions(projectItem.projectId, {force: options?.force === true}),',
+    );
+  });
+
   test('uses pwa foreground supervisor for background suspend and resume reconnect', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(

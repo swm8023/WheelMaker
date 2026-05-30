@@ -11829,8 +11829,8 @@ function App() {
     workspaceStore.replaceChatSessions(targetProjectId, nextSessions, cursorBySessionId);
   };
 
-  const refreshChatProjectSessions = async (targetProjectId: string) => {
-    if ((!connected && !connectInFlightRef.current) || !targetProjectId) return;
+  const refreshChatProjectSessions = async (targetProjectId: string, options?: {force?: boolean}) => {
+    if ((!options?.force && !connected && !connectInFlightRef.current) || !targetProjectId) return;
     if (chatProjectRefreshInFlightRef.current[targetProjectId]) {
       chatProjectRefreshDirtyRef.current[targetProjectId] = true;
       return;
@@ -11878,7 +11878,7 @@ function App() {
         setHasPendingProjectUpdates(false);
         await Promise.all(
           latestProjects.map(projectItem =>
-            refreshChatProjectSessions(projectItem.projectId),
+            refreshChatProjectSessions(projectItem.projectId, {force: options?.force === true}),
           ),
         );
       } while (chatIndexFullRefreshDirtyRef.current);
