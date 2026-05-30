@@ -66,6 +66,27 @@ function New-CleanDirectory {
   New-Item -ItemType Directory -Path $target -Force | Out-Null
 }
 
+function New-Directory {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  $resolved = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+  if ($WhatIf) {
+    Write-Host ("[whatif] create directory {0}" -f $resolved)
+    return
+  }
+  New-Item -ItemType Directory -Path $resolved -Force | Out-Null
+}
+
+function Get-AndroidBuildRoot {
+  $homeBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $script:WheelMakerHome "build\mobile\android"))
+  $repoRootPath = [System.IO.Path]::GetFullPath($script:RepoRoot)
+  $homePathRoot = [System.IO.Path]::GetPathRoot($homeBuildRoot)
+  $repoPathRoot = [System.IO.Path]::GetPathRoot($repoRootPath)
+  if ($homePathRoot.Equals($repoPathRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    return $homeBuildRoot
+  }
+  return [System.IO.Path]::GetFullPath((Join-Path $repoPathRoot ".wheelmaker\build\mobile\android"))
+}
+
 function Build-AndroidWeb {
   if (-not $WhatIf) {
     Assert-Command -Name "npm" -Hint "Install Node.js 22+."
@@ -102,8 +123,8 @@ function Build-AndroidApk {
     Assert-Command -Name "gradle" -Hint "Install Gradle or use Android Studio's Gradle command in PATH."
   }
   New-CleanDirectory -Path $script:GradleBuildRoot
-  New-CleanDirectory -Path $script:GradleCacheDir
-  New-CleanDirectory -Path $script:GradleHomeDir
+  New-Directory -Path $script:GradleCacheDir
+  New-Directory -Path $script:GradleHomeDir
 
   Push-Location $script:AndroidRoot
   try {
@@ -112,7 +133,9 @@ function Build-AndroidApk {
       "assembleRelease",
       "--project-cache-dir", $script:GradleCacheDir,
       "-g", $script:GradleHomeDir,
+      "-Dorg.gradle.jvmargs=-Djava.net.preferIPv4Stack=true -Dhttps.protocols=TLSv1.2",
       "-PwheelmakerBuildRoot=$script:GradleBuildRoot",
+      "-Pkotlin.project.persistent.dir=$script:KotlinPersistentDir",
       "-PwheelmakerWebAssetsDir=$script:WebRoot"
     )
     if ($WhatIf) {
@@ -181,9 +204,10 @@ $script:RepoRoot = if ([string]::IsNullOrWhiteSpace($RepoRoot)) { (Resolve-Path 
 $script:AppRoot = Join-Path $script:RepoRoot "app"
 $script:AndroidRoot = Join-Path $script:RepoRoot "mobile\android"
 $script:WheelMakerHome = Join-Path $HOME ".wheelmaker"
-$script:BuildRoot = Join-Path $script:WheelMakerHome "build\mobile\android"
+$script:BuildRoot = Get-AndroidBuildRoot
 $script:WebRoot = Join-Path $script:BuildRoot "webroot"
 $script:GradleBuildRoot = Join-Path $script:BuildRoot "gradle-build"
+$script:KotlinPersistentDir = Join-Path $script:GradleBuildRoot "kotlin-persistent"
 $script:GradleCacheDir = Join-Path $script:BuildRoot "gradle-cache"
 $script:GradleHomeDir = Join-Path $script:BuildRoot "gradle-home"
 $script:OutputDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)

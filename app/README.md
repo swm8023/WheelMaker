@@ -43,7 +43,7 @@ Fields:
 
 3. Android APK embedded snapshot:
    - Run `publish-android.bat` from the repository root.
-   - The publisher builds Web assets into `~/.wheelmaker/build/mobile/android/webroot`.
+   - The publisher builds Web assets into the external Android build root's `webroot` directory. By default this is `~/.wheelmaker/build/mobile/android/webroot`; on Windows cross-drive checkouts use the repository drive, for example `D:\.wheelmaker\build\mobile\android\webroot`.
    - Gradle packages that external Web root into the APK assets.
    - APK output is written to `~/.wheelmaker/mobile/android`.
    - No Android-generated Web assets are written under `app/` or `mobile/android/`.

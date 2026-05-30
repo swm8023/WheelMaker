@@ -355,6 +355,8 @@ Build workspace:
 ~/.wheelmaker/build/mobile/android/
 ```
 
+On Windows, if the repository and `HOME` are on different drives, the publisher uses the repository drive instead, for example `D:\.wheelmaker\build\mobile\android\`. This keeps Android Gradle build paths on one filesystem root while still staying outside the git worktree.
+
 The Android build does not write generated Web assets, Gradle output, APK files, or release manifests into the git worktree.
 The first Android slice only builds a local APK. It does not publish APK downloads through Nginx, Monitor, or the Update screen.
 

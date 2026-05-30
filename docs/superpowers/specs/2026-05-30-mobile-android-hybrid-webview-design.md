@@ -89,6 +89,8 @@ Use `~/.wheelmaker` for Android publish output and build workspace:
   gradle-home/
 ```
 
+On Windows, if the repository and `HOME` are on different drives, the build workspace uses the repository drive instead, for example `D:\.wheelmaker\build\mobile\android\`. This avoids Android Gradle path calculations that fail across filesystem roots while keeping all generated files outside the git worktree.
+
 `~/.wheelmaker/web` remains the normal browser/PWA Remote Web publish directory. Android publish builds a separate Embedded Web snapshot and does not overwrite `~/.wheelmaker/web`.
 
 The first Android slice stops at local build output. `android-release.json` records what was built, but no service exposes it for download.
@@ -110,7 +112,7 @@ scripts/publish_android.ps1
 The script:
 
 1. Resolves the repo root.
-2. Creates or cleans `~/.wheelmaker/build/mobile/android/webroot`.
+2. Creates or cleans the external Android build root's `webroot`.
 3. Runs the Web build with `WHEELMAKER_WEB_TARGET` set to that external `webroot`.
 4. Runs the existing Web public asset export so the embedded snapshot contains `index.html`, `runtime-config.js`, `web-build.json`, `manifest.webmanifest`, `service-worker.js`, icons, and hashed bundle assets.
 5. Runs Gradle from `mobile/android/` with external build/cache directories.
@@ -121,13 +123,14 @@ Suggested Gradle invocation shape:
 
 ```text
 gradlew assembleRelease
-  --project-cache-dir ~/.wheelmaker/build/mobile/android/gradle-cache
-  -g ~/.wheelmaker/build/mobile/android/gradle-home
-  -PwheelmakerBuildRoot=~/.wheelmaker/build/mobile/android/gradle-build
-  -PwheelmakerWebAssetsDir=~/.wheelmaker/build/mobile/android/webroot
+  --project-cache-dir <android-build-root>/gradle-cache
+  -g <android-build-root>/gradle-home
+  -PwheelmakerBuildRoot=<android-build-root>/gradle-build
+  -Pkotlin.project.persistent.dir=<android-build-root>/gradle-build/kotlin-persistent
+  -PwheelmakerWebAssetsDir=<android-build-root>/webroot
 ```
 
-Gradle configuration must set root and subproject build directories under `wheelmakerBuildRoot`, not under the repo.
+Gradle configuration must set root and subproject build directories under `wheelmakerBuildRoot`, not under the repo. The Kotlin persistent dir must also stay under the external build root so the Kotlin plugin does not create `mobile/android/.kotlin`.
 
 Do not generate `mobile/android/local.properties`; SDK discovery should use `ANDROID_HOME` or `ANDROID_SDK_ROOT`.
 

@@ -11,6 +11,11 @@ android {
     namespace = "com.wheelmaker.android"
     compileSdk = 36
 
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
     defaultConfig {
         applicationId = "com.wheelmaker.android"
         minSdk = 23
@@ -38,6 +43,10 @@ android {
             isMinifyEnabled = false
         }
     }
+}
+
+kotlin {
+    jvmToolchain(17)
 }
 
 dependencies {
