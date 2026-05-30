@@ -40,3 +40,10 @@ Fields:
 2. Desktop release:
    - Run `publish-desktop.bat` from the repository root.
    - The desktop publisher embeds this web output into the Go/WebView2 desktop executable.
+
+3. Android APK embedded snapshot:
+   - Run `publish-android.bat` from the repository root.
+   - The publisher builds Web assets into `~/.wheelmaker/build/mobile/android/webroot`.
+   - Gradle packages that external Web root into the APK assets.
+   - APK output is written to `~/.wheelmaker/mobile/android`.
+   - No Android-generated Web assets are written under `app/` or `mobile/android/`.

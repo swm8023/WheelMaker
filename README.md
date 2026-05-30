@@ -325,7 +325,40 @@ This will:
 3. write `web-build.json` for PWA freshness checks
 4. refresh the files served by the Nginx root path
 
-### 6. Install the Web UI as a PWA
+### 6. Build Android APK
+
+WheelMaker Android is a native Kotlin WebView shell under `mobile/android/`.
+It packages an embedded Workspace Web snapshot and uses a stable Android app origin so Web IndexedDB data survives Remote Web and Embedded Web fallback.
+
+Requirements:
+
+- Android SDK with `ANDROID_HOME` or `ANDROID_SDK_ROOT`
+- Gradle in `PATH`
+- Node.js 22+
+
+Build from the repository root:
+
+```bat
+publish-android.bat
+```
+
+Outputs:
+
+```text
+~/.wheelmaker/mobile/android/WheelMakerAndroid.apk
+~/.wheelmaker/mobile/android/android-release.json
+```
+
+Build workspace:
+
+```text
+~/.wheelmaker/build/mobile/android/
+```
+
+The Android build does not write generated Web assets, Gradle output, APK files, or release manifests into the git worktree.
+The first Android slice only builds a local APK. It does not publish APK downloads through Nginx, Monitor, or the Update screen.
+
+### 7. Install the Web UI as a PWA
 
 WheelMaker Web already ships with:
 
@@ -376,7 +409,7 @@ On iOS, the installed app opens from the home screen in a standalone-style windo
 - the app checks `web-build.json` on startup and resume; if a new published SHA is detected, it activates the latest service worker, clears old WheelMaker PWA caches, and reloads once
 - local notifications and PWA-related capabilities can be enabled by the browser when supported
 
-### 7. Service operations
+### 8. Service operations
 
 ```powershell
 ~/.wheelmaker/start.bat
@@ -418,7 +451,7 @@ The updater trigger path is:
 
 `WheelMakerUpdater` self-upgrade is reserved but not implemented in this transitional CLI.
 
-### 8. Quick validation checklist
+### 9. Quick validation checklist
 
 After deployment:
 
