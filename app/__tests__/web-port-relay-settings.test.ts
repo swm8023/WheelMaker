@@ -7,7 +7,7 @@ const stylesCss = fs.readFileSync(path.join(root, 'web/src/styles.css'), 'utf8')
 
 describe('port relay settings UI source structure', () => {
   test('adds Port Relay as a settings detail and mobile shortcut bar entry', () => {
-    expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | 'portRelay' | 'debugLogs' | null;");
+    expect(mainTsx).toContain("type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | 'portRelay' | 'connectionStatus' | 'debugLogs' | null;");
     expect(mainTsx).toContain("settingsDetailView === 'portRelay'");
     expect(mainTsx).toContain('renderPortRelaySettingsDetail(options)');
     expect(mainTsx).toContain("setSettingsDetailView('portRelay')");

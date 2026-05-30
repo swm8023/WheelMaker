@@ -32,7 +32,11 @@ import { initializePWAFoundation } from './pwa';
 import { installWebFreshnessAutoRefresh } from './pwa/webFreshness';
 import { DesktopTitleBar } from './shell/DesktopTitleBar';
 import {resolveDesktopChatQuickSwitchContextMenu} from './shell/desktop/chatQuickSwitchContextMenu';
-import { submitDesktopRemoteWebCandidate } from './shell/desktop/webSource';
+import {
+  readDesktopWebSourceState,
+  submitDesktopRemoteWebCandidate,
+  type DesktopWebSourceState,
+} from './shell/desktop/webSource';
 import { ResponsiveShell } from './shell/ResponsiveShell';
 import {
   getLatestSessionReadCursor,
@@ -223,6 +227,7 @@ import {
 } from './features/speech/voiceInputRuntime';
 import {
   createAndroidNativeSpeechRuntime,
+  getAndroidNativeSpeechBridge,
   isAndroidNativeSpeechHost,
   type AndroidNativeSpeechEvent,
   type AndroidNativeSpeechRuntime,
@@ -252,6 +257,11 @@ import {
 } from './features/speech/voiceInputDiagnostics';
 import {VoiceInputButton, type VoiceInputInteractionMode} from './features/speech/VoiceInputButton';
 import {VoiceRecordingBar} from './features/speech/VoiceRecordingBar';
+import {
+  resolveRegistryConnectionStatus,
+  resolveVoiceCapabilityStatus,
+  resolveWebResourceConnectionStatus,
+} from './settings/connectionStatus';
 import { WorkspaceController } from './services/workspaceController';
 import { WorkspaceStore } from './services/workspaceStore';
 import {
@@ -400,7 +410,7 @@ type ConfirmTarget =
       projectName?: string;
       includeProjects?: boolean;
     };
-type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | 'portRelay' | 'debugLogs' | null;
+type SettingsDetailView = 'update' | 'skills' | 'tokenStats' | 'ccSwitch' | 'database' | 'portRelay' | 'connectionStatus' | 'debugLogs' | null;
 type ActiveSettingsDetailView = Exclude<SettingsDetailView, null>;
 type SettingsDetailShellOptions = {
   hideDetailHeader?: boolean;
@@ -991,6 +1001,8 @@ function settingsDetailTitle(detail: ActiveSettingsDetailView): string {
       return 'Database';
     case 'portRelay':
       return 'Port Relay';
+    case 'connectionStatus':
+      return 'Connection Status';
     case 'debugLogs':
       return 'Logs';
   }
@@ -2927,6 +2939,7 @@ function App() {
   const [speechSettings, setSpeechSettings] = useState(() =>
     normalizeSpeechSettings(persistedGlobal.speechSettings ?? DEFAULT_SPEECH_SETTINGS),
   );
+  const [webSourceState, setWebSourceState] = useState<DesktopWebSourceState | null>(null);
   const [registryDebugPanelOpen, setRegistryDebugPanelOpen] = useState(
     typeof persistedGlobal.registryDebug === 'boolean'
       ? persistedGlobal.registryDebug
@@ -5414,6 +5427,21 @@ function App() {
   useEffect(() => {
     workspaceStore.rememberGlobalState({ speechSettings });
   }, [speechSettings]);
+
+  useEffect(() => {
+    if (!sidebarSettingsOpen && settingsDetailView !== 'connectionStatus') {
+      return undefined;
+    }
+    let cancelled = false;
+    readDesktopWebSourceState().then(state => {
+      if (!cancelled) {
+        setWebSourceState(state);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sidebarSettingsOpen, settingsDetailView]);
 
   useEffect(() => {
     workspaceStore.rememberGlobalState({
@@ -13852,6 +13880,79 @@ function App() {
     );
   };
 
+  const renderConnectionStatusSettingsDetail = (options?: SettingsDetailShellOptions) => {
+    const webStatus = resolveWebResourceConnectionStatus(webSourceState);
+    const registryStatus = resolveRegistryConnectionStatus({
+      connected,
+      reconnecting,
+      autoConnecting,
+      address,
+    });
+    const voiceStatus = resolveVoiceCapabilityStatus({
+      speechEnabled: speechSettings.enabled,
+      androidNativeHost: isAndroidNativeSpeechHost(),
+      androidNativeAvailable: !!getAndroidNativeSpeechBridge(),
+    });
+    return renderSettingsDetailShell(
+      'Connection Status',
+      <div className="settings-metadata-list settings-connection-status-list">
+        <div className="settings-metadata-card">
+          <div className="settings-metadata-line settings-metadata-line-tags">
+            <span className="settings-metadata-title">Registry</span>
+            <span className="agent-package-status">{registryStatus.label}</span>
+          </div>
+          <div className="settings-metadata-line settings-connection-value" title={registryStatus.detail}>
+            {registryStatus.detail}
+          </div>
+        </div>
+        <div className="settings-metadata-card">
+          <div className="settings-metadata-line settings-metadata-line-tags">
+            <span className="settings-metadata-title">Web Resources</span>
+            <span className="agent-package-status">{webStatus.label}</span>
+          </div>
+          <div className="settings-metadata-line settings-connection-value" title={webStatus.detail}>
+            {webStatus.detail}
+          </div>
+          {webStatus.remoteUrl ? (
+            <div className="settings-metadata-line settings-connection-value" title={webStatus.remoteUrl}>
+              Remote URL: {webStatus.remoteUrl}
+            </div>
+          ) : null}
+        </div>
+        <div className="settings-metadata-card">
+          <div className="settings-metadata-line settings-metadata-line-tags">
+            <span className="settings-metadata-title">Voice Input</span>
+            <span className="agent-package-status">{voiceStatus.label}</span>
+          </div>
+          <div className="settings-metadata-line settings-connection-value" title={voiceStatus.detail}>
+            {voiceStatus.detail}
+          </div>
+        </div>
+        <div className="settings-metadata-card">
+          <div className="settings-metadata-line settings-metadata-line-tags">
+            <span className="settings-metadata-title">Local Hub Read</span>
+            <span className="agent-package-status">{localHubReadEnabled ? 'Enabled' : 'Disabled'}</span>
+          </div>
+          {registryHubs.length === 0 ? (
+            <div className="settings-metadata-line">No hubs available.</div>
+          ) : (
+            registryHubs.map(hub => {
+              const readStatus = localHubReadStatuses[hub.hubId] ?? 'Remote';
+              return (
+                <div key={`connection-hub:${hub.hubId}`} className="settings-metadata-line settings-metadata-line-tags">
+                  <span className="settings-metadata-title" title={hub.hubId}>{hub.hubId}</span>
+                  <span className={`chat-hub-read-tag ${readStatus.toLowerCase()}`}>{readStatus}</span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>,
+      undefined,
+      options,
+    );
+  };
+
   const renderSettingsContent = (
     showSectionTitle: boolean,
     options: SettingsDetailShellOptions = {},
@@ -13873,6 +13974,9 @@ function App() {
     }
     if (settingsDetailView === 'portRelay') {
       return renderPortRelaySettingsDetail(options);
+    }
+    if (settingsDetailView === 'connectionStatus') {
+      return renderConnectionStatusSettingsDetail(options);
     }
     if (settingsDetailView === 'debugLogs') {
       return renderDebugLogsSettingsDetail(options);
@@ -13920,17 +14024,6 @@ function App() {
             type="checkbox"
             checked={hideToolCalls}
             onChange={e => setHideToolCalls(e.target.checked)}
-          />
-        </label>
-        <label className="settings-row sidebar-setting-row">
-          <span>
-            <span className="codicon codicon-cloud-download settings-row-icon" aria-hidden="true" />
-            Local Hub Read
-          </span>
-          <input
-            type="checkbox"
-            checked={localHubReadEnabled}
-            onChange={event => setLocalHubReadEnabled(event.target.checked)}
           />
         </label>
         <div className="voice-input-settings-menu">
@@ -14010,6 +14103,32 @@ function App() {
         </label>
         </>
         ), 'comment-discussion')}
+        {renderSettingsSection('Connection', (
+        <>
+        <button
+          type="button"
+          className="settings-row settings-detail-row"
+          onClick={() => openSettingsDetail('connectionStatus')}
+        >
+          <span>
+            <span className="codicon codicon-radio-tower settings-row-icon" aria-hidden="true" />
+            Connection Status
+          </span>
+          <span className="codicon codicon-chevron-right" aria-hidden="true" />
+        </button>
+        <label className="settings-row sidebar-setting-row">
+          <span>
+            <span className="codicon codicon-cloud-download settings-row-icon" aria-hidden="true" />
+            Local Hub Read
+          </span>
+          <input
+            type="checkbox"
+            checked={localHubReadEnabled}
+            onChange={event => setLocalHubReadEnabled(event.target.checked)}
+          />
+        </label>
+        </>
+        ), 'radio-tower')}
         {renderSettingsSection('Code Display', (
         <>
         <label className="settings-row sidebar-setting-row">

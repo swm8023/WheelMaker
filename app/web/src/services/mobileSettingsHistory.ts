@@ -5,6 +5,7 @@ export type MobileSettingsHistoryDetail =
   | 'ccSwitch'
   | 'database'
   | 'portRelay'
+  | 'connectionStatus'
   | 'debugLogs';
 
 export type MobileSettingsHistoryState = {
@@ -40,6 +41,7 @@ export function isMobileSettingsHistoryState(input: unknown): input is MobileSet
       || state.detail === 'ccSwitch'
       || state.detail === 'database'
       || state.detail === 'portRelay'
+      || state.detail === 'connectionStatus'
       || state.detail === 'debugLogs'
     );
 }
