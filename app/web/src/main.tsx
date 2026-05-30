@@ -116,6 +116,7 @@ import {
   resolveChatScrollToBottomVisibility,
   shouldAutoScrollChatToBottom,
 } from './chat/chatScrollIntent';
+import { resolveChatScrollBottomButtonOffset } from './services/chatScrollBottomButton';
 import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { mergeChatSessionList, shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
 import {
@@ -3017,6 +3018,7 @@ function App() {
   const [floatingControlStackHeight, setFloatingControlStackHeight] = useState(184);
   const chatComposerRef = useRef<HTMLDivElement | null>(null);
   const [chatComposerTop, setChatComposerTop] = useState<number | null>(null);
+  const [chatComposerHeight, setChatComposerHeight] = useState(0);
   const [floatingDefaultComposerTop, setFloatingDefaultComposerTop] = useState<number | null>(null);
   const floatingLongPressTimerRef = useRef<number | null>(null);
   const floatingCooldownTimerRef = useRef<number | null>(null);
@@ -3822,9 +3824,13 @@ function App() {
   const chatMainStyle = useMemo(
     () => ({
       '--chat-message-font-family': chatFontFamily,
+      '--chat-scroll-bottom-offset': `${resolveChatScrollBottomButtonOffset({
+        composerHeight: chatComposerHeight,
+        keyboardInset: chatKeyboardInset,
+      })}px`,
       ...(chatKeyboardInset > 0 ? { paddingBottom: `${chatKeyboardInset}px` } : {}),
     }) as React.CSSProperties,
-    [chatFontFamily, chatKeyboardInset],
+    [chatComposerHeight, chatFontFamily, chatKeyboardInset],
   );
 
   useEffect(() => {
@@ -4910,7 +4916,9 @@ function App() {
 
   const measureChatComposerTop = useCallback(() => {
     const rect = chatComposerRef.current?.getBoundingClientRect();
+    const nextHeight = rect ? Math.round(rect.height) : 0;
     setChatComposerTop(rect ? Math.round(rect.top) : null);
+    setChatComposerHeight(current => (current === nextHeight ? current : nextHeight));
   }, []);
 
   useLayoutEffect(() => {
@@ -4921,6 +4929,7 @@ function App() {
   useEffect(() => {
     if (isWide || tab !== 'chat') {
       setChatComposerTop(null);
+      setChatComposerHeight(0);
       return;
     }
     const measure = () => measureChatComposerTop();

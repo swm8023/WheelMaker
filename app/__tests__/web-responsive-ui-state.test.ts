@@ -99,6 +99,38 @@ describe('web responsive ui state', () => {
     expect(floatingControlYRatioFromLegacySlot('invalid')).toBeNull();
   });
 
+  test('keeps the chat scroll-to-bottom button above the composer and keyboard inset', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const modulePath = path.join(projectRoot, 'web', 'src', 'services', 'chatScrollBottomButton.ts');
+
+    expect(fs.existsSync(modulePath)).toBe(true);
+
+    const {
+      CHAT_SCROLL_BOTTOM_COMPOSER_GAP_PX,
+      CHAT_SCROLL_BOTTOM_FALLBACK_OFFSET_PX,
+      resolveChatScrollBottomButtonOffset,
+    } = require(modulePath);
+
+    expect(CHAT_SCROLL_BOTTOM_COMPOSER_GAP_PX).toBe(10);
+    expect(CHAT_SCROLL_BOTTOM_FALLBACK_OFFSET_PX).toBe(92);
+    expect(resolveChatScrollBottomButtonOffset({
+      composerHeight: 84,
+      keyboardInset: 0,
+    })).toBe(94);
+    expect(resolveChatScrollBottomButtonOffset({
+      composerHeight: 128,
+      keyboardInset: 240,
+    })).toBe(378);
+    expect(resolveChatScrollBottomButtonOffset({
+      composerHeight: 0,
+      keyboardInset: 240,
+    })).toBe(332);
+    expect(resolveChatScrollBottomButtonOffset({
+      composerHeight: Number.NaN,
+      keyboardInset: -20,
+    })).toBe(92);
+  });
+
   test('uses a best-effort mobile haptic helper around navigator vibration', () => {
     const projectRoot = path.join(__dirname, '..');
     const modulePath = path.join(projectRoot, 'web', 'src', 'services', 'mobileHaptics.ts');

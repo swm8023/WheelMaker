@@ -7414,7 +7414,7 @@ textarea,
 .chat-scroll-bottom-button {
   position: absolute;
   right: 20px;
-  bottom: 92px;
+  bottom: var(--chat-scroll-bottom-offset, 92px);
   z-index: 5;
   width: 32px;
   height: 32px;
