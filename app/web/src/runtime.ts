@@ -13,6 +13,10 @@ function getConfig(): RuntimeConfig {
   return globalLike.__WHEELMAKER_RUNTIME_CONFIG__ ?? {};
 }
 
+function isNativeAppAssetHost(hostname: string): boolean {
+  return hostname.toLowerCase() === 'appassets.androidplatform.net';
+}
+
 export function getDefaultRegistryAddress(): string {
   const cfg = getConfig();
   if (cfg.defaultRegistryAddress?.trim()) {
@@ -21,6 +25,9 @@ export function getDefaultRegistryAddress(): string {
   const host = window.location.hostname;
   if (host === '127.0.0.1') {
     return 'ws://127.0.0.1:9630/ws';
+  }
+  if (isNativeAppAssetHost(host)) {
+    return `127.0.0.1:${cfg.defaultRegistryPort ?? 9630}`;
   }
   if (window.location.host) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
