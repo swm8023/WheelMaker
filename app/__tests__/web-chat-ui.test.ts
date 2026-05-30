@@ -1338,6 +1338,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('data-backdrop-tone={floatingBackdropTone}');
     expect(mainTsx).toContain('requestFloatingBackdropToneMeasure');
     expect(mainTsx).toContain('FLOATING_BACKDROP_TONE_THROTTLE_MS');
+    expect(mainTsx).toContain('const floatingPositionSnapshotRef = useRef');
+    expect(mainTsx).toContain('resolveFloatingControlYRatioForStableTop({');
+    expect(mainTsx).toContain('previousTop: previousFloatingPosition.top');
     expect(stylesCss).toMatch(
       /\.floating-nav-group,\s*\.drawer-toggle-bubble \{[\s\S]*background: color-mix\(in srgb, var\(--panel\) 34%, transparent\);[\s\S]*backdrop-filter: blur\(1px\);[\s\S]*\}/,
     );
@@ -1349,6 +1352,12 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toMatch(
       /\.floating-control-stack\[data-idle='true'\] \.floating-nav-group,[\s\S]*\.floating-control-stack\[data-idle='true'\] \.drawer-toggle-bubble,[\s\S]*\.floating-control-stack\[data-idle='true'\] \.gesture-nav-button \{[\s\S]*background: transparent;[\s\S]*box-shadow: none;[\s\S]*backdrop-filter: none;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.floating-nav-button\[data-active='true'\]:hover \{[\s\S]*color: color-mix\(in srgb, var\(--accent\) 88%, var\(--text\)\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.port-relay-floating-bubble\[data-active='true'\] \{[\s\S]*background: transparent;[\s\S]*border-color: color-mix\(in srgb, var\(--accent\) 72%, transparent\);[\s\S]*color: color-mix\(in srgb, var\(--accent\) 88%, var\(--text\)\);[\s\S]*\}/,
     );
   });
 

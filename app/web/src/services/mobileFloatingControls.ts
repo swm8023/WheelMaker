@@ -67,3 +67,21 @@ export function floatingControlYRatioFromTop(
   }
   return sanitizeFloatingControlYRatio((top - minTop) / (maxTop - minTop));
 }
+
+export function resolveFloatingControlYRatioForStableTop({
+  previousTop,
+  minTop,
+  maxTop,
+  fallbackRatio = FLOATING_CONTROL_DEFAULT_Y_RATIO,
+}: {
+  previousTop: number;
+  minTop: number;
+  maxTop: number;
+  fallbackRatio?: number;
+}): number {
+  if (maxTop <= minTop) {
+    return sanitizeFloatingControlYRatio(fallbackRatio);
+  }
+  const clampedTop = Math.min(maxTop, Math.max(minTop, previousTop));
+  return floatingControlYRatioFromTop(clampedTop, minTop, maxTop);
+}

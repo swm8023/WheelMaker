@@ -133,6 +133,7 @@ import {
   floatingControlTopFromYRatio,
   floatingControlYRatioFromLegacySlot,
   floatingControlYRatioFromTop,
+  resolveFloatingControlYRatioForStableTop,
   resolveFloatingControlDragSide,
   sanitizeFloatingControlYRatio,
 } from './services/mobileFloatingControls';
@@ -3019,6 +3020,7 @@ function App() {
   const floatingClickCooldownUntilRef = useRef(0);
   const floatingIgnoreLostCaptureRef = useRef(false);
   const floatingControlStackRef = useRef<HTMLDivElement | null>(null);
+  const floatingPositionSnapshotRef = useRef<{minTop: number; maxTop: number; top: number} | null>(null);
   const [floatingBackdropTone, setFloatingBackdropTone] = useState<FloatingBackdropTone>('dark');
   const [floatingSidePulse, setFloatingSidePulse] = useState<PersistedFloatingControlSide | ''>('');
   const [floatingControlsIdle, setFloatingControlsIdle] = useState(false);
@@ -5647,6 +5649,52 @@ function App() {
     floatingDragState,
     floatingKeyboardOffset,
     floatingRestTop,
+  ]);
+  useLayoutEffect(() => {
+    if (isWide || floatingDragState?.active) {
+      floatingPositionSnapshotRef.current = null;
+      return;
+    }
+    const previousFloatingPosition = floatingPositionSnapshotRef.current;
+    const boundsChanged =
+      previousFloatingPosition !== null &&
+      (previousFloatingPosition.minTop !== floatingBounds.minTop ||
+        previousFloatingPosition.maxTop !== floatingBounds.maxTop);
+    if (boundsChanged && previousFloatingPosition) {
+      const nextYRatio = resolveFloatingControlYRatioForStableTop({
+        previousTop: previousFloatingPosition.top,
+        minTop: floatingBounds.minTop,
+        maxTop: floatingBounds.maxTop,
+        fallbackRatio: floatingControlYRatio,
+      });
+      const nextTop = floatingControlTopFromYRatio(
+        nextYRatio,
+        floatingBounds.minTop,
+        floatingBounds.maxTop,
+      );
+      floatingPositionSnapshotRef.current = {
+        minTop: floatingBounds.minTop,
+        maxTop: floatingBounds.maxTop,
+        top: nextTop,
+      };
+      if (Math.abs(nextYRatio - floatingControlYRatio) > 0.001) {
+        setFloatingControlYRatio(nextYRatio);
+        return;
+      }
+    }
+    floatingPositionSnapshotRef.current = {
+      minTop: floatingBounds.minTop,
+      maxTop: floatingBounds.maxTop,
+      top: floatingControlTop,
+    };
+  }, [
+    floatingBounds.maxTop,
+    floatingBounds.minTop,
+    floatingControlTop,
+    floatingControlYRatio,
+    floatingDragState?.active,
+    isWide,
+    setFloatingControlYRatio,
   ]);
   const floatingNavIndex = tab === 'chat' ? 0 : tab === 'file' ? 1 : 2;
   const floatingNavIndicatorStyle = useMemo(

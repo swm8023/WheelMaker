@@ -31,6 +31,7 @@ describe('web responsive ui state', () => {
       floatingControlTopFromYRatio,
       floatingControlYRatioFromLegacySlot,
       floatingControlYRatioFromTop,
+      resolveFloatingControlYRatioForStableTop,
       sanitizeFloatingControlYRatio,
     } = require(modulePath);
 
@@ -41,6 +42,19 @@ describe('web responsive ui state', () => {
     expect(floatingControlTopFromYRatio(0.4, 10, 210)).toBe(90);
     expect(floatingControlYRatioFromTop(90, 10, 210)).toBe(0.4);
     expect(floatingControlYRatioFromTop(999, 10, 210)).toBe(1);
+    const stableExpandedRatio = resolveFloatingControlYRatioForStableTop({
+      previousTop: 90,
+      minTop: 10,
+      maxTop: 310,
+      fallbackRatio: 0.4,
+    });
+    expect(floatingControlTopFromYRatio(stableExpandedRatio, 10, 310)).toBe(90);
+    expect(resolveFloatingControlYRatioForStableTop({
+      previousTop: 999,
+      minTop: 10,
+      maxTop: 310,
+      fallbackRatio: 0.4,
+    })).toBe(1);
     expect(floatingControlYRatioFromLegacySlot('upper')).toBe(0);
     expect(floatingControlYRatioFromLegacySlot('upper-middle')).toBe(0.25);
     expect(floatingControlYRatioFromLegacySlot('center')).toBe(0.5);

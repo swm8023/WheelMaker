@@ -2491,6 +2491,7 @@ textarea,
 
 .floating-nav-button[data-active='true']:hover {
   background: transparent;
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
 }
 
 .floating-nav-button:active,
@@ -2509,9 +2510,9 @@ textarea,
 }
 
 .port-relay-floating-bubble[data-active='true'] {
-  color: var(--text);
-  background: color-mix(in srgb, var(--accent) 34%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  background: transparent;
+  border-color: color-mix(in srgb, var(--accent) 72%, transparent);
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
 }
 
 .floating-control-stack[data-backdrop-tone='mixed'] .drawer-toggle-bubble[data-active='true'] {
