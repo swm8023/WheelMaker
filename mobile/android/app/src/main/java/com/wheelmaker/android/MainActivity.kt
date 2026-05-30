@@ -12,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.MediaStore
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.PermissionRequest
@@ -147,29 +148,35 @@ class MainActivity : Activity() {
     }
 
     private fun createAndroidFileChooserIntent(fileChooserParams: WebChromeClient.FileChooserParams): Intent {
-        val acceptTypes = normalizeFileChooserAcceptTypes(fileChooserParams.acceptTypes)
+        val acceptTypes = normalizeAndroidFileChooserAcceptTypes(fileChooserParams.acceptTypes)
+        val allowMultiple = fileChooserParams.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+        if (shouldUseAndroidPhotoPicker(acceptTypes, Build.VERSION.SDK_INT)) {
+            return createAndroidPhotoPickerIntent(acceptTypes, allowMultiple)
+        }
+        return createAndroidDocumentFileChooserIntent(acceptTypes, allowMultiple)
+    }
+
+    private fun createAndroidDocumentFileChooserIntent(acceptTypes: List<String>, allowMultiple: Boolean): Intent {
         return Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = acceptTypes.singleOrNull() ?: "*/*"
             if (acceptTypes.size > 1) {
                 putExtra(Intent.EXTRA_MIME_TYPES, acceptTypes.toTypedArray())
             }
-            putExtra(
-                Intent.EXTRA_ALLOW_MULTIPLE,
-                fileChooserParams.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
-            )
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
     }
 
-    private fun normalizeFileChooserAcceptTypes(acceptTypes: Array<String>?): List<String> {
-        return acceptTypes
-            .orEmpty()
-            .flatMap { it.split(',') }
-            .map { it.trim().lowercase(Locale.US) }
-            .filter { it.isNotBlank() && (it == "*/*" || it.contains('/')) }
-            .distinct()
+    private fun createAndroidPhotoPickerIntent(acceptTypes: List<String>, allowMultiple: Boolean): Intent {
+        return Intent(MediaStore.ACTION_PICK_IMAGES).apply {
+            photoPickerTypeForAcceptTypes(acceptTypes)?.let { type = it }
+            if (allowMultiple) {
+                putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, MediaStore.getPickImagesMaxLimit())
+            }
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
     }
 
     private fun deliverFileChooserResult(resultCode: Int, data: Intent?) {
@@ -274,4 +281,34 @@ class MainActivity : Activity() {
         private const val NATIVE_SPEECH_PERMISSION_REQUEST_CODE = 1003
         private val APP_BACKGROUND_COLOR = Color.rgb(11, 18, 32)
     }
+}
+
+fun normalizeAndroidFileChooserAcceptTypes(acceptTypes: Array<String>?): List<String> {
+    return acceptTypes
+        .orEmpty()
+        .flatMap { it.split(',') }
+        .map { it.trim().lowercase(Locale.US) }
+        .filter { it.isNotBlank() && (it == "*/*" || it.contains('/')) }
+        .distinct()
+}
+
+fun shouldUseAndroidPhotoPicker(acceptTypes: List<String>, sdkInt: Int): Boolean {
+    if (sdkInt < Build.VERSION_CODES.TIRAMISU || acceptTypes.isEmpty()) {
+        return false
+    }
+    return acceptTypes.all { isAndroidPhotoPickerMimeType(it) }
+}
+
+fun photoPickerTypeForAcceptTypes(acceptTypes: List<String>): String? {
+    val hasImages = acceptTypes.any { it.startsWith("image/") }
+    val hasVideos = acceptTypes.any { it.startsWith("video/") }
+    return when {
+        hasImages && !hasVideos -> "image/*"
+        hasVideos && !hasImages -> "video/*"
+        else -> null
+    }
+}
+
+private fun isAndroidPhotoPickerMimeType(mimeType: String): Boolean {
+    return mimeType.startsWith("image/") || mimeType.startsWith("video/")
 }
