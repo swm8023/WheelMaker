@@ -823,6 +823,12 @@ describe('web chat integration', () => {
     const mobileHubButtonBlock = stylesCss.match(/\.mobile-chat-drawer-header \.chat-hub-summary-button \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileHubButtonBlock).toContain('height: 36px;');
     expect(mobileHubButtonBlock).toContain('align-items: center;');
+    expect(stylesCss).toMatch(
+      /@media \(max-width: 900px\) \{[\s\S]*?\.content > \.block-title\.with-tools \{[\s\S]*?height: calc\(var\(--wm-safe-area-top\) \+ 50px\);[\s\S]*?min-height: calc\(var\(--wm-safe-area-top\) \+ 50px\);[\s\S]*?max-height: calc\(var\(--wm-safe-area-top\) \+ 50px\);[\s\S]*?padding: calc\(var\(--wm-safe-area-top\) \+ 6px\) 7px 6px;[\s\S]*?\}/,
+    );
+    expect(stylesCss).toMatch(
+      /@media \(max-width: 900px\) \{[\s\S]*?\.content > \.block-title\.with-tools \.view-tool \{[\s\S]*?width: 36px;[\s\S]*?height: 36px;[\s\S]*?\}/,
+    );
     expect(stylesCss).toContain('.chat-hub-summary-copy {');
     expect(stylesCss).toContain('.chat-hub-summary-project-label {');
     expect(stylesCss).not.toContain('.chat-hub-summary-count {');

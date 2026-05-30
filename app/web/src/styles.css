@@ -9021,6 +9021,14 @@ textarea,
     opacity: 0.95;
   }
 
+  .content > .block-title.with-tools {
+    height: calc(var(--wm-safe-area-top) + 50px);
+    min-height: calc(var(--wm-safe-area-top) + 50px);
+    max-height: calc(var(--wm-safe-area-top) + 50px);
+    gap: 7px;
+    padding: calc(var(--wm-safe-area-top) + 6px) 7px 6px;
+  }
+
   .view-tools {
     gap: 4px;
   }
@@ -9028,6 +9036,12 @@ textarea,
   .view-tool {
     height: 28px;
     width: 28px;
+  }
+
+  .content > .block-title.with-tools .view-tool {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
   }
 
   .pinned-pin-toggle {
