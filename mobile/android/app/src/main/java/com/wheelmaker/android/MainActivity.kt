@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
@@ -28,6 +29,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import java.util.Locale
 
 class MainActivity : Activity() {
     private lateinit var rootView: FrameLayout
@@ -79,11 +81,9 @@ class MainActivity : Activity() {
         super.onBackPressed()
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == FILE_CHOOSER_REQUEST_CODE) {
-            val result = WebChromeClient.FileChooserParams.parseResult(resultCode, data)
-            fileChooserCallback?.onReceiveValue(result)
-            fileChooserCallback = null
+            deliverFileChooserResult(resultCode, data)
             return
         }
         super.onActivityResult(requestCode, resultCode, data)
@@ -109,6 +109,8 @@ class MainActivity : Activity() {
         target.settings.domStorageEnabled = true
         target.settings.databaseEnabled = true
         target.settings.cacheMode = WebSettings.LOAD_DEFAULT
+        target.settings.allowContentAccess = true
+        target.settings.allowFileAccess = true
         target.settings.mediaPlaybackRequiresUserGesture = false
         target.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         target.webViewClient = StableOriginWebViewClient(this, webSourceRuntime)
@@ -129,7 +131,7 @@ class MainActivity : Activity() {
                 fileChooserCallback?.onReceiveValue(null)
                 fileChooserCallback = filePathCallback
                 return try {
-                    startActivityForResult(fileChooserParams.createIntent(), FILE_CHOOSER_REQUEST_CODE)
+                    startActivityForResult(createAndroidFileChooserIntent(fileChooserParams), FILE_CHOOSER_REQUEST_CODE)
                     true
                 } catch (_: ActivityNotFoundException) {
                     fileChooserCallback = null
@@ -142,6 +144,75 @@ class MainActivity : Activity() {
             enqueueDownload(url, userAgent, contentDisposition, mimeType)
         }
         target.addJavascriptInterface(WheelMakerBridge(webSourceRuntime, androidSpeechRuntime), "WheelMakerAndroidNative")
+    }
+
+    private fun createAndroidFileChooserIntent(fileChooserParams: WebChromeClient.FileChooserParams): Intent {
+        val acceptTypes = normalizeFileChooserAcceptTypes(fileChooserParams.acceptTypes)
+        return Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = acceptTypes.singleOrNull() ?: "*/*"
+            if (acceptTypes.size > 1) {
+                putExtra(Intent.EXTRA_MIME_TYPES, acceptTypes.toTypedArray())
+            }
+            putExtra(
+                Intent.EXTRA_ALLOW_MULTIPLE,
+                fileChooserParams.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+            )
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+    }
+
+    private fun normalizeFileChooserAcceptTypes(acceptTypes: Array<String>?): List<String> {
+        return acceptTypes
+            .orEmpty()
+            .flatMap { it.split(',') }
+            .map { it.trim().lowercase(Locale.US) }
+            .filter { it.isNotBlank() && (it == "*/*" || it.contains('/')) }
+            .distinct()
+    }
+
+    private fun deliverFileChooserResult(resultCode: Int, data: Intent?) {
+        val result = collectFileChooserResultUris(resultCode, data)
+        fileChooserCallback?.onReceiveValue(result)
+        fileChooserCallback = null
+    }
+
+    private fun collectFileChooserResultUris(resultCode: Int, data: Intent?): Array<Uri>? {
+        if (resultCode != RESULT_OK) {
+            return null
+        }
+        val uris = linkedSetOf<Uri>()
+        val clipData = data?.clipData
+        if (clipData != null) {
+            for (index in 0 until clipData.itemCount) {
+                clipData.getItemAt(index).uri?.let { uris.add(it) }
+            }
+        }
+        data?.data?.let { uris.add(it) }
+        WebChromeClient.FileChooserParams.parseResult(resultCode, data)?.forEach { uris.add(it) }
+        if (uris.isEmpty()) {
+            return null
+        }
+        persistFileChooserReadPermissions(uris, data)
+        return uris.toTypedArray()
+    }
+
+    private fun persistFileChooserReadPermissions(uris: Set<Uri>, data: Intent?) {
+        val flags = data?.flags ?: 0
+        if ((flags and Intent.FLAG_GRANT_READ_URI_PERMISSION) == 0) {
+            return
+        }
+        if ((flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) == 0) {
+            return
+        }
+        for (uri in uris) {
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: SecurityException) {
+                // Some providers grant temporary read access only; WebView can still consume those URIs immediately.
+            }
+        }
     }
 
     private fun configureWindowInsets(target: FrameLayout) {
