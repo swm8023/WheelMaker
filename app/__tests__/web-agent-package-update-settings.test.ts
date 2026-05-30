@@ -353,7 +353,7 @@ describe('agent package update settings UI source structure', () => {
     expect(mobileBar).toContain('className="mobile-settings-shortcut-label">CC Switch</span>');
 
     const mobileToolbarStart = mainTsx.indexOf('<div className="mobile-chat-toolbar"');
-    const mobileToolbarEnd = mainTsx.indexOf('{renderChatHubSummary()}', mobileToolbarStart);
+    const mobileToolbarEnd = mainTsx.indexOf('{renderChatHubSummary(true)}', mobileToolbarStart);
     expect(mobileToolbarStart).toBeGreaterThanOrEqual(0);
     expect(mobileToolbarEnd).toBeGreaterThan(mobileToolbarStart);
     const mobileToolbar = mainTsx.slice(mobileToolbarStart, mobileToolbarEnd);

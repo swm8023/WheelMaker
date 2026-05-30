@@ -5573,15 +5573,17 @@ function App() {
     ),
     [handleMobileBreadcrumbProjectClick],
   );
-  const renderChatHubSummary = useCallback(() => {
+  const renderChatHubSummary = useCallback((mobile = false) => {
     const hubCount = registryHubs.length;
+    const projectCount = projects.length;
     const chatHubSummaryLabel = `${hubCount} ${hubCount === 1 ? 'Hub' : 'Hubs'}`;
+    const chatHubProjectLabel = `${projectCount} ${projectCount === 1 ? 'Project' : 'Projects'}`;
     return (
-      <div ref={chatHubMenuRef} className="chat-hub-summary">
+      <div ref={chatHubMenuRef} className={`chat-hub-summary${mobile ? ' mobile' : ''}`}>
         <button
           type="button"
           className="chat-hub-summary-button"
-          aria-label="Show connected hubs"
+          aria-label={mobile ? `Show connected hubs, ${chatHubSummaryLabel}, ${chatHubProjectLabel}` : 'Show connected hubs'}
           aria-haspopup="menu"
           aria-expanded={chatHubMenuOpen}
           onClick={() => {
@@ -5592,7 +5594,14 @@ function App() {
             setChatHubMenuOpen(open => !open);
           }}
         >
-          <span className="chat-hub-summary-label">{chatHubSummaryLabel}</span>
+          {mobile ? (
+            <span className="chat-hub-summary-copy">
+              <span className="chat-hub-summary-label">{chatHubSummaryLabel}</span>
+              <span className="chat-hub-summary-project-label">{chatHubProjectLabel}</span>
+            </span>
+          ) : (
+            <span className="chat-hub-summary-label">{chatHubSummaryLabel}</span>
+          )}
           <span className="codicon codicon-chevron-down" aria-hidden="true" />
         </button>
         {chatHubMenuOpen ? (
@@ -5616,7 +5625,7 @@ function App() {
         ) : null}
       </div>
     );
-  }, [chatHubMenuOpen, localHubReadStatuses, registryHubs, setChatConfigOverflowOpen]);
+  }, [chatHubMenuOpen, localHubReadStatuses, projects.length, registryHubs, setChatConfigOverflowOpen]);
   const floatingBaseBounds = useMemo(() => {
     if (isWide) {
       return { minTop: 0, maxTop: 0 };
@@ -14053,7 +14062,7 @@ function App() {
                 </button>
               </div>
               {renderChatHeaderSearchControls(true)}
-              {renderChatHubSummary()}
+              {renderChatHubSummary(true)}
             </>
           )}
         </div>

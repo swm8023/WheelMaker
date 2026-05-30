@@ -75,8 +75,8 @@ describe('web session search UI wiring', () => {
     expect(mobileHeaderEnd).toBeGreaterThan(mobileHeaderStart);
     const mobileHeader = main.slice(mobileHeaderStart, mobileHeaderEnd);
     expect(mobileHeader).toContain('renderChatHeaderSearchControls(true)');
-    expect(mobileHeader).toContain('renderChatHubSummary()');
-    expect(mobileHeader.indexOf('renderChatHeaderSearchControls(true)')).toBeLessThan(mobileHeader.indexOf('renderChatHubSummary()'));
+    expect(mobileHeader).toContain('renderChatHubSummary(true)');
+    expect(mobileHeader.indexOf('renderChatHeaderSearchControls(true)')).toBeLessThan(mobileHeader.indexOf('renderChatHubSummary(true)'));
 
     expect(styles).toContain('.chat-header-search-control');
     expect(styles).toContain('.chat-header-search-control.open');
@@ -91,6 +91,7 @@ describe('web session search UI wiring', () => {
     const styles = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     expect(main).toContain("const chatHubSummaryLabel = `${hubCount} ${hubCount === 1 ? 'Hub' : 'Hubs'}`;");
+    expect(main).toContain("const chatHubProjectLabel = `${projectCount} ${projectCount === 1 ? 'Project' : 'Projects'}`;");
     expect(main).toContain('const sessionSearchProjectDoneCount = useMemo(');
     expect(main).toContain("`Searching ${sessionSearchProjectDoneCount}/${sortedProjectItems.length} projects`");
     expect(main).toContain('parts.push(`${sessionSearchErrorCount} error${sessionSearchErrorCount === 1 ? \'\' : \'s\'}`);');

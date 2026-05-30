@@ -5237,7 +5237,7 @@ textarea,
 
 .mobile-chat-drawer-header .chat-hub-summary {
   flex: 0 0 auto;
-  max-width: min(132px, 38vw);
+  max-width: min(148px, 42vw);
   margin-left: 0;
 }
 
@@ -5251,8 +5251,29 @@ textarea,
 
 .mobile-chat-drawer-header .session-search-control.compact,
 .mobile-chat-drawer-header .chat-header-search-control.compact {
-  flex: 0 0 auto;
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  height: 40px;
   margin-left: auto;
+}
+
+.mobile-chat-drawer-header .session-search-control.compact .session-search-icon-btn,
+.mobile-chat-drawer-header .chat-header-search-control.compact .session-search-icon-btn {
+  width: 40px;
+  height: 40px;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-2) 92%, transparent);
+  color: var(--text);
+  font-size: 15px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
+.mobile-chat-drawer-header .session-search-control.compact .session-search-icon-btn .codicon,
+.mobile-chat-drawer-header .chat-header-search-control.compact .session-search-icon-btn .codicon {
+  font-size: 15px;
 }
 
 .mobile-chat-drawer-header.search-open .chat-header-search-wrap,
@@ -5266,17 +5287,18 @@ textarea,
 }
 
 .mobile-chat-drawer-header .chat-hub-summary-button {
-  height: 24px;
-  border-radius: 999px;
-  padding: 0 8px;
-  font-size: 10px;
+  height: 40px;
+  align-items: center;
+  border-radius: 12px;
+  padding: 0 8px 0 10px;
+  font-size: 11px;
   font-weight: 700;
-  gap: 4px;
+  gap: 6px;
   white-space: nowrap;
 }
 
 .mobile-chat-drawer-header .chat-hub-summary-button .codicon {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .mobile-project-session-nav {
@@ -6148,6 +6170,25 @@ textarea,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-hub-summary-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.05;
+}
+
+.chat-hub-summary-project-label {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .chat-hub-summary-button:hover {
