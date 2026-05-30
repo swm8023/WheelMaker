@@ -18,8 +18,14 @@ describe('connection settings UI source structure', () => {
     const chatSectionStart = mainTsx.indexOf("renderSettingsSection('Chat'");
     const connectionSectionStart = mainTsx.indexOf("renderSettingsSection('Connection'");
     const codeSectionStart = mainTsx.indexOf("renderSettingsSection('Code Display'");
+    const connectionSection = mainTsx.slice(connectionSectionStart, codeSectionStart);
+    const localHubReadIndex = connectionSection.indexOf('Local Hub Read');
+    const connectionStatusIndex = connectionSection.indexOf('Connection Status');
 
     expect(connectionSectionStart).toBeGreaterThan(chatSectionStart);
     expect(connectionSectionStart).toBeLessThan(codeSectionStart);
+    expect(localHubReadIndex).toBeGreaterThanOrEqual(0);
+    expect(connectionStatusIndex).toBeGreaterThanOrEqual(0);
+    expect(localHubReadIndex).toBeLessThan(connectionStatusIndex);
   });
 });

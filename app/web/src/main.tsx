@@ -14105,17 +14105,6 @@ function App() {
         ), 'comment-discussion')}
         {renderSettingsSection('Connection', (
         <>
-        <button
-          type="button"
-          className="settings-row settings-detail-row"
-          onClick={() => openSettingsDetail('connectionStatus')}
-        >
-          <span>
-            <span className="codicon codicon-radio-tower settings-row-icon" aria-hidden="true" />
-            Connection Status
-          </span>
-          <span className="codicon codicon-chevron-right" aria-hidden="true" />
-        </button>
         <label className="settings-row sidebar-setting-row">
           <span>
             <span className="codicon codicon-cloud-download settings-row-icon" aria-hidden="true" />
@@ -14127,6 +14116,17 @@ function App() {
             onChange={event => setLocalHubReadEnabled(event.target.checked)}
           />
         </label>
+        <button
+          type="button"
+          className="settings-row settings-detail-row"
+          onClick={() => openSettingsDetail('connectionStatus')}
+        >
+          <span>
+            <span className="codicon codicon-radio-tower settings-row-icon" aria-hidden="true" />
+            Connection Status
+          </span>
+          <span className="codicon codicon-chevron-right" aria-hidden="true" />
+        </button>
         </>
         ), 'radio-tower')}
         {renderSettingsSection('Code Display', (
