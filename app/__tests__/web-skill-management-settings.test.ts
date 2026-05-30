@@ -17,7 +17,7 @@ describe('skill management settings UI source structure', () => {
     const mobileBar = mainTsx.slice(mobileBarStart, mobileBarEnd);
     expect(mobileBar.indexOf('title="Update"')).toBeLessThan(mobileBar.indexOf('title="Skills"'));
     expect(mobileBar.indexOf('title="Skills"')).toBeLessThan(mobileBar.indexOf('title="Port Relay"'));
-    expect(mobileBar).toContain("openSettingsDetail('skills')");
+    expect(mobileBar).toContain("openMobileSettingsShortcutDetail('skills')");
   });
 
   test('adds desktop Skills shortcut between Update and Token Stats', () => {

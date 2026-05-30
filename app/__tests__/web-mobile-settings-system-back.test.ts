@@ -72,6 +72,12 @@ describe('mobile settings system back', () => {
     })).toBe('push');
 
     expect(resolveMobileSettingsHistoryWriteAction({
+      currentKey: mobileSettingsHistoryKey(null),
+      nextDetail: 'update',
+      replaceRootWithDetail: true,
+    })).toBe('replace');
+
+    expect(resolveMobileSettingsHistoryWriteAction({
       currentKey: mobileSettingsHistoryKey('update'),
       nextDetail: 'skills',
     })).toBe('replace');
@@ -94,6 +100,7 @@ describe('mobile settings system back', () => {
     expect(main).toContain('window.history.pushState(createMobileSettingsHistoryState(settingsDetailView');
     expect(main).toContain('window.history.replaceState(createMobileSettingsHistoryState(settingsDetailView');
     expect(main).toContain('resolveMobileSettingsHistoryWriteAction({');
+    expect(main).toContain('replaceRootWithDetail: mobileSettingsReplaceRootHistoryRef.current');
     expect(main).toContain("window.addEventListener('popstate', handleMobileSettingsPopState)");
     expect(main).toContain('resolveMobileSettingsPopAction({');
     expect(main).toContain('const mobileSettingsTitle = settingsDetailView');
@@ -101,6 +108,7 @@ describe('mobile settings system back', () => {
     expect(main).toContain('renderSettingsContent(false, { hideDetailHeader: true })');
     expect(main).toContain('handleMobileSettingsBackButton');
     expect(main).toContain('handleMobileSettingsRootShortcut');
+    expect(main).toContain('openMobileSettingsShortcutDetail');
     expect(main).toContain('renderSettingsDetailActions(settingsDetailView)');
     expect(main).not.toContain('mobileSettingsSwipe');
   });

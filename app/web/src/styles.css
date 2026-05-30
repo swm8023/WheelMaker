@@ -832,6 +832,7 @@ textarea,
 
 .mobile-settings-shortcut-bar {
   flex: 0 0 auto;
+  position: relative;
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   align-items: center;
@@ -840,8 +841,44 @@ textarea,
   padding: 0 0 env(safe-area-inset-bottom, 0px);
 }
 
+.mobile-settings-shortcut-bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 0;
+  width: calc(100% / 6);
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: var(--accent);
+  transform: translateX(0);
+  transition: transform 180ms cubic-bezier(0.2, 0, 0, 1);
+  pointer-events: none;
+}
+
+.mobile-settings-shortcut-bar[data-active-index='1']::before {
+  transform: translateX(100%);
+}
+
+.mobile-settings-shortcut-bar[data-active-index='2']::before {
+  transform: translateX(200%);
+}
+
+.mobile-settings-shortcut-bar[data-active-index='3']::before {
+  transform: translateX(300%);
+}
+
+.mobile-settings-shortcut-bar[data-active-index='4']::before {
+  transform: translateX(400%);
+}
+
+.mobile-settings-shortcut-bar[data-active-index='5']::before {
+  transform: translateX(500%);
+}
+
 .mobile-settings-shortcut-button {
   position: relative;
+  z-index: 1;
   height: 58px;
   min-width: 0;
   border: 0;
@@ -880,17 +917,6 @@ textarea,
 
 .mobile-settings-shortcut-button.active {
   color: var(--text);
-}
-
-.mobile-settings-shortcut-button.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 2px;
-  border-radius: 0 0 2px 2px;
-  background: var(--accent);
 }
 
 .settings-detail-page {

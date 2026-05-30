@@ -51,16 +51,21 @@ export function mobileSettingsHistoryKey(detail: MobileSettingsHistoryDetail | n
 export function resolveMobileSettingsHistoryWriteAction({
   currentKey,
   nextDetail,
+  replaceRootWithDetail = false,
 }: {
   currentKey: string | null;
   nextDetail: MobileSettingsHistoryDetail | null;
+  replaceRootWithDetail?: boolean;
 }): MobileSettingsHistoryWriteAction {
   const nextKey = mobileSettingsHistoryKey(nextDetail);
   if (currentKey === nextKey) {
     return 'none';
   }
-  if (currentKey === null || currentKey === mobileSettingsHistoryKey(null)) {
+  if (currentKey === null) {
     return 'push';
+  }
+  if (currentKey === mobileSettingsHistoryKey(null)) {
+    return replaceRootWithDetail && nextDetail !== null ? 'replace' : 'push';
   }
   return 'replace';
 }

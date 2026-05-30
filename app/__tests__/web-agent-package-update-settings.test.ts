@@ -342,12 +342,13 @@ describe('agent package update settings UI source structure', () => {
     expect(mobileBar.indexOf('title="Skills"')).toBeLessThan(mobileBar.indexOf('title="Port Relay"'));
     expect(mobileBar.indexOf('title="Port Relay"')).toBeLessThan(mobileBar.indexOf('title="Token Stats"'));
     expect(mobileBar.indexOf('title="Token Stats"')).toBeLessThan(mobileBar.indexOf('title="CC Switch"'));
-    expect(mobileBar).toContain("openSettingsDetail('update')");
-    expect(mobileBar).toContain("openSettingsDetail('skills')");
-    expect(mobileBar).toContain("openSettingsDetail('portRelay')");
-    expect(mobileBar).toContain("openSettingsDetail('tokenStats')");
-    expect(mobileBar).toContain("openSettingsDetail('ccSwitch')");
+    expect(mobileBar).toContain("openMobileSettingsShortcutDetail('update')");
+    expect(mobileBar).toContain("openMobileSettingsShortcutDetail('skills')");
+    expect(mobileBar).toContain("openMobileSettingsShortcutDetail('portRelay')");
+    expect(mobileBar).toContain("openMobileSettingsShortcutDetail('tokenStats')");
+    expect(mobileBar).toContain("openMobileSettingsShortcutDetail('ccSwitch')");
     expect(mobileBar).toContain('onClick={handleMobileSettingsRootShortcut}');
+    expect(mobileBar).toContain('data-active-index={mobileSettingsShortcutActiveIndex}');
     expect(mobileBar).toContain('className="mobile-settings-shortcut-label">Settings</span>');
     expect(mobileBar).toContain('className="mobile-settings-shortcut-label">CC Switch</span>');
 
@@ -371,15 +372,17 @@ describe('agent package update settings UI source structure', () => {
     expect(mobileToolbarBlock).not.toContain('border-radius: 10px;');
 
     expect(stylesCss).toContain('.mobile-settings-shortcut-bar {');
+    expect(stylesCss).toContain('.mobile-settings-shortcut-bar::before {');
     expect(stylesCss).toContain('.mobile-settings-shortcut-button {');
     expect(stylesCss).toContain('.mobile-settings-shortcut-label {');
-    expect(stylesCss).toContain('.mobile-settings-shortcut-button.active::before');
     const mobileShortcutButtonBlock = stylesCss.match(/\.mobile-settings-shortcut-button \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(mobileShortcutButtonBlock).toContain('height: 58px;');
     expect(mobileShortcutButtonBlock).toContain('flex-direction: column;');
-    const mobileShortcutActiveBlock = stylesCss.match(/\.mobile-settings-shortcut-button\.active::before \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(mobileShortcutActiveBlock).toContain('top: 0;');
-    expect(mobileShortcutActiveBlock).not.toContain('bottom: 0;');
+    const mobileShortcutIndicatorBlock = stylesCss.match(/\.mobile-settings-shortcut-bar::before \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(mobileShortcutIndicatorBlock).toContain('top: 0;');
+    expect(mobileShortcutIndicatorBlock).toContain('transition: transform');
+    expect(stylesCss).toContain(".mobile-settings-shortcut-bar[data-active-index='5']::before");
+    expect(stylesCss).not.toContain('.mobile-settings-shortcut-button.active::before');
     expect(stylesCss).toContain('padding: 0 0 env(safe-area-inset-bottom, 0px);');
     expect(stylesCss).not.toContain('.mobile-chat-toolbar-icon.active');
   });

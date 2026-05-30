@@ -3090,6 +3090,7 @@ function App() {
   const [databaseDumpText, setDatabaseDumpText] = useState('');
   const [settingsDetailView, setSettingsDetailView] = useState<SettingsDetailView>(null);
   const mobileSettingsHistoryKeyRef = useRef<string | null>(null);
+  const mobileSettingsReplaceRootHistoryRef = useRef(false);
   const sidebarSettingsOpenRef = useRef(sidebarSettingsOpen);
   const settingsDetailViewRef = useRef<SettingsDetailView>(settingsDetailView);
   const [desktopSidebarResizing, setDesktopSidebarResizing] = useState(false);
@@ -6446,13 +6447,16 @@ function App() {
   useEffect(() => {
     if (isWide || !sidebarSettingsOpen) {
       mobileSettingsHistoryKeyRef.current = null;
+      mobileSettingsReplaceRootHistoryRef.current = false;
       return;
     }
     const nextKey = mobileSettingsHistoryKey(settingsDetailView as MobileSettingsHistoryDetail | null);
     const historyWriteAction = resolveMobileSettingsHistoryWriteAction({
       currentKey: mobileSettingsHistoryKeyRef.current,
       nextDetail: settingsDetailView as MobileSettingsHistoryDetail | null,
+      replaceRootWithDetail: mobileSettingsReplaceRootHistoryRef.current,
     });
+    mobileSettingsReplaceRootHistoryRef.current = false;
     if (historyWriteAction === 'none') {
       return;
     }
@@ -6511,9 +6515,15 @@ function App() {
   }, [isWide, sidebarSettingsOpen, settingsDetailView, setSidebarSettingsOpen]);
   const handleMobileSettingsRootShortcut = useCallback(() => {
     if (settingsDetailView !== null) {
-      handleSettingsDetailBack();
+      setSettingsDetailView(null);
     }
-  }, [handleSettingsDetailBack, settingsDetailView]);
+  }, [settingsDetailView]);
+  const openMobileSettingsShortcutDetail = useCallback((detail: Exclude<SettingsDetailView, null>) => {
+    if (!isWide && sidebarSettingsOpen && settingsDetailView !== detail) {
+      mobileSettingsReplaceRootHistoryRef.current = true;
+    }
+    openSettingsDetail(detail);
+  }, [isWide, openSettingsDetail, settingsDetailView, sidebarSettingsOpen]);
   const clampDesktopSidebarWidthForViewport = useCallback((width: number) => {
     const viewportMax = windowWidth > 0
       ? Math.floor(windowWidth * DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO)
@@ -16527,11 +16537,28 @@ function App() {
   const mobileSettingsActions = settingsDetailView
     ? renderSettingsDetailActions(settingsDetailView)
     : <span className="mobile-settings-action-spacer" aria-hidden="true" />;
+  const mobileSettingsShortcutActiveIndex =
+    settingsDetailView === 'update'
+      ? 1
+      : settingsDetailView === 'skills'
+        ? 2
+        : settingsDetailView === 'portRelay'
+          ? 3
+          : settingsDetailView === 'tokenStats'
+            ? 4
+            : settingsDetailView === 'ccSwitch'
+              ? 5
+              : 0;
+  const mobileSettingsRootShortcutActive = mobileSettingsShortcutActiveIndex === 0;
   const mobileSettingsShortcutBar = !isWide && sidebarSettingsOpen ? (
-    <nav className="mobile-settings-shortcut-bar" aria-label="Settings shortcuts">
+    <nav
+      className="mobile-settings-shortcut-bar"
+      data-active-index={mobileSettingsShortcutActiveIndex}
+      aria-label="Settings shortcuts"
+    >
       <button
         type="button"
-        className={`mobile-settings-shortcut-button${settingsDetailView === null ? ' active' : ''}`}
+        className={`mobile-settings-shortcut-button${mobileSettingsRootShortcutActive ? ' active' : ''}`}
         onClick={handleMobileSettingsRootShortcut}
         title="Settings"
         aria-label="Settings"
@@ -16542,7 +16569,7 @@ function App() {
       <button
         type="button"
         className={`mobile-settings-shortcut-button${settingsDetailView === 'update' ? ' active' : ''}`}
-        onClick={() => openSettingsDetail('update')}
+        onClick={() => openMobileSettingsShortcutDetail('update')}
         title="Update"
         aria-label="Update"
       >
@@ -16552,7 +16579,7 @@ function App() {
       <button
         type="button"
         className={`mobile-settings-shortcut-button${settingsDetailView === 'skills' ? ' active' : ''}`}
-        onClick={() => openSettingsDetail('skills')}
+        onClick={() => openMobileSettingsShortcutDetail('skills')}
         title="Skills"
         aria-label="Skills"
       >
@@ -16562,7 +16589,7 @@ function App() {
       <button
         type="button"
         className={`mobile-settings-shortcut-button${settingsDetailView === 'portRelay' ? ' active' : ''}`}
-        onClick={() => openSettingsDetail('portRelay')}
+        onClick={() => openMobileSettingsShortcutDetail('portRelay')}
         title="Port Relay"
         aria-label="Port Relay"
       >
@@ -16572,7 +16599,7 @@ function App() {
       <button
         type="button"
         className={`mobile-settings-shortcut-button${settingsDetailView === 'tokenStats' ? ' active' : ''}`}
-        onClick={() => openSettingsDetail('tokenStats')}
+        onClick={() => openMobileSettingsShortcutDetail('tokenStats')}
         title="Token Stats"
         aria-label="Token Stats"
       >
@@ -16582,7 +16609,7 @@ function App() {
       <button
         type="button"
         className={`mobile-settings-shortcut-button${settingsDetailView === 'ccSwitch' ? ' active' : ''}`}
-        onClick={() => openSettingsDetail('ccSwitch')}
+        onClick={() => openMobileSettingsShortcutDetail('ccSwitch')}
         title="CC Switch"
         aria-label="CC Switch"
       >

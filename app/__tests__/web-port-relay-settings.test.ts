@@ -18,7 +18,7 @@ describe('port relay settings UI source structure', () => {
     const mobileBar = mainTsx.slice(mobileBarStart, mobileBarEnd);
     expect(mobileBar.indexOf('title="Skills"')).toBeLessThan(mobileBar.indexOf('title="Port Relay"'));
     expect(mobileBar.indexOf('title="Port Relay"')).toBeLessThan(mobileBar.indexOf('title="Token Stats"'));
-    expect(mobileBar).toContain("openSettingsDetail('portRelay')");
+    expect(mobileBar).toContain("openMobileSettingsShortcutDetail('portRelay')");
   });
 
   test('renders Port Relay controls and service hooks', () => {
